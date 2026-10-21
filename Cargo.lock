@@ -1382,7 +1382,17 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "egui",
+ "hactorio-core",
+ "hactorio-data",
 ]
+
+[[package]]
+name = "hactorio-core"
+version = "0.1.0"
+
+[[package]]
+name = "hactorio-data"
+version = "0.1.0"
 
 [[package]]
 name = "half"

@@ -1,8 +1,13 @@
-[package]
-name = "hactorio"
+[workspace]
+members = ["crates/hactorio", "crates/hactorio-core", "crates/hactorio-data"]
+resolver = "3"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
+[workspace.dependencies]
 eframe = "0.37.0"
 egui = "0.37.0"
+hactorio-core = { path = "crates/hactorio-core" }
+hactorio-data = { path = "crates/hactorio-data" }

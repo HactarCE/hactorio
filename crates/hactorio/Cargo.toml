@@ -1,0 +1,10 @@
+[package]
+name = "hactorio"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+eframe.workspace = true
+egui.workspace = true
+hactorio-core.workspace = true
+hactorio-data.workspace = true
