@@ -57,7 +57,8 @@ pub enum Expr {
     },
     In {
         quantity: Box<Expr>,
-        machine: MachineSpec,
+        /// Any expression evaluating to a `MachineValue` or `RecipeValue`.
+        machine: Box<Expr>,
     },
 }
 

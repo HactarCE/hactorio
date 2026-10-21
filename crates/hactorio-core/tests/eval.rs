@@ -336,6 +336,30 @@ fn in_with_craft_uses_the_craft_row() {
 }
 
 #[test]
+fn in_accepts_machine_expressions() {
+    let registry = registry();
+    let outputs = run(
+        &registry,
+        "furnace = @:electric-furnace:\n\
+         100 :iron-plate: / second in furnace\n\
+         100 :iron-plate: / second in (1 * @:electric-furnace:)\n\
+         100 :iron-plate: / second in (2 * @:electric-furnace:)\n\
+         100 :iron-plate: / second in 2",
+    );
+
+    assert_eq!(
+        recipe_output(&outputs[1]).quantity,
+        RecipeQuantity::Machines(160.0)
+    );
+    assert_eq!(
+        recipe_output(&outputs[2]).quantity,
+        RecipeQuantity::Machines(160.0)
+    );
+    assert!(error(&outputs[3]).message.contains("exactly one machine"));
+    assert!(error(&outputs[4]).message.contains("machine on the right"));
+}
+
+#[test]
 fn craft_quantities_need_making() {
     let registry = registry();
     let outputs = run(&registry, "100 craft / second in @:electric-furnace:");

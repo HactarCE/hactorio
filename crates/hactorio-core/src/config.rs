@@ -17,6 +17,8 @@ pub(crate) struct Modifiers {
     pub productivity: f64,
     /// Active power of one machine in watts.
     pub power_w: f64,
+    /// Pollution per minute of one machine.
+    pub pollution_per_minute: f64,
 }
 
 /// Checks a machine configuration, and the recipe against it when one is known.
@@ -100,6 +102,7 @@ pub(crate) fn modifiers(
             speed: 0.0,
             productivity: 0.0,
             power_w: 0.0,
+            pollution_per_minute: 0.0,
         };
     };
     let allowed = data.allowed_effects;
@@ -107,6 +110,7 @@ pub(crate) fn modifiers(
     let mut speed_sum = 0.0;
     let mut productivity = 0.0;
     let mut consumption_sum = 0.0;
+    let mut pollution_sum = 0.0;
     for module in modules {
         let Some(module_data) = registry.entry_by_index(module.module).module.as_ref() else {
             continue;
@@ -121,6 +125,9 @@ pub(crate) fn modifiers(
         if allowed.productivity {
             productivity += module_data.effect.productivity * count;
         }
+        if allowed.pollution {
+            pollution_sum += module_data.effect.pollution * count;
+        }
     }
 
     let productivity_allowed = recipe.is_none_or(|recipe| recipe.allow_productivity);
@@ -132,6 +139,9 @@ pub(crate) fn modifiers(
             0.0
         },
         power_w: data.energy_usage_w * (1.0 + consumption_sum),
+        pollution_per_minute: data.pollution_per_minute
+            * (1.0 + consumption_sum)
+            * (1.0 + pollution_sum),
     }
 }
 

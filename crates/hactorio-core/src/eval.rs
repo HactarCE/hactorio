@@ -115,6 +115,8 @@ pub struct RecipeOutput {
     pub net: BTreeMap<BaseUnit, f64>,
     /// Active power of one machine, in watts.
     pub per_machine_power_w: f64,
+    /// Total energy in joules; present for `MachineSeconds` quantities.
+    pub total_energy_j: Option<f64>,
 }
 
 /// Evaluates one tab.
@@ -257,6 +259,7 @@ fn eval_expr(
         }
         Expr::In { quantity, machine } => {
             let quantity = eval_expr(quantity, variables, settings, registry, span)?;
+            let machine = eval_expr(machine, variables, settings, registry, span)?;
             eval_in(quantity, machine, registry, span)
         }
     }
@@ -299,7 +302,7 @@ fn merge_modules(modules: &[ModuleUse]) -> Vec<ModuleCount> {
 
 fn eval_in(
     quantity: Eval,
-    spec: &MachineSpec,
+    machine: Eval,
     registry: &Registry,
     span: Span,
 ) -> Result<Eval, EvalError> {
@@ -312,15 +315,35 @@ fn eval_in(
             "`in` needs an item, fluid, or craft quantity",
         ));
     };
-    if spec.count != 1.0 {
-        return Err(EvalError::new(
-            span,
-            "`in` needs exactly one machine; scale the result instead",
-        ));
-    }
 
-    let modules = merge_modules(&spec.modules);
-    let recipe = match spec.recipe {
+    let (machine_id, modules, recipe) = match machine {
+        Eval::Machine(machine) => {
+            if machine.count != 1.0 {
+                return Err(EvalError::new(
+                    span,
+                    "`in` needs exactly one machine; scale the result instead",
+                ));
+            }
+            (machine.machine, machine.modules, None)
+        }
+        Eval::Recipe(recipe) => {
+            if recipe.quantity != RecipeQuantity::Machines(1.0) {
+                return Err(EvalError::new(
+                    span,
+                    "`in` needs exactly one machine; scale the result instead",
+                ));
+            }
+            (recipe.machine, recipe.modules, Some(recipe.recipe))
+        }
+        Eval::Scalar(_) => {
+            return Err(EvalError::new(
+                span,
+                "`in` needs a machine on the right",
+            ));
+        }
+    };
+
+    let recipe = match recipe {
         Some(recipe) => recipe,
         None => {
             if selection.unit == BaseUnit::Craft {
@@ -329,13 +352,13 @@ fn eval_in(
                     "a craft quantity needs an explicit `making` recipe",
                 ));
             }
-            config::resolve_recipe(registry, spec.machine, selection.unit, span)?
+            config::resolve_recipe(registry, machine_id, selection.unit, span)?
         }
     };
     let recipe_data = registry.recipe(recipe);
-    config::validate(registry, spec.machine, &modules, Some(recipe_data), span)?;
+    config::validate(registry, machine_id, &modules, Some(recipe_data), span)?;
 
-    let net = config::coefficients(registry, spec.machine, &modules, recipe_data, span)?;
+    let net = config::coefficients(registry, machine_id, &modules, recipe_data, span)?;
     let coefficient = net.get(&selection.unit).copied().unwrap_or(0.0);
     let divisor = if selection.item_or_fluid {
         coefficient.abs()
@@ -350,7 +373,7 @@ fn eval_in(
     };
 
     Ok(Eval::Recipe(RecipeValue {
-        machine: spec.machine,
+        machine: machine_id,
         modules,
         recipe,
         quantity,
@@ -654,10 +677,15 @@ fn output_of(value: &Eval, registry: &Registry, span: Span) -> Result<Output, Ev
                 &recipe.modules,
                 Some(recipe_data),
             );
+            let total_energy_j = match recipe.quantity {
+                RecipeQuantity::MachineSeconds(tau) => Some(tau * modifiers.power_w),
+                RecipeQuantity::Machines(_) => None,
+            };
             Ok(Output::Recipe(RecipeOutput {
                 quantity: recipe.quantity,
                 net: scaled,
                 per_machine_power_w: modifiers.power_w,
+                total_energy_j,
             }))
         }
     }

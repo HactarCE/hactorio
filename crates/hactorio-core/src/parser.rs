@@ -140,10 +140,10 @@ impl Parser<'_> {
 
             if let Infix::In = infix {
                 self.pos += 1;
-                let machine = self.parse_machine_spec()?;
+                let machine = self.parse_bp(BP_NEG)?;
                 lhs = Expr::In {
                     quantity: Box::new(lhs),
-                    machine,
+                    machine: Box::new(machine),
                 };
                 if let (Infix::In, span) = self.infix() {
                     return Err(ParseError::new(span, "`in` is not associative"));
@@ -320,21 +320,6 @@ impl Parser<'_> {
         }
     }
 
-    /// The right operand of `in`: optional positive integer count, `@`, then
-    /// the machine spec.
-    fn parse_machine_spec(&mut self) -> Result<MachineSpec, ParseError> {
-        if let Some((count, span)) = self.count_before_at() {
-            positive_integer(count, span, "machine counts must be positive integers")?;
-            self.pos += 2;
-            return self.parse_machine_body(count);
-        }
-        if matches!(self.peek().map(|token| &token.kind), Some(TokenKind::At)) {
-            self.pos += 1;
-            return self.parse_machine_body(1.0);
-        }
-        Err(self.error_here("expected `@` and a machine item"))
-    }
-
     /// Everything after `@`: the machine, its modules, and an optional recipe.
     fn parse_machine_body(&mut self, count: f64) -> Result<MachineSpec, ParseError> {
         let token = self
@@ -462,27 +447,12 @@ impl Parser<'_> {
         self.tokens.get(self.pos)
     }
 
-    fn peek_at(&self, offset: usize) -> Option<&Token> {
-        self.tokens.get(self.pos + offset)
-    }
-
     fn advance(&mut self) -> Option<Token> {
         let token = self.tokens.get(self.pos).cloned();
         if token.is_some() {
             self.pos += 1;
         }
         token
-    }
-
-    fn count_before_at(&self) -> Option<(f64, Span)> {
-        let token = self.peek()?;
-        let TokenKind::Number(count) = token.kind else {
-            return None;
-        };
-        match self.peek_at(1).map(|token| &token.kind) {
-            Some(TokenKind::At) => Some((count, token.span)),
-            _ => None,
-        }
     }
 
     fn follow(&self) -> Follow {
@@ -541,13 +511,6 @@ impl Parser<'_> {
 
     fn last_end(&self) -> u32 {
         self.tokens.last().map(|token| token.span.end).unwrap_or(0)
-    }
-
-    fn error_here(&self, message: &str) -> ParseError {
-        match self.peek() {
-            Some(token) => ParseError::new(token.span, message),
-            None => self.error_at_end(message),
-        }
     }
 
     fn error_at_end(&self, message: &str) -> ParseError {

@@ -291,14 +291,17 @@ fn parses_in_expressions() {
     let machine = match expr("100 :iron-plate: / second in @:assembling-machine-3:") {
         Expr::In { quantity, machine } => {
             assert!(matches!(*quantity, Expr::Binary { op: BinaryOp::Div, .. }));
-            machine
+            match *machine {
+                Expr::Machine(spec) => spec,
+                other => panic!("expected a machine spec, got {other:?}"),
+            }
         }
         other => panic!("expected an in expression, got {other:?}"),
     };
     assert_eq!(machine.machine, registry.entry_id("assembling-machine-3").unwrap());
     assert_eq!(machine.count, 1.0);
 
-    // Q in M * 2 is (Q in M) * 2, because the spec ends at `*`.
+    // Q in M * 2 is (Q in M) * 2, because the right operand ends at `*`.
     assert!(matches!(
         expr("Q in @:assembling-machine-3: * 2"),
         Expr::Binary { op: BinaryOp::Mul, .. }
@@ -314,9 +317,22 @@ fn parses_in_expressions() {
 
     // A machine spec can carry its own count.
     match expr("Q in 3 @:assembling-machine-3:") {
-        Expr::In { machine, .. } => assert_eq!(machine.count, 3.0),
+        Expr::In { machine, .. } => match *machine {
+            Expr::Machine(spec) => assert_eq!(spec.count, 3.0),
+            other => panic!("expected a machine spec, got {other:?}"),
+        },
         other => panic!("expected an in expression, got {other:?}"),
     }
+
+    // Variables and parenthesized machine values are allowed on the right.
+    assert!(matches!(
+        expr("Q in furnace"),
+        Expr::In { machine, .. } if matches!(*machine, Expr::Variable(_))
+    ));
+    assert!(matches!(
+        expr("Q in (2 * @:assembling-machine-3:)"),
+        Expr::In { machine, .. } if matches!(*machine, Expr::Binary { .. })
+    ));
 }
 
 #[test]
