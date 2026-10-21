@@ -76,8 +76,12 @@ fn is_craft_rate(value: &Value) -> bool {
 
 /// Item rates in a belt mode are shown as belt counts; fluids ignore the mode.
 fn format_belt_rate(value: &Value, settings: &Settings, registry: &Registry) -> Option<String> {
-    let (tier, stacked) = settings.item_rate_display.belt()?;
-    let token = settings.item_rate_display.token()?;
+    let tier = settings.item_rate_belt?;
+    let token = if settings.stacked_belts {
+        tier.stacked_token()
+    } else {
+        tier.token()
+    };
     if value.units().len() != 2 || value.exponent(BaseUnit::Second) != -1 {
         return None;
     }
@@ -94,7 +98,12 @@ fn format_belt_rate(value: &Value, settings: &Settings, registry: &Registry) -> 
         return None;
     }
     let stack_size = item_stack_size(registry, item)?;
-    let capacity = belt_capacity(tier, stacked, stack_size, settings.belt_stacking);
+    let capacity = belt_capacity(
+        tier,
+        settings.stacked_belts,
+        stack_size,
+        settings.belt_stacking,
+    );
     let belts = value.coef() / capacity;
     Some(format!(
         "{} {token} {}",

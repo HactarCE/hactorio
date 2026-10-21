@@ -1,11 +1,13 @@
 //! Belt-rate literals. The belt rate is sugar for an item-per-second rate.
 
 use hactorio_data::EntryId;
+use serde::{Deserialize, Serialize};
 
 use crate::value::{BaseUnit, Value};
 
 /// The four belt tiers whose throughput is fixed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BeltTier {
     Yellow,
     Red,
@@ -14,12 +16,49 @@ pub enum BeltTier {
 }
 
 impl BeltTier {
+    /// The tiers from slowest to fastest.
+    pub const ALL: [BeltTier; 4] = [
+        BeltTier::Yellow,
+        BeltTier::Red,
+        BeltTier::Blue,
+        BeltTier::Green,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            BeltTier::Yellow => "yellow",
+            BeltTier::Red => "red",
+            BeltTier::Blue => "blue",
+            BeltTier::Green => "green",
+        }
+    }
+
     pub fn items_per_second(self) -> f64 {
         match self {
             BeltTier::Yellow => 15.0,
             BeltTier::Red => 30.0,
             BeltTier::Blue => 45.0,
             BeltTier::Green => 60.0,
+        }
+    }
+
+    /// The display token for an unstacked belt rate.
+    pub fn token(self) -> &'static str {
+        match self {
+            BeltTier::Yellow => "yb",
+            BeltTier::Red => "rb",
+            BeltTier::Blue => "bb",
+            BeltTier::Green => "gb",
+        }
+    }
+
+    /// The display token for a stacked belt rate.
+    pub fn stacked_token(self) -> &'static str {
+        match self {
+            BeltTier::Yellow => "syb",
+            BeltTier::Red => "srb",
+            BeltTier::Blue => "sbb",
+            BeltTier::Green => "sgb",
         }
     }
 }

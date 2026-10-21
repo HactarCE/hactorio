@@ -62,53 +62,6 @@ impl TimeUnit {
     }
 }
 
-/// How item rates are displayed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ItemRateDisplay {
-    PerSecond,
-    Yb,
-    Rb,
-    Bb,
-    Gb,
-    Syb,
-    Srb,
-    Sbb,
-    Sgb,
-}
-
-impl ItemRateDisplay {
-    /// The belt tier and stacking this display mode uses, if it is a belt mode.
-    pub fn belt(self) -> Option<(BeltTier, bool)> {
-        match self {
-            ItemRateDisplay::PerSecond => None,
-            ItemRateDisplay::Yb => Some((BeltTier::Yellow, false)),
-            ItemRateDisplay::Rb => Some((BeltTier::Red, false)),
-            ItemRateDisplay::Bb => Some((BeltTier::Blue, false)),
-            ItemRateDisplay::Gb => Some((BeltTier::Green, false)),
-            ItemRateDisplay::Syb => Some((BeltTier::Yellow, true)),
-            ItemRateDisplay::Srb => Some((BeltTier::Red, true)),
-            ItemRateDisplay::Sbb => Some((BeltTier::Blue, true)),
-            ItemRateDisplay::Sgb => Some((BeltTier::Green, true)),
-        }
-    }
-
-    /// The belt token, for belt display modes.
-    pub fn token(self) -> Option<&'static str> {
-        match self {
-            ItemRateDisplay::PerSecond => None,
-            ItemRateDisplay::Yb => Some("yb"),
-            ItemRateDisplay::Rb => Some("rb"),
-            ItemRateDisplay::Bb => Some("bb"),
-            ItemRateDisplay::Gb => Some("gb"),
-            ItemRateDisplay::Syb => Some("syb"),
-            ItemRateDisplay::Srb => Some("srb"),
-            ItemRateDisplay::Sbb => Some("sbb"),
-            ItemRateDisplay::Sgb => Some("sgb"),
-        }
-    }
-}
-
 /// Global display and evaluation settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -118,7 +71,10 @@ pub struct Settings {
     /// Display item quantities and rates with `k`/`M`/`G`.
     pub metric_prefixes: bool,
     pub time_unit: TimeUnit,
-    pub item_rate_display: ItemRateDisplay,
+    /// Belt tier used to display item rates, or `None` for items per second.
+    pub item_rate_belt: Option<BeltTier>,
+    /// Whether item rates in belt mode use stacked belts.
+    pub stacked_belts: bool,
     /// Effective belt stacking level, 1 through 4.
     pub belt_stacking: u8,
 }
@@ -129,7 +85,8 @@ impl Default for Settings {
             max_decimals: 3,
             metric_prefixes: true,
             time_unit: TimeUnit::Second,
-            item_rate_display: ItemRateDisplay::PerSecond,
+            item_rate_belt: None,
+            stacked_belts: false,
             belt_stacking: 4,
         }
     }

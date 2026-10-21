@@ -27,6 +27,6 @@ pub use format::{
 };
 pub use line_cache::LineCache;
 pub use parser::{ParseError, parse_line};
-pub use settings::{ItemRateDisplay, Settings, TimeUnit};
+pub use settings::{Settings, TimeUnit};
 pub use text::{from_plaintext, to_plaintext};
 pub use value::{BaseUnit, Value, ValueError};

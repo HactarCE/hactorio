@@ -1,4 +1,4 @@
-use hactorio_core::{BaseUnit, ItemRateDisplay, Settings, TimeUnit, Value, format_value};
+use hactorio_core::{BaseUnit, BeltTier, Settings, TimeUnit, Value, format_value};
 use hactorio_data::{Locale, Registry, postprocess};
 
 const DUMP: &str = r#"{
@@ -171,7 +171,7 @@ fn belt_modes_show_item_rates_as_belt_counts() {
     let registry = registry();
     let glyph = glyph(&registry, "iron-plate");
     let belts = Settings {
-        item_rate_display: ItemRateDisplay::Gb,
+        item_rate_belt: Some(BeltTier::Green),
         ..Settings::default()
     };
 
@@ -187,7 +187,8 @@ fn belt_modes_show_item_rates_as_belt_counts() {
 
     // Stacked green belts carry 60 * 4 = 240 items per second.
     let stacked = Settings {
-        item_rate_display: ItemRateDisplay::Sgb,
+        item_rate_belt: Some(BeltTier::Green),
+        stacked_belts: true,
         ..Settings::default()
     };
     assert_eq!(
@@ -200,7 +201,7 @@ fn belt_modes_show_item_rates_as_belt_counts() {
 fn belt_modes_ignore_fluids_and_composite_units() {
     let registry = registry();
     let belts = Settings {
-        item_rate_display: ItemRateDisplay::Gb,
+        item_rate_belt: Some(BeltTier::Green),
         ..Settings::default()
     };
 

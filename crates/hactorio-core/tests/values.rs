@@ -1,4 +1,4 @@
-use hactorio_core::{BaseUnit, BeltTier, ItemRateDisplay, Settings, TimeUnit, Value, ValueError, belt_capacity, belt_value, stack_size};
+use hactorio_core::{BaseUnit, BeltTier, Settings, TimeUnit, Value, ValueError, belt_capacity, belt_value, stack_size};
 
 fn item() -> BaseUnit {
     BaseUnit::Item(hactorio_data::EntryId::from_index(0))
@@ -150,22 +150,26 @@ fn belt_literals_become_item_rates() {
 fn settings_defaults_and_serialization() {
     let settings = Settings::default();
     assert_eq!(settings.time_unit, TimeUnit::Second);
-    assert_eq!(settings.item_rate_display, ItemRateDisplay::PerSecond);
+    assert_eq!(settings.item_rate_belt, None);
+    assert!(!settings.stacked_belts);
     assert_eq!(settings.max_decimals, 3);
     assert!(settings.metric_prefixes);
     assert_eq!(settings.belt_stacking, 4);
 
     let json = serde_json::to_string(&settings).unwrap();
     assert!(json.contains("\"time_unit\":\"second\""));
-    assert!(json.contains("\"item_rate_display\":\"per_second\""));
+    assert!(json.contains("\"item_rate_belt\":null"));
+    assert!(json.contains("\"stacked_belts\":false"));
     assert_eq!(serde_json::from_str::<Settings>(&json).unwrap(), settings);
 
     let belt = Settings {
-        item_rate_display: ItemRateDisplay::Sgb,
+        item_rate_belt: Some(BeltTier::Green),
+        stacked_belts: true,
         ..Settings::default()
     };
     let json = serde_json::to_string(&belt).unwrap();
-    assert!(json.contains("\"sgb\""));
+    assert!(json.contains("\"item_rate_belt\":\"green\""));
+    assert!(json.contains("\"stacked_belts\":true"));
     assert_eq!(
         serde_json::from_str::<Settings>("{\"time_unit\":\"minute\"}")
             .unwrap()

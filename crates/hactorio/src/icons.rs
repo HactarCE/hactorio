@@ -9,6 +9,18 @@ use egui::epaint::text::{
 };
 use hactorio_data::{IconImage, IconSource, Registry};
 
+/// Glyph for the game's stack-size icon, which is not a prototype entry.
+///
+/// It occupies the last BMP private-use codepoint, far above any prototype's
+/// glyph in practice.
+pub const STACK_SIZE: char = '\u{F8FF}';
+
+/// Icons that are not namespace entries, as `(glyph, data path)`.
+const EXTRAS: &[(char, &str)] = &[(
+    STACK_SIZE,
+    "__base__/graphics/icons/signal/signal-stack-size.png",
+)];
+
 /// Installs a highest-priority rasterizer that draws namespace glyphs as icons.
 ///
 /// Replacing the rasterizer list drops every cached glyph, which is what a
@@ -23,10 +35,14 @@ pub fn install(ctx: &egui::Context, registry: Arc<Registry>, source: &IconSource
             icons.insert(entry.glyph, image);
         }
     }
+    for &(glyph, path) in EXTRAS {
+        if let Some(image) = source.read_rgba(path) {
+            icons.insert(glyph, image);
+        }
+    }
     let icons = Arc::new(icons);
     type ScaleCache = Arc<Mutex<HashMap<(char, u32), Arc<ColorImage>>>>;
     let scaled: ScaleCache = Arc::new(Mutex::new(HashMap::new()));
-    let lookup = Arc::clone(&registry);
 
     let rasterizer = GlyphRasterizer::new("hactorio::icons", move |request: &GlyphRasterizerRequest<'_>| {
         // Highest priority means this is asked about every cluster: reject fast.
@@ -35,7 +51,6 @@ pub fn install(ctx: &egui::Context, registry: Arc<Registry>, source: &IconSource
         if chars.next().is_some() {
             return None;
         }
-        lookup.entry_by_glyph(glyph)?;
         let source = icons.get(&glyph)?;
 
         let size = (request.font_size_px.round() as u32).clamp(1, 256);

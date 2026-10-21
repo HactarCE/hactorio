@@ -1,5 +1,5 @@
 use hactorio_core::{
-    Breakdown, ItemRateDisplay, LineCache, LineOutput, Output, RecipeQuantity, Settings,
+    Breakdown, BeltTier, LineCache, LineOutput, Output, RecipeQuantity, Settings,
     StatementOutput, breakdown, evaluate, format_output,
 };
 use hactorio_data::{Locale, Registry, postprocess};
@@ -146,7 +146,7 @@ fn machine_seconds_render_totals_and_energy() {
 fn belt_mode_applies_to_rate_rows() {
     let registry = registry();
     let settings = Settings {
-        item_rate_display: ItemRateDisplay::Gb,
+        item_rate_belt: Some(BeltTier::Green),
         ..Settings::default()
     };
     let outputs = run_with(

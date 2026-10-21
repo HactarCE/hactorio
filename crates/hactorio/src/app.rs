@@ -7,14 +7,13 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use egui::{
-    Align, Color32, ComboBox, Context, CursorIcon, Key, Layout, Modifiers, Rect, RichText, ScrollArea,
-    Sense, TextEdit, TextStyle,
-    Ui,
+    Align, Color32, Context, CursorIcon, Key, Layout, Modifiers, Rect, RichText, ScrollArea, Sense,
+    TextEdit, TextStyle, Ui,
 };
 use hactorio_core::{
-    BaseUnit, ItemRateDisplay, LineOutput, Output, RecipeQuantity, Settings, StatementOutput,
-    TimeUnit, Value, breakdown, format_amount, format_energy, format_output, format_power,
-    format_value, from_plaintext, line_hash, to_plaintext,
+    BaseUnit, BeltTier, LineOutput, Output, RecipeQuantity, Settings, StatementOutput, TimeUnit,
+    Value, breakdown, format_amount, format_energy, format_output, format_power, format_value,
+    from_plaintext, line_hash, to_plaintext,
 };
 use hactorio_data::{GameInstall, Registry, locate};
 
@@ -23,6 +22,9 @@ use crate::evaluator::Evaluator;
 use crate::icons;
 
 const SAVE_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Font size of icon glyphs, such as belt tiers.
+const ICON_SIZE: f32 = 18.0;
 
 /// The app's data directory, where the cache and document live.
 pub fn data_dir() -> PathBuf {
@@ -44,6 +46,27 @@ pub fn data_dir() -> PathBuf {
         return PathBuf::from(appdata).join("hactorio");
     }
     PathBuf::from(".hactorio")
+}
+
+/// Height of a button whose text is an icon glyph.
+fn icon_button_height(ui: &Ui) -> f32 {
+    let font = egui::FontId::proportional(ICON_SIZE);
+    let text_height = ui.fonts_mut(|fonts| fonts.row_height(&font));
+    ui.spacing()
+        .interact_size
+        .y
+        .max(text_height + 2.0 * ui.spacing().button_padding.y)
+}
+
+/// The game item whose icon represents a belt tier.
+fn belt_tier_glyph(registry: &Registry, tier: BeltTier) -> Option<char> {
+    let id = match tier {
+        BeltTier::Yellow => "transport-belt",
+        BeltTier::Red => "fast-transport-belt",
+        BeltTier::Blue => "express-transport-belt",
+        BeltTier::Green => "turbo-transport-belt",
+    };
+    registry.entry(id).map(|entry| entry.glyph)
 }
 
 pub struct HactorioApp {
@@ -83,11 +106,17 @@ impl HactorioApp {
         let mut tabs: Vec<Tab> = if document.tabs.is_empty() {
             vec![Tab::from_text("# Main\n")]
         } else {
-            document.tabs.iter().map(|text| Tab::from_text(text)).collect()
+            document
+                .tabs
+                .iter()
+                .map(|text| Tab::from_text(text))
+                .collect()
         };
         let active = document.active_tab.min(tabs.len() - 1);
         for (tab, cursor) in tabs.iter_mut().zip(document.cursors.iter()) {
-            tab.cursor_line = cursor.line.min(tab.text.split('\n').count().saturating_sub(1));
+            tab.cursor_line = cursor
+                .line
+                .min(tab.text.split('\n').count().saturating_sub(1));
             tab.scroll = cursor.scroll;
         }
 
@@ -98,7 +127,10 @@ impl HactorioApp {
                 (Some(Arc::new(registry)), status)
             }
             Err(error) if cache_path.exists() => (None, format!("Game data failed: {error}")),
-            Err(_) => (None, "No game data yet; use \"Load game data\".".to_string()),
+            Err(_) => (
+                None,
+                "No game data yet; use \"Load game data\".".to_string(),
+            ),
         };
         if let Some(registry) = &registry {
             for tab in &mut tabs {
@@ -284,56 +316,78 @@ impl HactorioApp {
         }
     }
 
-    fn settings_ui(&mut self, ui: &mut Ui) {
+    fn display_bar(&mut self, ui: &mut Ui) {
         let before = self.settings.clone();
-        ui.heading("Settings");
+        let belt_icons = BeltTier::ALL.map(|tier| {
+            let glyph = self
+                .registry
+                .as_deref()
+                .and_then(|registry| belt_tier_glyph(registry, tier));
+            (tier, glyph)
+        });
+        let has_icons = self.registry.is_some();
 
-        ComboBox::from_label("Time unit")
-            .selected_text(self.settings.time_unit.name())
-            .show_ui(ui, |ui| {
-                for unit in [TimeUnit::Second, TimeUnit::Minute, TimeUnit::Hour] {
-                    ui.selectable_value(&mut self.settings.time_unit, unit, unit.name());
-                }
+        ui.horizontal_wrapped(|ui| {
+            // Reserve the tallest control's height so labels and controls align.
+            ui.set_height(icon_button_height(ui));
+            ui.strong("Display");
+            // ui.add_space(8.0);
+            ui.separator();
+
+            ui.label("Time unit");
+            for unit in [TimeUnit::Second, TimeUnit::Minute, TimeUnit::Hour] {
+                ui.selectable_value(&mut self.settings.time_unit, unit, unit.name());
+            }
+            ui.separator();
+
+            ui.label("Item rates");
+            ui.selectable_value(&mut self.settings.item_rate_belt, None, "item/s");
+            for (tier, glyph) in belt_icons {
+                let label: egui::WidgetText = match glyph {
+                    Some(glyph) => RichText::new(glyph.to_string()).size(ICON_SIZE).into(),
+                    None => tier.token().to_string().into(),
+                };
+                ui.selectable_value(&mut self.settings.item_rate_belt, Some(tier), label)
+                    .on_hover_text(format!("{} belts", tier.name()));
+            }
+            ui.add_enabled_ui(self.settings.item_rate_belt.is_some(), |ui| {
+                let stack_label = if has_icons {
+                    RichText::new(icons::STACK_SIZE.to_string()).size(ICON_SIZE)
+                } else {
+                    RichText::new("stacked")
+                };
+                ui.toggle_value(&mut self.settings.stacked_belts, stack_label)
+                    .on_hover_text("Show item rates as stacks on stacked belts");
             });
+            ui.separator();
 
-        let display_label = match self.settings.item_rate_display.belt() {
-            None => "per second",
-            Some(_) => self.settings.item_rate_display.token().unwrap_or(""),
-        };
-        ComboBox::from_label("Item rates")
-            .selected_text(display_label)
-            .show_ui(ui, |ui| {
-                for display in [
-                    ItemRateDisplay::PerSecond,
-                    ItemRateDisplay::Yb,
-                    ItemRateDisplay::Rb,
-                    ItemRateDisplay::Bb,
-                    ItemRateDisplay::Gb,
-                    ItemRateDisplay::Syb,
-                    ItemRateDisplay::Srb,
-                    ItemRateDisplay::Sbb,
-                    ItemRateDisplay::Sgb,
-                ] {
-                    let label = display.token().unwrap_or("per second");
-                    ui.selectable_value(&mut self.settings.item_rate_display, display, label);
-                }
-            });
+            ui.label("Decimals");
+            ui.add(egui::Slider::new(&mut self.settings.max_decimals, 0..=6));
+            ui.separator();
 
-        ui.add(egui::Slider::new(&mut self.settings.max_decimals, 0..=6).text("Decimals"));
-        ui.checkbox(&mut self.settings.metric_prefixes, "Metric prefixes");
+            ui.checkbox(&mut self.settings.metric_prefixes, "Metric prefixes");
+        });
 
-        ComboBox::from_label("Belt stacking")
-            .selected_text(self.settings.belt_stacking.to_string())
-            .show_ui(ui, |ui| {
-                for level in 1..=4u8 {
-                    ui.selectable_value(
-                        &mut self.settings.belt_stacking,
-                        level,
-                        level.to_string(),
-                    );
-                }
-            });
+        self.settings_changed(before);
+    }
 
+    fn research_bar(&mut self, ui: &mut Ui) {
+        let before = self.settings.clone();
+
+        ui.horizontal_wrapped(|ui| {
+            // Reserve the tallest control's height so labels and controls align.
+            ui.set_height(icon_button_height(ui));
+            ui.strong("Research");
+            ui.separator();
+
+            ui.label("Belt stacking");
+            ui.add(egui::Slider::new(&mut self.settings.belt_stacking, 1..=4));
+        });
+
+        self.settings_changed(before);
+    }
+
+    fn settings_changed(&mut self, before: Settings) {
         if self.settings != before {
             self.dirty = true;
             self.last_request = None;
@@ -348,10 +402,8 @@ impl HactorioApp {
             ui.weak("Focus a line to see how it was computed.");
             return;
         };
-        let (Some(text), Some(output)) = (
-            tab.text.split('\n').nth(line),
-            self.outputs.get(line),
-        ) else {
+        let (Some(text), Some(output)) = (tab.text.split('\n').nth(line), self.outputs.get(line))
+        else {
             return;
         };
         if output.source_hash != line_hash(text) {
@@ -398,8 +450,14 @@ impl HactorioApp {
         let screen = ctx.viewport_rect();
         let width = width.clamp(240.0, 420.0);
         let pos = egui::pos2(
-            anchor.x.min(screen.right() - width).max(screen.left() + 8.0),
-            anchor.y.min(screen.bottom() - 160.0).max(screen.top() + 8.0),
+            anchor
+                .x
+                .min(screen.right() - width)
+                .max(screen.left() + 8.0),
+            anchor
+                .y
+                .min(screen.bottom() - 160.0)
+                .max(screen.top() + 8.0),
         );
         egui::Area::new(egui::Id::unique("line_detail"))
             .order(egui::Order::Foreground)
@@ -483,6 +541,14 @@ impl HactorioApp {
             self.tabs_bar(ui);
         });
 
+        egui::Panel::top("display_settings").show(ui, |ui| {
+            self.display_bar(ui);
+        });
+
+        egui::Panel::top("research_settings").show(ui, |ui| {
+            self.research_bar(ui);
+        });
+
         egui::Panel::bottom("status").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(&self.status).small().weak());
@@ -499,8 +565,6 @@ impl HactorioApp {
                 ScrollArea::vertical()
                     .id_salt("side_scroll")
                     .show(ui, |ui| {
-                        self.settings_ui(ui);
-                        ui.separator();
                         self.breakdown_ui(ui);
                     });
             });
@@ -547,7 +611,6 @@ impl HactorioApp {
             self.save();
         }
     }
-
 }
 
 impl eframe::App for HactorioApp {
@@ -689,9 +752,11 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                     let index = start + column.min(length);
                     let stored = egui::text_edit::TextEditState::load(ui.ctx(), text_id);
                     if let Some(mut state) = stored {
-                        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
-                            egui::text::CCursor::new(index),
-                        )));
+                        state
+                            .cursor
+                            .set_char_range(Some(egui::text::CCursorRange::one(
+                                egui::text::CCursor::new(index),
+                            )));
                         state.store(ui.ctx(), text_id);
                         *pending_focus = None;
                     }
@@ -744,9 +809,9 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                     } else {
                         if move_selection != 0 {
                             let len = completion.items.len() as i32;
-                            completion.selected =
-                                (completion.selected as i32 + move_selection).rem_euclid(len)
-                                    as usize;
+                            completion.selected = (completion.selected as i32 + move_selection)
+                                .rem_euclid(len)
+                                as usize;
                         }
                         if accept {
                             let inserted = insert_completion(
@@ -758,11 +823,11 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                             if let Some(mut state) =
                                 egui::text_edit::TextEditState::load(ui.ctx(), text_id)
                             {
-                                state.cursor.set_char_range(Some(
-                                    egui::text::CCursorRange::one(egui::text::CCursor::new(
-                                        inserted,
-                                    )),
-                                ));
+                                state
+                                    .cursor
+                                    .set_char_range(Some(egui::text::CCursorRange::one(
+                                        egui::text::CCursor::new(inserted),
+                                    )));
                                 state.store(ui.ctx(), text_id);
                             }
                             ui.memory_mut(|memory| memory.request_focus(text_id));
@@ -773,12 +838,19 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                             let caret = text_edit
                                 .galley
                                 .pos_from_cursor(egui::text::CCursor::new(cursor_char));
-                            let anchor =
-                                text_edit.galley_pos + caret.left_bottom().to_vec2() + egui::vec2(0.0, 2.0);
+                            let anchor = text_edit.galley_pos
+                                + caret.left_bottom().to_vec2()
+                                + egui::vec2(0.0, 2.0);
                             let screen = ui.ctx().viewport_rect();
                             let pos = egui::pos2(
-                                anchor.x.min(screen.right() - 340.0).max(screen.left() + 8.0),
-                                anchor.y.min(screen.bottom() - 100.0).max(screen.top() + 8.0),
+                                anchor
+                                    .x
+                                    .min(screen.right() - 340.0)
+                                    .max(screen.left() + 8.0),
+                                anchor
+                                    .y
+                                    .min(screen.bottom() - 100.0)
+                                    .max(screen.top() + 8.0),
                             );
                             let mut clicked = None;
                             egui::Area::new(egui::Id::unique(("completion", active)))
@@ -788,19 +860,15 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                                     egui::Frame::popup(ui.style()).show(ui, |ui| {
                                         ui.set_min_width(300.0);
                                         ui.set_max_width(420.0);
-                                        egui::ScrollArea::vertical()
-                                            .max_height(240.0)
-                                            .show(ui, |ui| {
+                                        egui::ScrollArea::vertical().max_height(240.0).show(
+                                            ui,
+                                            |ui| {
                                                 for (index, item) in
                                                     completion.items.iter().enumerate()
                                                 {
-                                                    let mut label = format!(
-                                                        "{} {}",
-                                                        item.glyph, item.id
-                                                    );
-                                                    if let Some(description) =
-                                                        &item.description
-                                                    {
+                                                    let mut label =
+                                                        format!("{} {}", item.glyph, item.id);
+                                                    if let Some(description) = &item.description {
                                                         label.push_str("   ");
                                                         label.push_str(description);
                                                     }
@@ -814,7 +882,8 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                                                         clicked = Some(index);
                                                     }
                                                 }
-                                            });
+                                            },
+                                        );
                                     });
                                 });
                             ui.memory_mut(|memory| memory.request_focus(text_id));
@@ -829,9 +898,9 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                                     egui::text_edit::TextEditState::load(ui.ctx(), text_id)
                                 {
                                     state.cursor.set_char_range(Some(
-                                        egui::text::CCursorRange::one(
-                                            egui::text::CCursor::new(inserted),
-                                        ),
+                                        egui::text::CCursorRange::one(egui::text::CCursor::new(
+                                            inserted,
+                                        )),
                                     ));
                                     state.store(ui.ctx(), text_id);
                                 }
@@ -847,22 +916,16 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                 let viewport = hscroll.inner_rect;
                 let origin = text_edit.galley_pos;
                 let galley = &text_edit.galley;
-                let editor_height = text_edit
-                    .response
-                    .rect
-                    .height()
-                    .max(galley.size().y + 8.0);
+                let editor_height = text_edit.response.rect.height().max(galley.size().y + 8.0);
 
-                let (divider_rect, divider) = ui.allocate_exact_size(
-                    egui::vec2(divider_width, editor_height),
-                    Sense::drag(),
-                );
+                let (divider_rect, divider) =
+                    ui.allocate_exact_size(egui::vec2(divider_width, editor_height), Sense::drag());
                 if divider.hovered() || divider.dragged() {
                     ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
                 }
                 if divider.dragged() {
-                    *results_width = (*results_width - divider.drag_delta().x)
-                        .clamp(120.0, max_results);
+                    *results_width =
+                        (*results_width - divider.drag_delta().x).clamp(120.0, max_results);
                     result.resized = true;
                 }
                 let shown_results = (*results_width).clamp(120.0, max_results);
@@ -923,8 +986,6 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                         color,
                     );
                 }
-
-
             });
         });
     tab.scroll = scroll.state.clamped_offset().y;
@@ -959,7 +1020,11 @@ struct CompletionItem {
 /// Word boundaries for completion. `:` is deliberately not one: it is part of
 /// a plaintext prototype token.
 fn is_completion_boundary(ch: char) -> bool {
-    ch.is_whitespace() || matches!(ch, '+' | '-' | '*' | '/' | '^' | '@' | '=' | '(' | ')' | '#')
+    ch.is_whitespace()
+        || matches!(
+            ch,
+            '+' | '-' | '*' | '/' | '^' | '@' | '=' | '(' | ')' | '#'
+        )
 }
 
 /// The word ending at `cursor`, as a char index and text.
@@ -1085,18 +1150,11 @@ fn truncate_text(
     shortened
 }
 
-fn detail_ui(
-    ui: &mut Ui,
-    statement: &StatementOutput,
-    settings: &Settings,
-    registry: &Registry,
-) {
+fn detail_ui(ui: &mut Ui, statement: &StatementOutput, settings: &Settings, registry: &Registry) {
     match &statement.output {
         LineOutput::Nothing => {}
         LineOutput::Error(error) => {
-            ui.label(
-                RichText::new(&error.message).color(Color32::from_rgb(220, 90, 90)),
-            );
+            ui.label(RichText::new(&error.message).color(Color32::from_rgb(220, 90, 90)));
         }
         LineOutput::Value(value) => {
             let formatted = format_output(value, settings, registry);
@@ -1136,16 +1194,12 @@ fn detail_ui(
                     ui.end_row();
                     for row in 0..produces.len().max(consumes.len()) {
                         ui.label(
-                            RichText::new(
-                                produces.get(row).map(String::as_str).unwrap_or(""),
-                            )
-                            .monospace(),
+                            RichText::new(produces.get(row).map(String::as_str).unwrap_or(""))
+                                .monospace(),
                         );
                         ui.label(
-                            RichText::new(
-                                consumes.get(row).map(String::as_str).unwrap_or(""),
-                            )
-                            .monospace(),
+                            RichText::new(consumes.get(row).map(String::as_str).unwrap_or(""))
+                                .monospace(),
                         );
                         ui.end_row();
                     }
@@ -1180,11 +1234,8 @@ fn detail_ui(
             }
             if !rate && let Some(energy) = recipe.total_energy_j {
                 ui.label(
-                    RichText::new(format!(
-                        "{} total energy",
-                        format_energy(energy, settings)
-                    ))
-                    .monospace(),
+                    RichText::new(format!("{} total energy", format_energy(energy, settings)))
+                        .monospace(),
                 );
             }
         }
@@ -1193,9 +1244,7 @@ fn detail_ui(
 
 fn unit_label(registry: &Registry, unit: BaseUnit) -> String {
     match unit {
-        BaseUnit::Item(id) | BaseUnit::Fluid(id) => {
-            registry.entry_by_index(id).id.to_string()
-        }
+        BaseUnit::Item(id) | BaseUnit::Fluid(id) => registry.entry_by_index(id).id.to_string(),
         BaseUnit::Craft => "craft".to_string(),
         BaseUnit::Second => "second".to_string(),
         BaseUnit::Joule => "joule".to_string(),
@@ -1357,7 +1406,11 @@ mod tests {
     #[test]
     fn completion_after_at_only_offers_machines() {
         let registry = fixture_registry();
-        let machine = registry.entry("assembling-machine-3").unwrap().glyph.to_string();
+        let machine = registry
+            .entry("assembling-machine-3")
+            .unwrap()
+            .glyph
+            .to_string();
         let plate = registry.entry("iron-plate").unwrap().glyph.to_string();
 
         let inserts = suggested_ids(&registry, "@asm");
@@ -1370,7 +1423,11 @@ mod tests {
     #[test]
     fn completion_after_making_only_offers_recipes() {
         let registry = fixture_registry();
-        let circuit = registry.entry("electronic-circuit").unwrap().glyph.to_string();
+        let circuit = registry
+            .entry("electronic-circuit")
+            .unwrap()
+            .glyph
+            .to_string();
         let water = registry.entry("water").unwrap().glyph.to_string();
 
         let inserts = suggested_ids(&registry, "making :circ");
