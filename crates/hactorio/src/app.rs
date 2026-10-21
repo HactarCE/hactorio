@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use egui::{
-    Align, Color32, ComboBox, Context, Key, Layout, RichText, ScrollArea, TextEdit, TextStyle,
+    Align, Color32, ComboBox, Context, Layout, RichText, ScrollArea, TextEdit, TextStyle,
     Ui,
 };
 use hactorio_core::{
@@ -54,7 +54,6 @@ pub struct HactorioApp {
     pending: u64,
     last_request: Option<(String, Settings)>,
     focus_line: Option<usize>,
-    focus_request: Option<usize>,
     install: Option<GameInstall>,
     load: LoadState,
     status: String,
@@ -80,7 +79,7 @@ impl HactorioApp {
         };
         let active = document.active_tab.min(tabs.len() - 1);
         for (tab, cursor) in tabs.iter_mut().zip(document.cursors.iter()) {
-            tab.cursor_line = cursor.line.min(tab.lines.len().saturating_sub(1));
+            tab.cursor_line = cursor.line.min(tab.text.split('\n').count().saturating_sub(1));
             tab.scroll = cursor.scroll;
         }
 
@@ -112,7 +111,6 @@ impl HactorioApp {
             pending: 0,
             last_request: None,
             focus_line: None,
-            focus_request: None,
             install,
             load: LoadState::Idle,
             status,
@@ -128,7 +126,7 @@ impl HactorioApp {
     fn current_text(&self) -> String {
         self.tabs
             .get(self.active)
-            .map(Tab::text)
+            .map(|tab| tab.text.clone())
             .unwrap_or_default()
     }
 
@@ -195,9 +193,9 @@ impl HactorioApp {
     fn install_data(&mut self, registry: Registry, install: GameInstall, ctx: &Context) {
         if let Some(old) = &self.registry {
             for tab in &mut self.tabs {
-                let text = tab.text();
-                let plain = to_plaintext(&text, old);
-                tab.set_text(&from_plaintext(&plain, &registry));
+                let plain = to_plaintext(&tab.text, old);
+                let relexed = from_plaintext(&plain, &registry);
+                tab.set_text(&relexed);
             }
         }
 
@@ -331,7 +329,10 @@ impl HactorioApp {
             ui.weak("Focus a line to see how it was computed.");
             return;
         };
-        let (Some(text), Some(output)) = (tab.lines.get(line), self.outputs.get(line)) else {
+        let (Some(text), Some(output)) = (
+            tab.text.split('\n').nth(line),
+            self.outputs.get(line),
+        ) else {
             return;
         };
         if output.source_hash != line_hash(text) {
@@ -363,7 +364,7 @@ impl HactorioApp {
     fn snapshot(&self) -> Document {
         Document {
             version: DOCUMENT_VERSION,
-            tabs: self.tabs.iter().map(Tab::text).collect(),
+            tabs: self.tabs.iter().map(|tab| tab.text.clone()).collect(),
             active_tab: self.active,
             cursors: self
                 .tabs
@@ -421,7 +422,7 @@ impl eframe::App for HactorioApp {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(&self.status).small().weak());
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let lines = self.tabs[self.active].lines.len();
+                    let lines = self.tabs[self.active].text.split('\n').count();
                     ui.label(RichText::new(format!("{lines} lines")).small().weak());
                 });
             });
@@ -450,7 +451,6 @@ impl eframe::App for HactorioApp {
                 ui.separator();
             }
             let active = self.active;
-            let focus_request = self.focus_request.take();
             let result = editor_ui(
                 ui,
                 &mut self.tabs[active],
@@ -458,7 +458,6 @@ impl eframe::App for HactorioApp {
                 &self.outputs,
                 &self.settings,
                 self.registry.as_deref(),
-                focus_request,
             );
             if result.changed {
                 self.dirty = true;
@@ -466,10 +465,6 @@ impl eframe::App for HactorioApp {
             }
             if let Some(line) = result.focused {
                 self.focus_line = Some(line);
-            }
-            if let Some(line) = result.focus {
-                self.focus_line = Some(line);
-                self.focus_request = Some(line);
             }
         });
 
@@ -485,13 +480,12 @@ impl eframe::App for HactorioApp {
 
 struct EditorResult {
     changed: bool,
-    /// A line the user is editing now.
+    /// The line the caret is on, while the editor has focus.
     focused: Option<usize>,
-    /// A line to focus next frame, after inserting or deleting.
-    focus: Option<usize>,
 }
 
-/// Renders one tab's lines with their outputs, and handles line insertion.
+/// Renders the tab as one multiline editor, with line numbers and outputs
+/// painted at the galley's row positions so they stay aligned.
 fn editor_ui(
     ui: &mut Ui,
     tab: &mut Tab,
@@ -499,129 +493,137 @@ fn editor_ui(
     outputs: &[StatementOutput],
     settings: &Settings,
     registry: Option<&Registry>,
-    focus_request: Option<usize>,
 ) -> EditorResult {
     let mut result = EditorResult {
         changed: false,
         focused: None,
-        focus: None,
     };
-    let mut enter_at: Option<(usize, usize)> = None;
-    let mut remove_line: Option<usize> = None;
 
-    let scroll = ScrollArea::vertical()
+    let font_id = TextStyle::Monospace.resolve(ui.style());
+    let char_width = ui
+        .fonts_mut(|fonts| fonts.glyph_width(&font_id, 'M'))
+        .max(1.0);
+    let line_count = tab.text.split('\n').count();
+    let longest = tab
+        .text
+        .split('\n')
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0);
+
+    let number_width = 44.0;
+    let output_width = (ui.available_width() * 0.4).max(220.0);
+    let min_editor = (ui.available_width() - number_width - output_width).max(320.0);
+    let editor_width = (longest as f32 * char_width + 24.0).max(min_editor);
+
+    let mut layouter = |ui: &Ui, buffer: &dyn egui::TextBuffer, _wrap_width: f32| {
+        let mut job = egui::text::LayoutJob::simple(
+            buffer.as_str().to_string(),
+            font_id.clone(),
+            ui.visuals().text_color(),
+            f32::INFINITY,
+        );
+        job.wrap.max_width = f32::INFINITY;
+        ui.fonts_mut(|fonts| fonts.layout_job(job))
+    };
+
+    let scroll = ScrollArea::both()
         .id_salt(("editor", active))
         .vertical_scroll_offset(tab.scroll)
         .show(ui, |ui| {
-            for index in 0..tab.lines.len() {
-                let line_id = ui.make_persistent_id(("line", active, index));
-                ui.horizontal(|ui| {
-                    ui.add_sized(
-                        [28.0, 18.0],
-                        egui::Label::new(
-                            RichText::new(format!("{:>3}", index + 1))
-                                .weak()
-                                .monospace(),
-                        ),
+            ui.horizontal_top(|ui| {
+                ui.add_space(number_width);
+                let text_edit = TextEdit::multiline(&mut tab.text)
+                    .code_editor()
+                    .desired_width(editor_width)
+                    .desired_rows(line_count.max(6))
+                    .margin(egui::Margin::symmetric(4, 4))
+                    .layouter(&mut layouter)
+                    .id_salt(("text", active))
+                    .show(ui);
+                result.changed |= text_edit.response.changed();
+
+                if let Some(range) = text_edit.cursor_range {
+                    let line = tab
+                        .text
+                        .chars()
+                        .take(range.primary.index.0)
+                        .filter(|ch| *ch == '\n')
+                        .count();
+                    tab.cursor_line = line;
+                    if text_edit.response.has_focus() {
+                        result.focused = Some(line);
+                    }
+                }
+
+                let frame = text_edit.response.rect;
+                let galley = &text_edit.galley;
+                let origin = text_edit.galley_pos;
+                let weak = ui.visuals().weak_text_color();
+                let error_color = Color32::from_rgb(220, 90, 90);
+                let painter = ui.painter();
+
+                for (index, line) in tab.text.split('\n').enumerate() {
+                    let Some(row) = galley.rows.get(index) else {
+                        break;
+                    };
+                    let y = origin.y + row.pos.y;
+                    painter.text(
+                        egui::pos2(origin.x - 10.0, y),
+                        egui::Align2::RIGHT_TOP,
+                        format!("{}", index + 1),
+                        font_id.clone(),
+                        weak,
                     );
 
-                    let available = ui.available_width();
-                    let editor_width = (available * 0.55).max(120.0);
-                    let response = ui.add_sized(
-                        [editor_width, 18.0],
-                        TextEdit::singleline(&mut tab.lines[index])
-                            .id(line_id)
-                            .font(TextStyle::Monospace),
+                    let (Some(statement), Some(registry)) = (outputs.get(index), registry) else {
+                        continue;
+                    };
+                    if statement.source_hash != line_hash(line) {
+                        continue;
+                    }
+                    let Some(text) = output_text(statement, settings, registry) else {
+                        continue;
+                    };
+                    let color = if matches!(statement.output, LineOutput::Error(_)) {
+                        error_color
+                    } else {
+                        weak
+                    };
+                    painter.text(
+                        egui::pos2(frame.max.x + 12.0, y),
+                        egui::Align2::LEFT_TOP,
+                        text,
+                        font_id.clone(),
+                        color,
                     );
-                    result.changed |= response.changed();
-                    if response.has_focus() {
-                        result.focused = Some(index);
-                        tab.cursor_line = index;
-                    }
-                    if focus_request == Some(index) {
-                        ui.memory_mut(|memory| memory.request_focus(line_id));
-                    }
+                }
 
-                    if response.has_focus() {
-                        if ui.input(|input| input.key_pressed(Key::Enter)) {
-                            let chars = egui::text_edit::TextEditState::load(ui.ctx(), line_id)
-                                .and_then(|state| state.cursor.char_range())
-                                .map(|range| range.primary.index.0)
-                                .unwrap_or(usize::MAX);
-                            enter_at = Some((index, chars));
-                        }
-                        if tab.lines[index].is_empty()
-                            && tab.lines.len() > 1
-                            && ui.input(|input| input.key_pressed(Key::Backspace))
-                        {
-                            remove_line = Some(index);
-                        }
-                    }
-
-                    ui.add_space(6.0);
-                    if let (Some(output), Some(registry)) = (outputs.get(index), registry)
-                        && output.source_hash == line_hash(&tab.lines[index])
-                    {
-                        output_ui(ui, output, settings, registry);
-                    }
-                });
-            }
+                ui.add_space(8.0);
+                ui.allocate_space(egui::vec2(output_width, 0.0));
+            });
         });
     tab.scroll = scroll.state.clamped_offset().y;
-
-    if let Some((index, chars)) = enter_at {
-        let byte = char_to_byte(&tab.lines[index], chars);
-        let tail = tab.lines[index].split_off(byte);
-        tab.lines.insert(index + 1, tail);
-        tab.cursor_line = index + 1;
-        result.focus = Some(index + 1);
-    }
-
-    if let Some(index) = remove_line {
-        tab.lines.remove(index);
-        let previous = index.saturating_sub(1);
-        tab.cursor_line = previous;
-        result.focus = Some(previous);
-    }
 
     result
 }
 
-fn char_to_byte(text: &str, chars: usize) -> usize {
-    text.char_indices()
-        .nth(chars)
-        .map(|(byte, _)| byte)
-        .unwrap_or(text.len())
-}
-
-fn output_ui(
-    ui: &mut Ui,
-    output: &StatementOutput,
+fn output_text(
+    statement: &StatementOutput,
     settings: &Settings,
     registry: &Registry,
-) {
-    match &output.output {
-        LineOutput::Nothing => {}
-        LineOutput::Error(error) => {
-            ui.label(
-                RichText::new(&error.message)
-                    .small()
-                    .color(Color32::from_rgb(220, 90, 90)),
-            );
-        }
+) -> Option<String> {
+    match &statement.output {
+        LineOutput::Nothing => None,
+        LineOutput::Error(error) => Some(error.message.clone()),
         LineOutput::Value(value) => {
             let formatted = format_output(value, settings, registry);
             let mut text = formatted.headline;
             for row in formatted.rows {
-                text.push('\n');
+                text.push_str(" · ");
                 text.push_str(&row);
             }
-            ui.label(
-                RichText::new(text)
-                    .monospace()
-                    .small()
-                    .color(ui.visuals().weak_text_color()),
-            );
+            Some(text)
         }
     }
 }

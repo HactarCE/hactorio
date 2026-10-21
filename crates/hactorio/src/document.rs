@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 
 pub const DOCUMENT_VERSION: u32 = 1;
 
-/// One tab's editable lines.
+/// One tab's editable text.
 #[derive(Debug, Clone)]
 pub struct Tab {
-    pub lines: Vec<String>,
+    pub text: String,
     pub cursor_line: usize,
     pub scroll: f32,
 }
@@ -19,24 +19,21 @@ pub struct Tab {
 impl Tab {
     pub fn from_text(text: &str) -> Self {
         Tab {
-            lines: text.split('\n').map(str::to_string).collect(),
+            text: text.to_string(),
             cursor_line: 0,
             scroll: 0.0,
         }
     }
 
-    pub fn text(&self) -> String {
-        self.lines.join("\n")
-    }
-
     pub fn set_text(&mut self, text: &str) {
-        self.lines = text.split('\n').map(str::to_string).collect();
-        self.cursor_line = self.cursor_line.min(self.lines.len().saturating_sub(1));
+        self.text = text.to_string();
+        let lines = self.text.split('\n').count();
+        self.cursor_line = self.cursor_line.min(lines.saturating_sub(1));
     }
 
     /// The first comment line, without the `#`, or `Untitled`.
     pub fn title(&self) -> String {
-        for line in &self.lines {
+        for line in self.text.split('\n') {
             if let Some(rest) = line.trim_start().strip_prefix('#') {
                 let title = rest.trim();
                 if !title.is_empty() {
