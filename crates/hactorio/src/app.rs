@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use egui::{
-    Align, Color32, ComboBox, Context, Layout, RichText, ScrollArea, TextEdit, TextStyle,
+    Align, Color32, ComboBox, Context, Key, Layout, Modifiers, RichText, ScrollArea, TextEdit, TextStyle,
     Ui,
 };
 use hactorio_core::{
@@ -68,6 +68,7 @@ pub struct HactorioApp {
     pending_focus: Option<(usize, usize)>,
     /// Generation whose results are currently displayed.
     applied: u64,
+    completion: CompletionState,
 }
 
 enum LoadState {
@@ -126,6 +127,7 @@ impl HactorioApp {
                 .get(active)
                 .map(|cursor| (cursor.line, cursor.column)),
             applied: 0,
+            completion: CompletionState::default(),
         }
     }
 
@@ -496,15 +498,15 @@ impl HactorioApp {
                 ui.separator();
             }
             let active = self.active;
-            let result = editor_ui(
-                ui,
-                &mut self.tabs[active],
+            let mut state = EditorState {
                 active,
-                &self.outputs,
-                &self.settings,
-                self.registry.as_deref(),
-                &mut self.pending_focus,
-            );
+                outputs: &self.outputs,
+                settings: &self.settings,
+                registry: self.registry.as_deref(),
+                pending_focus: &mut self.pending_focus,
+                completion: &mut self.completion,
+            };
+            let result = editor_ui(ui, &mut self.tabs[active], &mut state);
             if result.changed {
                 self.dirty = true;
                 self.last_request = None;
@@ -512,7 +514,9 @@ impl HactorioApp {
             if let Some(line) = result.focused {
                 self.focus_line = Some(line);
             }
-            if let Some((line, anchor, width)) = result.detail {
+            if let Some((line, anchor, width)) = result.detail
+                && self.completion.items.is_empty()
+            {
                 self.detail_panel(&ctx, anchor, line, width);
             }
         });
@@ -534,6 +538,15 @@ impl eframe::App for HactorioApp {
     }
 }
 
+struct EditorState<'a> {
+    active: usize,
+    outputs: &'a [StatementOutput],
+    settings: &'a Settings,
+    registry: Option<&'a Registry>,
+    pending_focus: &'a mut Option<(usize, usize)>,
+    completion: &'a mut CompletionState,
+}
+
 struct EditorResult {
     changed: bool,
     /// The line the caret is on, while the editor has focus.
@@ -544,15 +557,14 @@ struct EditorResult {
 
 /// Renders the tab as one multiline editor, with line numbers and outputs
 /// painted at the galley's row positions so they stay aligned.
-fn editor_ui(
-    ui: &mut Ui,
-    tab: &mut Tab,
-    active: usize,
-    outputs: &[StatementOutput],
-    settings: &Settings,
-    registry: Option<&Registry>,
-    pending_focus: &mut Option<(usize, usize)>,
-) -> EditorResult {
+fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorResult {
+    let active = state.active;
+    let outputs = state.outputs;
+    let settings = state.settings;
+    let registry = state.registry;
+    let pending_focus: &mut Option<(usize, usize)> = state.pending_focus;
+    let completion: &mut CompletionState = state.completion;
+
     let mut result = EditorResult {
         changed: false,
         focused: None,
@@ -593,6 +605,28 @@ fn editor_ui(
         .show(ui, |ui| {
             ui.horizontal_top(|ui| {
                 ui.add_space(number_width);
+                let popup_open = !completion.items.is_empty()
+                    && completion.dismissed.as_deref() != Some(completion.word.as_str());
+                let mut accept = false;
+                let mut dismiss = false;
+                let mut move_selection = 0i32;
+                if popup_open {
+                    ui.input_mut(|input| {
+                        let mut down = 0;
+                        let mut up = 0;
+                        while input.consume_key(Modifiers::NONE, Key::ArrowDown) {
+                            down += 1;
+                        }
+                        while input.consume_key(Modifiers::NONE, Key::ArrowUp) {
+                            up += 1;
+                        }
+                        accept = input.consume_key(Modifiers::NONE, Key::Enter)
+                            || input.consume_key(Modifiers::NONE, Key::Tab);
+                        dismiss = input.consume_key(Modifiers::NONE, Key::Escape);
+                        move_selection = down - up;
+                    });
+                }
+
                 let text_id = ui.make_persistent_id(("text", active));
                 let hscroll = ScrollArea::horizontal()
                     .id_salt(("text_scroll", active))
@@ -645,6 +679,139 @@ fn editor_ui(
                     tab.cursor_line = line;
                     if text_edit.response.has_focus() {
                         result.focused = Some(line);
+                    }
+                }
+
+                let cursor_char = text_edit
+                    .cursor_range
+                    .map(|range| range.primary.index.0)
+                    .unwrap_or(0);
+                let (word_start, word) = completion_word(&tab.text, cursor_char);
+                if !text_edit.response.has_focus() {
+                    completion.items.clear();
+                }
+
+                if let Some(registry) = registry {
+                    let text_changed = completion.text_hash != line_hash(&tab.text);
+                    if text_changed || word != completion.word {
+                        completion.text_hash = line_hash(&tab.text);
+                        completion.word = word.clone();
+                        completion.selected = 0;
+                        completion.items = if word.is_empty() {
+                            Vec::new()
+                        } else {
+                            completion_items(registry, &tab.text, word_start, &word)
+                        };
+                        if completion.dismissed.as_deref() != Some(word.as_str()) {
+                            completion.dismissed = None;
+                        }
+                    }
+                }
+
+                if popup_open && !completion.items.is_empty() {
+                    if dismiss {
+                        completion.dismissed = Some(completion.word.clone());
+                        completion.items.clear();
+                    } else {
+                        if move_selection != 0 {
+                            let len = completion.items.len() as i32;
+                            completion.selected =
+                                (completion.selected as i32 + move_selection).rem_euclid(len)
+                                    as usize;
+                        }
+                        if accept {
+                            let inserted = insert_completion(
+                                &mut tab.text,
+                                word_start,
+                                completion.word.chars().count(),
+                                &completion.items[completion.selected].insert,
+                            );
+                            if let Some(mut state) =
+                                egui::text_edit::TextEditState::load(ui.ctx(), text_id)
+                            {
+                                state.cursor.set_char_range(Some(
+                                    egui::text::CCursorRange::one(egui::text::CCursor::new(
+                                        inserted,
+                                    )),
+                                ));
+                                state.store(ui.ctx(), text_id);
+                            }
+                            ui.memory_mut(|memory| memory.request_focus(text_id));
+                            completion.items.clear();
+                            completion.word.clear();
+                            result.changed = true;
+                        } else {
+                            let caret = text_edit
+                                .galley
+                                .pos_from_cursor(egui::text::CCursor::new(cursor_char));
+                            let anchor =
+                                text_edit.galley_pos + caret.left_bottom().to_vec2() + egui::vec2(0.0, 2.0);
+                            let screen = ui.ctx().viewport_rect();
+                            let pos = egui::pos2(
+                                anchor.x.min(screen.right() - 340.0).max(screen.left() + 8.0),
+                                anchor.y.min(screen.bottom() - 100.0).max(screen.top() + 8.0),
+                            );
+                            let mut clicked = None;
+                            egui::Area::new(egui::Id::unique(("completion", active)))
+                                .order(egui::Order::Foreground)
+                                .fixed_pos(pos)
+                                .show(ui.ctx(), |ui| {
+                                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                        ui.set_min_width(300.0);
+                                        ui.set_max_width(420.0);
+                                        egui::ScrollArea::vertical()
+                                            .max_height(240.0)
+                                            .show(ui, |ui| {
+                                                for (index, item) in
+                                                    completion.items.iter().enumerate()
+                                                {
+                                                    let mut label = format!(
+                                                        "{} {}",
+                                                        item.glyph, item.id
+                                                    );
+                                                    if let Some(description) =
+                                                        &item.description
+                                                    {
+                                                        label.push_str("   ");
+                                                        label.push_str(description);
+                                                    }
+                                                    if ui
+                                                        .selectable_label(
+                                                            index == completion.selected,
+                                                            RichText::new(label).monospace(),
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        clicked = Some(index);
+                                                    }
+                                                }
+                                            });
+                                    });
+                                });
+                            ui.memory_mut(|memory| memory.request_focus(text_id));
+                            if let Some(index) = clicked {
+                                let inserted = insert_completion(
+                                    &mut tab.text,
+                                    word_start,
+                                    completion.word.chars().count(),
+                                    &completion.items[index].insert,
+                                );
+                                if let Some(mut state) =
+                                    egui::text_edit::TextEditState::load(ui.ctx(), text_id)
+                                {
+                                    state.cursor.set_char_range(Some(
+                                        egui::text::CCursorRange::one(
+                                            egui::text::CCursor::new(inserted),
+                                        ),
+                                    ));
+                                    state.store(ui.ctx(), text_id);
+                                }
+                                ui.memory_mut(|memory| memory.request_focus(text_id));
+                                completion.items.clear();
+                                completion.word.clear();
+                                result.changed = true;
+                            }
+                        }
                     }
                 }
 
@@ -705,6 +872,129 @@ fn editor_ui(
     tab.scroll = scroll.state.clamped_offset().y;
 
     result
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CompletionContext {
+    Normal,
+    Machine,
+    Recipe,
+}
+
+#[derive(Clone, Default)]
+struct CompletionState {
+    text_hash: u64,
+    word: String,
+    items: Vec<CompletionItem>,
+    selected: usize,
+    dismissed: Option<String>,
+}
+
+#[derive(Clone)]
+struct CompletionItem {
+    insert: String,
+    glyph: char,
+    id: String,
+    description: Option<String>,
+}
+
+/// Word boundaries for completion. `:` is deliberately not one: it is part of
+/// a plaintext prototype token.
+fn is_completion_boundary(ch: char) -> bool {
+    ch.is_whitespace() || matches!(ch, '+' | '-' | '*' | '/' | '^' | '@' | '=' | '(' | ')' | '#')
+}
+
+/// The word ending at `cursor`, as a char index and text.
+fn completion_word(text: &str, cursor: usize) -> (usize, String) {
+    let chars: Vec<char> = text.chars().collect();
+    let cursor = cursor.min(chars.len());
+    let mut start = cursor;
+    while start > 0 && !is_completion_boundary(chars[start - 1]) {
+        start -= 1;
+    }
+    (start, chars[start..cursor].iter().collect())
+}
+
+fn char_to_byte(text: &str, chars: usize) -> usize {
+    text.char_indices()
+        .nth(chars)
+        .map(|(byte, _)| byte)
+        .unwrap_or(text.len())
+}
+
+fn insert_completion(text: &mut String, start: usize, len: usize, insert: &str) -> usize {
+    let start_byte = char_to_byte(text, start);
+    let end_byte = char_to_byte(text, start + len);
+    text.replace_range(start_byte..end_byte, insert);
+    start + insert.chars().count()
+}
+
+fn previous_word(before: &[char]) -> String {
+    let mut word: Vec<char> = before
+        .iter()
+        .rev()
+        .skip_while(|ch| ch.is_whitespace())
+        .take_while(|ch| !is_completion_boundary(**ch))
+        .copied()
+        .collect();
+    word.reverse();
+    word.into_iter().collect()
+}
+
+fn is_subsequence(haystack: &str, needle: &str) -> bool {
+    let mut chars = haystack.chars();
+    needle.chars().all(|wanted| chars.any(|ch| ch == wanted))
+}
+
+fn completion_items(
+    registry: &Registry,
+    text: &str,
+    word_start: usize,
+    word: &str,
+) -> Vec<CompletionItem> {
+    if word.is_empty() {
+        return Vec::new();
+    }
+    let needle = word.strip_prefix(':').unwrap_or(word).to_lowercase();
+    let before: Vec<char> = text.chars().take(word_start).collect();
+    let context = if before.last() == Some(&'@') {
+        CompletionContext::Machine
+    } else if previous_word(&before) == "making" {
+        CompletionContext::Recipe
+    } else {
+        CompletionContext::Normal
+    };
+
+    let mut entries: Vec<&hactorio_data::Entry> = registry
+        .entries()
+        .iter()
+        .filter(|entry| match context {
+            CompletionContext::Machine => entry.machine().is_some(),
+            CompletionContext::Recipe => entry.recipe.is_some(),
+            CompletionContext::Normal => true,
+        })
+        .filter(|entry| needle.is_empty() || is_subsequence(&entry.id.to_lowercase(), &needle))
+        .collect();
+
+    entries.sort_by(|a, b| {
+        let a_prefix = !needle.is_empty() && a.id.to_lowercase().starts_with(&needle);
+        let b_prefix = !needle.is_empty() && b.id.to_lowercase().starts_with(&needle);
+        b_prefix
+            .cmp(&a_prefix)
+            .then_with(|| a.id.len().cmp(&b.id.len()))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    entries.truncate(40);
+
+    entries
+        .into_iter()
+        .map(|entry| CompletionItem {
+            insert: entry.glyph.to_string(),
+            glyph: entry.glyph,
+            id: entry.id.to_string(),
+            description: entry.display_name.as_ref().map(|name| name.to_string()),
+        })
+        .collect()
 }
 
 fn truncate_text(
@@ -933,5 +1223,174 @@ mod tests {
 
         harness.run();
         harness.snapshot("app");
+    }
+
+    const FIXTURE: &str = r#"{
+      "item": {
+        "iron-plate": {"type": "item", "name": "iron-plate", "stack_size": 100, "icon": "a.png"},
+        "copper-cable": {"type": "item", "name": "copper-cable", "stack_size": 200, "icon": "b.png"},
+        "assembling-machine-3": {"type": "item", "name": "assembling-machine-3", "stack_size": 50, "icon": "c.png"}
+      },
+      "fluid": {"water": {"type": "fluid", "name": "water", "icon": "d.png"}},
+      "module": {"speed-module-3": {"type": "module", "name": "speed-module-3", "category": "speed", "tier": 3, "stack_size": 50, "effect": {"speed": 0.5}}},
+      "recipe": {
+        "iron-plate": {"type": "recipe", "name": "iron-plate", "categories": ["smelting"], "results": [{"type": "item", "name": "iron-plate", "amount": 1}]},
+        "electronic-circuit": {"type": "recipe", "name": "electronic-circuit", "categories": ["crafting"], "results": [{"type": "item", "name": "iron-plate", "amount": 1}]}
+      },
+      "assembling-machine": {
+        "assembling-machine-3": {"type": "assembling-machine", "name": "assembling-machine-3", "crafting_categories": ["crafting"], "crafting_speed": 1.25, "module_slots": 4, "energy_usage": "375kW"}
+      }
+    }"#;
+
+    fn fixture_registry() -> Registry {
+        hactorio_data::postprocess(FIXTURE, &hactorio_data::Locale::empty()).unwrap()
+    }
+
+    fn suggested_ids(registry: &Registry, text: &str) -> Vec<String> {
+        let cursor = text.chars().count();
+        let (start, word) = completion_word(text, cursor);
+        completion_items(registry, text, start, &word)
+            .into_iter()
+            .map(|item| item.insert)
+            .collect()
+    }
+
+    #[test]
+    fn completion_matches_subsequences_case_insensitively() {
+        let registry = fixture_registry();
+        let inserts = suggested_ids(&registry, ":IPL");
+        let iron = registry.entry("iron-plate").unwrap().glyph.to_string();
+        assert!(inserts.contains(&iron), "{inserts:?}");
+    }
+
+    #[test]
+    fn completion_after_at_only_offers_machines() {
+        let registry = fixture_registry();
+        let machine = registry.entry("assembling-machine-3").unwrap().glyph.to_string();
+        let plate = registry.entry("iron-plate").unwrap().glyph.to_string();
+
+        let inserts = suggested_ids(&registry, "@asm");
+        assert!(inserts.contains(&machine), "{inserts:?}");
+
+        let inserts = suggested_ids(&registry, "@ipl");
+        assert!(!inserts.contains(&plate), "{inserts:?}");
+    }
+
+    #[test]
+    fn completion_after_making_only_offers_recipes() {
+        let registry = fixture_registry();
+        let circuit = registry.entry("electronic-circuit").unwrap().glyph.to_string();
+        let water = registry.entry("water").unwrap().glyph.to_string();
+
+        let inserts = suggested_ids(&registry, "making :circ");
+        assert!(inserts.contains(&circuit), "{inserts:?}");
+
+        let inserts = suggested_ids(&registry, "making :water");
+        assert!(!inserts.contains(&water), "{inserts:?}");
+    }
+
+    #[test]
+    fn completion_accepts_with_enter_and_inserts_a_glyph() {
+        if std::env::var_os("HACTORIO_UI_SNAPSHOT").is_none() {
+            return;
+        }
+        let app_dir = data_dir();
+        if !app_dir.join("cache.json").is_file() || locate().is_none() {
+            eprintln!("skipping: no game data cache or Factorio install");
+            return;
+        }
+
+        let mut document = sample_document();
+        let line = document.cursors[0].line;
+        document.cursors[0].column = document.tabs[0]
+            .split('\n')
+            .nth(line)
+            .map(|text| text.chars().count())
+            .unwrap_or(0);
+
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(1280.0, 800.0))
+            .with_accessibility_check(false)
+            .allow_missing_glyphs()
+            .wgpu()
+            .with_max_steps(60)
+            .build_ui_state(
+                move |ui, app: &mut Option<HactorioApp>| {
+                    let app = app.get_or_insert_with(|| {
+                        HactorioApp::new(ui.ctx(), document.clone(), app_dir.clone())
+                    });
+                    app.ui(ui);
+                },
+                None,
+            );
+
+        harness.run();
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::Text(" :iron".to_string()));
+        harness.run();
+        harness.key_press(Key::Enter);
+        harness.run();
+
+        let app = harness.state().as_ref().expect("app");
+        let glyph = app
+            .registry
+            .as_ref()
+            .unwrap()
+            .entry("iron-ore")
+            .unwrap()
+            .glyph;
+        assert!(app.tabs[0].text.contains(glyph), "{:?}", app.tabs[0].text);
+        assert_eq!(
+            app.tabs[0].text.split('\n').count(),
+            8,
+            "Enter must accept, not insert a newline"
+        );
+    }
+
+    /// Renders the completion popup for a typed `:iron`.
+    #[test]
+    fn completion_snapshot() {
+        if std::env::var_os("HACTORIO_UI_SNAPSHOT").is_none() {
+            return;
+        }
+        let app_dir = data_dir();
+        if !app_dir.join("cache.json").is_file() || locate().is_none() {
+            eprintln!("skipping: no game data cache or Factorio install");
+            return;
+        }
+
+        let mut document = sample_document();
+        let line = document.cursors[0].line;
+        document.cursors[0].column = document.tabs[0]
+            .split('\n')
+            .nth(line)
+            .map(|text| text.chars().count())
+            .unwrap_or(0);
+
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(1280.0, 800.0))
+            .with_accessibility_check(false)
+            .allow_missing_glyphs()
+            .wgpu()
+            .with_max_steps(60)
+            .build_ui_state(
+                move |ui, app: &mut Option<HactorioApp>| {
+                    let app = app.get_or_insert_with(|| {
+                        HactorioApp::new(ui.ctx(), document.clone(), app_dir.clone())
+                    });
+                    app.ui(ui);
+                },
+                None,
+            );
+
+        harness.run();
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::Text(" :iron".to_string()));
+        harness.run();
+        harness.snapshot("completion");
     }
 }
