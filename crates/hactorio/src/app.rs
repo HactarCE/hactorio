@@ -23,6 +23,9 @@ use crate::icons;
 
 const SAVE_INTERVAL: Duration = Duration::from_secs(5);
 
+/// Maximum height of the autocomplete popup, before it scrolls.
+const COMPLETION_MAX_HEIGHT: f32 = 240.0;
+
 /// Font size of icon glyphs, such as belt tiers.
 const ICON_SIZE: f32 = 18.0;
 
@@ -717,6 +720,7 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                 let popup_open = !completion.items.is_empty()
                     && completion.dismissed.as_deref() != Some(completion.word.as_str());
                 let mut accept = false;
+                let mut tab_accept = false;
                 let mut dismiss = false;
                 let mut move_selection = 0i32;
                 if popup_open {
@@ -729,11 +733,15 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                         while input.consume_key(Modifiers::NONE, Key::ArrowUp) {
                             up += 1;
                         }
-                        accept = input.consume_key(Modifiers::NONE, Key::Enter)
-                            || input.consume_key(Modifiers::NONE, Key::Tab);
+                        tab_accept = consume_unmodified_key(input, Key::Tab);
+                        accept = input.consume_key(Modifiers::NONE, Key::Enter) || tab_accept;
                         dismiss = input.consume_key(Modifiers::NONE, Key::Escape);
                         move_selection = down - up;
                     });
+                    if tab_accept {
+                        // Keep Tab from moving focus; it accepts the suggestion instead.
+                        ui.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+                    }
                 }
 
                 let text_id = ui.make_persistent_id(("text", active));
@@ -743,6 +751,12 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                     .show(ui, |ui| {
                         TextEdit::multiline(&mut tab.text)
                             .code_editor()
+                            .event_filter(egui::EventFilter {
+                                tab: false,
+                                horizontal_arrows: true,
+                                vertical_arrows: true,
+                                escape: true,
+                            })
                             .desired_width(editor_content_width)
                             .desired_rows(line_count.max(6))
                             .margin(egui::Margin::symmetric(4, 4))
@@ -798,26 +812,30 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                     .map(|range| range.primary.index.0)
                     .unwrap_or(0);
                 let (word_start, word) = completion_word(&tab.text, cursor_char);
+                let typed = text_edit.response.changed();
                 if !text_edit.response.has_focus() {
+                    completion.items.clear();
+                } else if popup_open && !typed && cursor_char != completion.cursor {
+                    // The caret moved without typing: close the popup.
                     completion.items.clear();
                 }
 
-                if let Some(registry) = registry {
-                    let text_changed = completion.text_hash != line_hash(&tab.text);
-                    if text_changed || word != completion.word {
-                        completion.text_hash = line_hash(&tab.text);
-                        completion.word = word.clone();
-                        completion.selected = 0;
-                        completion.items = if word.is_empty() {
-                            Vec::new()
-                        } else {
-                            completion_items(registry, &tab.text, word_start, &word)
-                        };
-                        if completion.dismissed.as_deref() != Some(word.as_str()) {
-                            completion.dismissed = None;
-                        }
+                if let Some(registry) = registry
+                    && typed
+                    && text_edit.response.has_focus()
+                {
+                    completion.word = word.clone();
+                    completion.selected = 0;
+                    completion.items = if word.is_empty() {
+                        Vec::new()
+                    } else {
+                        completion_items(registry, &tab.text, word_start, &word)
+                    };
+                    if completion.dismissed.as_deref() != Some(word.as_str()) {
+                        completion.dismissed = None;
                     }
                 }
+                completion.cursor = cursor_char;
 
                 if popup_open && !completion.items.is_empty() {
                     if dismiss {
@@ -874,36 +892,62 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                                 .order(egui::Order::Foreground)
                                 .fixed_pos(pos)
                                 .show(ui.ctx(), |ui| {
+                                    let style = ui.style();
+                                    let font_id = TextStyle::Monospace.resolve(style);
+                                    let text_width = completion
+                                        .items
+                                        .iter()
+                                        .map(|item| {
+                                            ui.fonts_mut(|fonts| {
+                                                fonts
+                                                    .layout_no_wrap(
+                                                        completion_label(item),
+                                                        font_id.clone(),
+                                                        Color32::WHITE,
+                                                    )
+                                                    .size()
+                                                    .x
+                                            })
+                                        })
+                                        .fold(0.0, f32::max);
+                                    let chrome = egui::Frame::popup(style);
+                                    let chrome_width =
+                                        chrome.inner_margin.sum().x + 2.0 * chrome.stroke.width;
+                                    let content_width = (text_width
+                                        + 2.0 * style.spacing.button_padding.x
+                                        + style.spacing.scroll.allocated_width())
+                                    .max(300.0);
+                                    let total_width = (content_width + chrome_width)
+                                        .min(ui.ctx().viewport_rect().width() - 16.0);
+                                    let content_width = (total_width - chrome_width).max(100.0);
+
+                                    // The area is sized by its contents, and its remembered size
+                                    // would otherwise cap this frame's available size.
+                                    ui.set_max_width(total_width);
+                                    ui.set_max_height(COMPLETION_MAX_HEIGHT);
                                     egui::Frame::popup(ui.style()).show(ui, |ui| {
-                                        ui.set_min_width(300.0);
-                                        ui.set_max_width(420.0);
-                                        egui::ScrollArea::vertical().max_height(240.0).show(
-                                            ui,
-                                            |ui| {
+                                        ui.set_min_width(content_width);
+                                        ui.set_max_width(content_width);
+                                        egui::ScrollArea::vertical()
+                                            .max_height(COMPLETION_MAX_HEIGHT)
+                                            .show(ui, |ui| {
                                                 for (index, item) in
                                                     completion.items.iter().enumerate()
                                                 {
-                                                    let mut label =
-                                                        format!("{} {}", item.glyph, item.id);
-                                                    if let Some(description) = &item.description {
-                                                        label.push_str("   ");
-                                                        label.push_str(description);
-                                                    }
                                                     if ui
                                                         .selectable_label(
                                                             index == completion.selected,
-                                                            RichText::new(label).monospace(),
+                                                            RichText::new(completion_label(item))
+                                                                .monospace(),
                                                         )
                                                         .clicked()
                                                     {
                                                         clicked = Some(index);
                                                     }
                                                 }
-                                            },
-                                        );
+                                            });
                                     });
                                 });
-                            ui.memory_mut(|memory| memory.request_focus(text_id));
                             if let Some(index) = clicked {
                                 let inserted = insert_completion(
                                     &mut tab.text,
@@ -1019,7 +1063,8 @@ enum CompletionContext {
 
 #[derive(Clone, Default)]
 struct CompletionState {
-    text_hash: u64,
+    /// Character index of the caret when completions were last updated.
+    cursor: usize,
     word: String,
     items: Vec<CompletionItem>,
     selected: usize,
@@ -1032,6 +1077,28 @@ struct CompletionItem {
     glyph: char,
     id: String,
     description: Option<String>,
+}
+
+/// Consumes a key press only when its modifiers match exactly.
+///
+/// Unlike [`egui::InputState::consume_key`], this does not ignore extra
+/// modifiers, so `Shift+Tab` can be told apart from plain `Tab`.
+fn consume_unmodified_key(input: &mut egui::InputState, key: Key) -> bool {
+    let mut consumed = false;
+    input.events.retain(|event| {
+        let matches = matches!(
+            event,
+            egui::Event::Key {
+                key: event_key,
+                modifiers,
+                pressed: true,
+                ..
+            } if *event_key == key && !modifiers.any()
+        );
+        consumed |= matches;
+        !matches
+    });
+    consumed
 }
 
 /// Word boundaries for completion. `:` is deliberately not one: it is part of
@@ -1096,6 +1163,9 @@ fn completion_items(
         return Vec::new();
     }
     let needle = word.strip_prefix(':').unwrap_or(word).to_lowercase();
+    if needle.starts_with(|ch: char| ch.is_ascii_digit()) {
+        return Vec::new();
+    }
     let before: Vec<char> = text.chars().take(word_start).collect();
     let context = if before.last() == Some(&'@') {
         CompletionContext::Machine
@@ -1135,6 +1205,16 @@ fn completion_items(
             description: entry.display_name.as_ref().map(|name| name.to_string()),
         })
         .collect()
+}
+
+/// The text shown for one completion row.
+fn completion_label(item: &CompletionItem) -> String {
+    let mut label = format!("{} {}", item.glyph, item.id);
+    if let Some(description) = &item.description {
+        label.push_str("   ");
+        label.push_str(description);
+    }
+    label
 }
 
 fn truncate_text(
@@ -1484,6 +1564,394 @@ mod tests {
 
         let inserts = suggested_ids(&registry, "making :water");
         assert!(!inserts.contains(&water), "{inserts:?}");
+    }
+
+    /// Builds a harness over the fixture registry, with the given cursor.
+    ///
+    /// The returned directory holds the app's cache and must be removed by the test.
+    fn completion_harness(
+        name: &str,
+        document: Document,
+    ) -> (Harness<'static, Option<HactorioApp>>, PathBuf) {
+        completion_harness_with(name, document, FIXTURE)
+    }
+
+    fn completion_harness_with(
+        name: &str,
+        document: Document,
+        fixture: &str,
+    ) -> (Harness<'static, Option<HactorioApp>>, PathBuf) {
+        let app_dir =
+            std::env::temp_dir().join(format!("hactorio-completion-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&app_dir);
+        std::fs::create_dir_all(&app_dir).unwrap();
+        hactorio_data::postprocess(fixture, &hactorio_data::Locale::empty())
+            .unwrap()
+            .save(&app_dir.join("cache.json"))
+            .unwrap();
+
+        let harness = Harness::builder()
+            .with_size(egui::vec2(800.0, 600.0))
+            .with_accessibility_check(false)
+            .allow_missing_glyphs()
+            .build_ui_state(
+                {
+                    let app_dir = app_dir.clone();
+                    move |ui, app: &mut Option<HactorioApp>| {
+                        let app = app.get_or_insert_with(|| {
+                            HactorioApp::new(ui.ctx(), document.clone(), app_dir.clone())
+                        });
+                        app.ui(ui);
+                    }
+                },
+                None,
+            );
+        (harness, app_dir)
+    }
+
+    fn editor_document(text: &str, line: usize, column: usize) -> Document {
+        Document {
+            tabs: vec![text.to_string()],
+            cursors: vec![Cursor {
+                line,
+                column,
+                scroll: 0.0,
+            }],
+            ..Document::default()
+        }
+    }
+
+    fn type_into_editor(harness: &mut Harness<'_, Option<HactorioApp>>, text: &str) {
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::Text(text.to_string()));
+        harness.run();
+    }
+
+    #[test]
+    fn focusing_a_word_does_not_open_completion() {
+        let document = editor_document("# Main\n:iron\n", 1, 5);
+        let (mut harness, dir) = completion_harness("focus", document);
+        harness.run();
+
+        let app = harness.state().as_ref().expect("app");
+        assert!(app.completion.items.is_empty());
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn typing_letters_opens_completion() {
+        let document = editor_document("# Main\n", 0, 6);
+        let (mut harness, dir) = completion_harness("letters", document);
+        harness.run();
+
+        type_into_editor(&mut harness, " ");
+        type_into_editor(&mut harness, "s");
+        type_into_editor(&mut harness, "m");
+        type_into_editor(&mut harness, "3");
+
+        let app = harness.state().as_ref().expect("app");
+        assert_eq!(app.completion.word, "sm3");
+        assert!(!app.completion.items.is_empty());
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn typing_digits_does_not_open_completion() {
+        let document = editor_document("# Main\n", 0, 6);
+        let (mut harness, dir) = completion_harness("digits", document);
+        harness.run();
+
+        type_into_editor(&mut harness, " ");
+        type_into_editor(&mut harness, "3");
+        assert!(
+            harness
+                .state()
+                .as_ref()
+                .expect("app")
+                .completion
+                .items
+                .is_empty()
+        );
+
+        type_into_editor(&mut harness, "4");
+        let app = harness.state().as_ref().expect("app");
+        assert_eq!(app.completion.word, "34");
+        assert!(app.completion.items.is_empty());
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn horizontal_arrow_closes_completion_and_moves_the_caret() {
+        let document = editor_document("# Main\n", 0, 6);
+        let (mut harness, dir) = completion_harness("left", document);
+        harness.run();
+        type_into_editor(&mut harness, " sm3");
+        assert!(
+            !harness
+                .state()
+                .as_ref()
+                .expect("app")
+                .completion
+                .items
+                .is_empty()
+        );
+
+        harness.key_press(Key::ArrowLeft);
+        harness.run();
+        assert!(
+            harness
+                .state()
+                .as_ref()
+                .expect("app")
+                .completion
+                .items
+                .is_empty()
+        );
+
+        type_into_editor(&mut harness, "X");
+        let app = harness.state().as_ref().expect("app");
+        assert_eq!(app.tabs[0].text, "# Main smX3\n");
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn vertical_arrow_moves_completion_selection() {
+        let document = editor_document("# Main\n", 0, 6);
+        let (mut harness, dir) = completion_harness("down", document);
+        harness.run();
+        type_into_editor(&mut harness, " i");
+        {
+            let app = harness.state().as_ref().expect("app");
+            assert!(app.completion.items.len() > 1);
+            assert_eq!(app.completion.selected, 0);
+        }
+
+        harness.key_press(Key::ArrowDown);
+        harness.run();
+        assert_eq!(
+            harness.state().as_ref().expect("app").completion.selected,
+            1
+        );
+
+        type_into_editor(&mut harness, "Z");
+        let app = harness.state().as_ref().expect("app");
+        assert_eq!(app.tabs[0].text, "# Main iZ\n");
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn tab_moves_focus_out_of_the_editor() {
+        let document = editor_document("# Main\n", 0, 6);
+        let (mut harness, dir) = completion_harness("tab", document);
+        harness.run();
+        type_into_editor(&mut harness, "x");
+
+        harness.key_press(Key::Tab);
+        harness.run();
+        type_into_editor(&mut harness, "Y");
+        let app = harness.state().as_ref().expect("app");
+        assert_eq!(app.tabs[0].text, "# Mainx\n");
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn shift_tab_moves_focus_out_of_the_editor() {
+        let document = editor_document("# Main\n", 0, 6);
+        let (mut harness, dir) = completion_harness("shift-tab", document);
+        harness.run();
+        type_into_editor(&mut harness, "x");
+
+        harness.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+        harness.run();
+        type_into_editor(&mut harness, "Y");
+        let app = harness.state().as_ref().expect("app");
+        assert_eq!(app.tabs[0].text, "# Mainx\n");
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn tab_accepts_completion_and_keeps_editor_focus() {
+        let document = editor_document("# Main\n", 0, 6);
+        let (mut harness, dir) = completion_harness("tab-accept", document);
+        harness.run();
+        type_into_editor(&mut harness, " :iron");
+        let glyph = harness
+            .state()
+            .as_ref()
+            .expect("app")
+            .registry
+            .as_ref()
+            .expect("registry")
+            .entry("iron-plate")
+            .expect("iron-plate")
+            .glyph;
+
+        harness.key_press(Key::Tab);
+        harness.run();
+        assert!(
+            harness.state().as_ref().expect("app").tabs[0]
+                .text
+                .contains(glyph)
+        );
+
+        type_into_editor(&mut harness, "Z");
+        let app = harness.state().as_ref().expect("app");
+        assert_eq!(app.tabs[0].text, format!("# Main {glyph}Z\n"));
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn shift_tab_moves_focus_while_completion_is_open() {
+        let document = editor_document("# Main\n", 0, 6);
+        let (mut harness, dir) = completion_harness("shift-tab-popup", document);
+        harness.run();
+        type_into_editor(&mut harness, " i");
+        assert!(
+            !harness
+                .state()
+                .as_ref()
+                .expect("app")
+                .completion
+                .items
+                .is_empty()
+        );
+
+        harness.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+        harness.run();
+        type_into_editor(&mut harness, "Y");
+        let app = harness.state().as_ref().expect("app");
+        assert!(app.completion.items.is_empty());
+        assert_eq!(app.tabs[0].text, "# Main i\n");
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn completion_popup_fits_the_widest_entry() {
+        const WIDE: &str = r#"{
+            "item": {
+                "short": {"type": "item", "name": "short", "stack_size": 1},
+                "long-prototype-name-that-needs-a-wide-popup": {
+                    "type": "item",
+                    "name": "long-prototype-name-that-needs-a-wide-popup",
+                    "stack_size": 1
+                }
+            }
+        }"#;
+        let document = editor_document("# Main\n", 0, 6);
+        let (mut harness, dir) = completion_harness_with("wide", document, WIDE);
+        harness.run();
+        let id = egui::Id::unique(("completion", 0usize));
+
+        type_into_editor(&mut harness, " sho");
+        let short_rect = harness
+            .ctx
+            .memory(|memory| memory.area_rect(id))
+            .expect("popup");
+
+        type_into_editor(&mut harness, " lon");
+        let long_rect = harness
+            .ctx
+            .memory(|memory| memory.area_rect(id))
+            .expect("popup");
+
+        assert!(long_rect.width() > short_rect.width(), "{short_rect:?}");
+        assert!(long_rect.width() > 300.0, "{long_rect:?}");
+        // A wrapped row would make the one-entry popup taller.
+        assert!(
+            long_rect.height() <= short_rect.height() + 2.0,
+            "{short_rect:?} -> {long_rect:?}"
+        );
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn completion_popup_grows_with_more_matches() {
+        let document = editor_document("# Main\n", 0, 6);
+        let (mut harness, dir) = completion_harness("growth", document);
+        harness.run();
+
+        type_into_editor(&mut harness, " i");
+        let id = egui::Id::unique(("completion", 0usize));
+        let short_items = harness
+            .state()
+            .as_ref()
+            .expect("app")
+            .completion
+            .items
+            .len();
+        let short = harness
+            .ctx
+            .memory(|memory| memory.area_rect(id))
+            .expect("popup")
+            .height();
+
+        type_into_editor(&mut harness, " ");
+        type_into_editor(&mut harness, "e");
+        let long_items = harness
+            .state()
+            .as_ref()
+            .expect("app")
+            .completion
+            .items
+            .len();
+        let tall = harness
+            .ctx
+            .memory(|memory| memory.area_rect(id))
+            .expect("popup")
+            .height();
+
+        assert!(long_items > short_items, "{short_items} -> {long_items}");
+        assert!(tall > short, "{short} -> {tall}");
+        assert!(tall <= COMPLETION_MAX_HEIGHT + 10.0, "{tall}");
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn escape_closes_completion_and_keeps_editor_focus() {
+        let document = editor_document("# Main\n", 0, 6);
+        let (mut harness, dir) = completion_harness("escape", document);
+        harness.run();
+        type_into_editor(&mut harness, " i");
+        assert!(
+            !harness
+                .state()
+                .as_ref()
+                .expect("app")
+                .completion
+                .items
+                .is_empty()
+        );
+
+        harness.key_press(Key::Escape);
+        harness.run();
+        assert!(
+            harness
+                .state()
+                .as_ref()
+                .expect("app")
+                .completion
+                .items
+                .is_empty()
+        );
+
+        type_into_editor(&mut harness, "Z");
+        let app = harness.state().as_ref().expect("app");
+        assert_eq!(app.tabs[0].text, "# Main iZ\n");
+
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
