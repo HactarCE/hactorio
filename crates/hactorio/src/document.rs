@@ -57,6 +57,13 @@ pub struct Document {
     pub window: Option<Window>,
     #[serde(default)]
     pub settings: Settings,
+    /// Width of the results column.
+    #[serde(default = "default_results_width")]
+    pub results_width: f32,
+}
+
+pub fn default_results_width() -> f32 {
+    380.0
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
@@ -84,6 +91,7 @@ impl Default for Document {
             cursors: Vec::new(),
             window: None,
             settings: Settings::default(),
+            results_width: default_results_width(),
         }
     }
 }

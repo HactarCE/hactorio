@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use egui::{
-    Align, Color32, ComboBox, Context, Key, Layout, Modifiers, RichText, ScrollArea, TextEdit, TextStyle,
+    Align, Color32, ComboBox, Context, CursorIcon, Key, Layout, Modifiers, Rect, RichText, ScrollArea,
+    Sense, TextEdit, TextStyle,
     Ui,
 };
 use hactorio_core::{
@@ -64,6 +65,7 @@ pub struct HactorioApp {
     initial_size: Option<[f32; 2]>,
     sized: bool,
     window: Option<Window>,
+    results_width: f32,
     /// Cursor to restore on the first frame, as `(line, column)`.
     pending_focus: Option<(usize, usize)>,
     /// Generation whose results are currently displayed.
@@ -129,6 +131,7 @@ impl HactorioApp {
             initial_size: document.window.map(|window| [window.width, window.height]),
             sized: false,
             window: document.window,
+            results_width: document.results_width,
             pending_focus: document
                 .cursors
                 .get(active)
@@ -434,6 +437,7 @@ impl HactorioApp {
                 .collect(),
             window: self.window,
             settings: self.settings.clone(),
+            results_width: self.results_width,
         }
     }
 
@@ -519,11 +523,15 @@ impl HactorioApp {
                 registry: self.registry.as_deref(),
                 pending_focus: &mut self.pending_focus,
                 completion: &mut self.completion,
+                results_width: &mut self.results_width,
             };
             let result = editor_ui(ui, &mut self.tabs[active], &mut state);
             if result.changed {
                 self.dirty = true;
                 self.last_request = None;
+            }
+            if result.resized {
+                self.dirty = true;
             }
             if let Some(line) = result.focused {
                 self.focus_line = Some(line);
@@ -559,10 +567,12 @@ struct EditorState<'a> {
     registry: Option<&'a Registry>,
     pending_focus: &'a mut Option<(usize, usize)>,
     completion: &'a mut CompletionState,
+    results_width: &'a mut f32,
 }
 
 struct EditorResult {
     changed: bool,
+    resized: bool,
     /// The line the caret is on, while the editor has focus.
     focused: Option<usize>,
     /// Where to place the full-results panel for the focused line, and its width.
@@ -578,9 +588,11 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
     let registry = state.registry;
     let pending_focus: &mut Option<(usize, usize)> = state.pending_focus;
     let completion: &mut CompletionState = state.completion;
+    let results_width: &mut f32 = state.results_width;
 
     let mut result = EditorResult {
         changed: false,
+        resized: false,
         focused: None,
         detail: None,
     };
@@ -597,9 +609,12 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
         .max()
         .unwrap_or(0);
     let number_width = 44.0;
+    let divider_width = 7.0;
     let central_width = ui.available_width();
-    let gutter_width = (central_width * 0.45).max(180.0);
-    let editor_width = (central_width - number_width - gutter_width - 28.0).max(200.0);
+    let max_results = (central_width - number_width - 220.0).max(120.0);
+    let requested_results = (*results_width).clamp(120.0, max_results);
+    let editor_width =
+        (central_width - number_width - requested_results - divider_width).max(160.0);
     let editor_content_width = (longest as f32 * char_width + 24.0).max(editor_width);
 
     let mut layouter = |ui: &Ui, buffer: &dyn egui::TextBuffer, _wrap_width: f32| {
@@ -832,8 +847,38 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                 let viewport = hscroll.inner_rect;
                 let origin = text_edit.galley_pos;
                 let galley = &text_edit.galley;
-                let gutter_x = viewport.right() + 12.0;
-                let gutter_room = (ui.available_width() - 16.0).max(120.0);
+                let editor_height = text_edit
+                    .response
+                    .rect
+                    .height()
+                    .max(galley.size().y + 8.0);
+
+                let (divider_rect, divider) = ui.allocate_exact_size(
+                    egui::vec2(divider_width, editor_height),
+                    Sense::drag(),
+                );
+                if divider.hovered() || divider.dragged() {
+                    ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
+                }
+                if divider.dragged() {
+                    *results_width = (*results_width - divider.drag_delta().x)
+                        .clamp(120.0, max_results);
+                    result.resized = true;
+                }
+                let shown_results = (*results_width).clamp(120.0, max_results);
+                ui.painter().vline(
+                    divider_rect.center().x,
+                    divider_rect.y_range(),
+                    ui.visuals().widgets.noninteractive.bg_stroke,
+                );
+                let results_rect = Rect::from_min_size(
+                    egui::pos2(divider_rect.right(), divider_rect.top()),
+                    egui::vec2(shown_results, editor_height),
+                );
+                ui.allocate_space(egui::vec2(shown_results, editor_height));
+
+                let gutter_x = results_rect.left() + 8.0;
+                let gutter_room = (shown_results - 16.0).max(60.0);
                 let weak = ui.visuals().weak_text_color();
                 let error_color = Color32::from_rgb(220, 90, 90);
                 let painter = ui.painter();
@@ -879,8 +924,7 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                     );
                 }
 
-                ui.add_space(8.0);
-                ui.allocate_space(egui::vec2(gutter_width, 0.0));
+
             });
         });
     tab.scroll = scroll.state.clamped_offset().y;
@@ -1230,6 +1274,7 @@ mod tests {
         app.save();
         let saved = std::fs::read_to_string(dir.join("document.json")).unwrap();
         assert!(saved.contains(":iron-plate:"), "{saved}");
+        assert!(saved.contains("results_width"), "{saved}");
         assert!(!saved.contains(glyph), "{saved}");
 
         std::fs::remove_dir_all(dir).unwrap();
