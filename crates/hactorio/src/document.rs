@@ -63,6 +63,9 @@ pub struct Document {
     /// Global GUI zoom factor.
     #[serde(default = "default_zoom")]
     pub zoom: f32,
+    /// Monospace font size for the editor and outputs.
+    #[serde(default = "default_font_size")]
+    pub font_size: f32,
 }
 
 pub fn default_results_width() -> f32 {
@@ -73,9 +76,16 @@ pub fn default_zoom() -> f32 {
     1.0
 }
 
+pub fn default_font_size() -> f32 {
+    13.0
+}
+
 /// Zoom range accepted by egui's keyboard and scroll zooming.
 pub const MIN_ZOOM: f32 = 0.2;
 pub const MAX_ZOOM: f32 = 5.0;
+
+pub const MIN_FONT_SIZE: f32 = 8.0;
+pub const MAX_FONT_SIZE: f32 = 24.0;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub struct Cursor {
@@ -104,6 +114,7 @@ impl Default for Document {
             settings: Settings::default(),
             results_width: default_results_width(),
             zoom: default_zoom(),
+            font_size: default_font_size(),
         }
     }
 }

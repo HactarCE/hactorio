@@ -17,7 +17,10 @@ use hactorio_core::{
 };
 use hactorio_data::{GameInstall, Registry, locate};
 
-use crate::document::{Cursor, DOCUMENT_VERSION, Document, MAX_ZOOM, MIN_ZOOM, Tab, Window};
+use crate::document::{
+    Cursor, DOCUMENT_VERSION, Document, MAX_FONT_SIZE, MAX_ZOOM, MIN_FONT_SIZE, MIN_ZOOM, Tab,
+    Window,
+};
 use crate::evaluator::Evaluator;
 use crate::icons;
 
@@ -28,6 +31,85 @@ const COMPLETION_MAX_HEIGHT: f32 = 240.0;
 
 /// Font size of icon glyphs, such as belt tiers.
 const ICON_SIZE: f32 = 18.0;
+
+/// Frame chrome between the detail popup's outer corner and its content.
+fn detail_popup_inset(style: &egui::Style) -> egui::Vec2 {
+    let frame = egui::Frame::popup(style);
+    frame.inner_margin.left_top() + egui::vec2(frame.stroke.width, frame.stroke.width)
+}
+
+/// Where to place the detail popup so its content starts at `anchor`.
+fn detail_popup_pos(
+    style: &egui::Style,
+    anchor: egui::Pos2,
+    screen: egui::Rect,
+    width: f32,
+) -> egui::Pos2 {
+    let inset = detail_popup_inset(style);
+    egui::pos2(
+        (anchor.x - inset.x)
+            .min(screen.right() - width)
+            .max(screen.left() + 8.0),
+        (anchor.y - inset.y)
+            .min(screen.bottom() - 160.0)
+            .max(screen.top() + 8.0),
+    )
+}
+
+/// The icon glyph under `pointer` in a laid-out text, with its row and rect.
+fn hovered_icon(
+    registry: &Registry,
+    galley: &egui::Galley,
+    origin: egui::Pos2,
+    pointer: egui::Pos2,
+) -> Option<(usize, egui::Rect)> {
+    for (row_index, row) in galley.rows.iter().enumerate() {
+        let top = origin.y + row.pos.y;
+        if pointer.y < top || pointer.y > top + row.size.y {
+            continue;
+        }
+        for glyph in &row.glyphs {
+            if registry.entry_by_glyph(glyph.chr).is_none() {
+                continue;
+            }
+            let rect = egui::Rect::from_min_size(
+                egui::pos2(origin.x + row.pos.x + glyph.pos.x, top),
+                egui::vec2(glyph.advance_width, row.size.y),
+            );
+            if rect.contains(pointer) {
+                return Some((row_index, rect));
+            }
+        }
+    }
+    None
+}
+
+/// Whether a popup is covering `pointer`, so editors below it do not react.
+fn pointer_over_popup(ctx: &Context, active: usize, pointer: egui::Pos2) -> bool {
+    [
+        egui::Id::unique("line_detail"),
+        egui::Id::unique(("completion", active)),
+    ]
+    .into_iter()
+    .any(|id| {
+        let layer = egui::LayerId::new(egui::Order::Foreground, id);
+        ctx.memory(|memory| {
+            memory.areas().visible_last_frame(&layer)
+                && memory
+                    .area_rect(id)
+                    .is_some_and(|rect| rect.contains(pointer))
+        })
+    })
+}
+
+/// Sets the monospace text size globally, so the editor, gutter outputs, and popups agree.
+fn set_font_size(ctx: &Context, size: f32) {
+    ctx.all_styles_mut(|style| {
+        style
+            .text_styles
+            .insert(TextStyle::Monospace, egui::FontId::monospace(size));
+    });
+}
 
 /// The app's data directory, where the cache and document live.
 pub fn data_dir() -> PathBuf {
@@ -81,7 +163,6 @@ pub struct HactorioApp {
     outputs: Vec<StatementOutput>,
     pending: u64,
     last_request: Option<(String, Settings)>,
-    focus_line: Option<usize>,
     install: Option<GameInstall>,
     load: LoadState,
     status: String,
@@ -94,6 +175,8 @@ pub struct HactorioApp {
     results_width: f32,
     /// The GUI zoom factor currently shown, as saved in the document.
     zoom: f32,
+    /// Monospace font size for the editor and outputs.
+    font_size: f32,
     /// Cursor to restore on the first frame, as `(line, column)`.
     pending_focus: Option<(usize, usize)>,
     /// Generation whose results are currently displayed.
@@ -151,6 +234,8 @@ impl HactorioApp {
 
         let zoom = document.zoom.clamp(MIN_ZOOM, MAX_ZOOM);
         ctx.set_zoom_factor(zoom);
+        let font_size = document.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
+        set_font_size(ctx, font_size);
 
         HactorioApp {
             tabs,
@@ -161,7 +246,6 @@ impl HactorioApp {
             outputs: Vec::new(),
             pending: 0,
             last_request: None,
-            focus_line: None,
             install,
             load: LoadState::Idle,
             status,
@@ -173,6 +257,7 @@ impl HactorioApp {
             window: document.window,
             results_width: document.results_width,
             zoom,
+            font_size,
             pending_focus: document
                 .cursors
                 .get(active)
@@ -313,7 +398,6 @@ impl HactorioApp {
             self.active = index;
             self.outputs.clear();
             self.last_request = None;
-            self.focus_line = None;
         }
         if let Some(index) = close {
             self.tabs.remove(index);
@@ -341,6 +425,18 @@ impl HactorioApp {
             ui.set_height(icon_button_height(ui));
             ui.strong("Display");
             // ui.add_space(8.0);
+            ui.separator();
+
+            ui.label("Font size");
+            let font_size = ui.add(
+                egui::Slider::new(&mut self.font_size, MIN_FONT_SIZE..=MAX_FONT_SIZE)
+                    .step_by(1.0)
+                    .fixed_decimals(0),
+            );
+            if font_size.changed() {
+                set_font_size(ui.ctx(), self.font_size);
+                self.dirty = true;
+            }
             ui.separator();
 
             ui.label("Time unit");
@@ -403,12 +499,8 @@ impl HactorioApp {
         }
     }
 
-    fn breakdown_ui(&self, ui: &mut Ui) {
+    fn breakdown_ui(&self, ui: &mut Ui, line: usize) {
         let (Some(registry), Some(tab)) = (&self.registry, self.tabs.get(self.active)) else {
-            return;
-        };
-        let Some(line) = self.focus_line else {
-            ui.weak("Focus a line to see how it was computed.");
             return;
         };
         let (Some(text), Some(output)) = (tab.text.split('\n').nth(line), self.outputs.get(line))
@@ -441,6 +533,32 @@ impl HactorioApp {
         }
     }
 
+    /// The breakdown for `line`, shown next to a hovered icon.
+    fn breakdown_popup(&self, ctx: &Context, line: usize, anchor: egui::Rect) {
+        let (Some(tab), Some(output)) = (self.tabs.get(self.active), self.outputs.get(line)) else {
+            return;
+        };
+        let Some(text) = tab.text.split('\n').nth(line) else {
+            return;
+        };
+        if output.source_hash != line_hash(text) || output.eval.is_none() {
+            return;
+        }
+
+        let pointer = ctx.pointer_hover_pos().unwrap_or(anchor.center());
+        let layer = ctx.layer_id_at(pointer).unwrap_or_else(|| {
+            egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("breakdown"))
+        });
+        egui::Tooltip::always_open(
+            ctx.clone(),
+            layer,
+            egui::Id::unique(("breakdown", line)),
+            anchor,
+        )
+        .width(360.0)
+        .show(|ui| self.breakdown_ui(ui, line));
+    }
+
     /// Full results for the line under the caret, floating beside it.
     fn detail_panel(&self, ctx: &Context, anchor: egui::Pos2, line: usize, width: f32) {
         let (Some(registry), Some(tab)) = (&self.registry, self.tabs.get(self.active)) else {
@@ -458,27 +576,25 @@ impl HactorioApp {
 
         let screen = ctx.viewport_rect();
         let width = width.clamp(240.0, 420.0);
-        let pos = egui::pos2(
-            anchor
-                .x
-                .min(screen.right() - width)
-                .max(screen.left() + 8.0),
-            anchor
-                .y
-                .min(screen.bottom() - 160.0)
-                .max(screen.top() + 8.0),
-        );
-        egui::Area::new(egui::Id::unique("line_detail"))
+        let style = ctx.style_of(ctx.theme());
+        let pos = detail_popup_pos(&style, anchor, screen, width);
+        let hovered = egui::Area::new(egui::Id::unique("line_detail"))
             .order(egui::Order::Foreground)
             .fixed_pos(pos)
             .interactable(false)
             .show(ctx, |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.set_min_width((width - 20.0).max(240.0));
-                    ui.set_max_width(width);
-                    detail_ui(ui, statement, &self.settings, registry);
-                });
-            });
+                egui::Frame::popup(ui.style())
+                    .show(ui, |ui| {
+                        ui.set_min_width((width - 20.0).max(240.0));
+                        ui.set_max_width(width);
+                        detail_ui(ui, statement, &self.settings, registry)
+                    })
+                    .inner
+            })
+            .inner;
+        if let Some(anchor) = hovered {
+            self.breakdown_popup(ctx, line, anchor);
+        }
     }
 
     fn snapshot(&self) -> Document {
@@ -506,6 +622,7 @@ impl HactorioApp {
             settings: self.settings.clone(),
             results_width: self.results_width,
             zoom: self.zoom,
+            font_size: self.font_size,
         }
     }
 
@@ -579,16 +696,6 @@ impl HactorioApp {
             });
         });
 
-        egui::Panel::right("side")
-            .default_size(380.0)
-            .show(ui, |ui| {
-                ScrollArea::vertical()
-                    .id_salt("side_scroll")
-                    .show(ui, |ui| {
-                        self.breakdown_ui(ui);
-                    });
-            });
-
         egui::CentralPanel::default().show(ui, |ui| {
             if self.registry.is_none() {
                 ui.add_space(12.0);
@@ -617,13 +724,13 @@ impl HactorioApp {
             if result.resized {
                 self.dirty = true;
             }
-            if let Some(line) = result.focused {
-                self.focus_line = Some(line);
-            }
             if let Some((line, anchor, width)) = result.detail
                 && self.completion.items.is_empty()
             {
                 self.detail_panel(&ctx, anchor, line, width);
+            }
+            if let Some((line, anchor)) = result.hover {
+                self.breakdown_popup(&ctx, line, anchor);
             }
         });
 
@@ -660,6 +767,8 @@ struct EditorResult {
     focused: Option<usize>,
     /// Where to place the full-results panel for the focused line, and its width.
     detail: Option<(usize, egui::Pos2, f32)>,
+    /// The line whose icon is hovered, and the icon's rect.
+    hover: Option<(usize, egui::Rect)>,
 }
 
 /// Renders the tab as one multiline editor, with line numbers and outputs
@@ -678,6 +787,7 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
         resized: false,
         focused: None,
         detail: None,
+        hover: None,
     };
 
     let font_id = TextStyle::Monospace.resolve(ui.style());
@@ -745,6 +855,23 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                 }
 
                 let text_id = ui.make_persistent_id(("text", active));
+                // Clicking the popup must not surrender the editor's focus, or the
+                // popup would be cleared before the click reaches its row.
+                let popup_id = egui::Id::unique(("completion", active));
+                let pointer_on_popup = popup_open
+                    && ui.ctx().pointer_interact_pos().is_some_and(|pos| {
+                        ui.ctx()
+                            .memory(|memory| memory.area_rect(popup_id))
+                            .is_some_and(|rect| rect.contains(pos))
+                    });
+                let surrender_focus_on = ui
+                    .ctx()
+                    .options(|options| options.input_options.surrender_focus_on);
+                if pointer_on_popup {
+                    ui.ctx().options_mut(|options| {
+                        options.input_options.surrender_focus_on = egui::SurrenderFocusOn::Never;
+                    });
+                }
                 let hscroll = ScrollArea::horizontal()
                     .id_salt(("text_scroll", active))
                     .max_width(editor_width)
@@ -764,8 +891,21 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                             .id(text_id)
                             .show(ui)
                     });
+                ui.ctx().options_mut(|options| {
+                    options.input_options.surrender_focus_on = surrender_focus_on;
+                });
                 let text_edit = hscroll.inner;
                 result.changed |= text_edit.response.changed();
+
+                if let Some(registry) = registry
+                    && let Some(pointer) = ui.ctx().pointer_hover_pos()
+                    && text_edit.response.rect.contains(pointer)
+                    && !pointer_over_popup(ui.ctx(), active, pointer)
+                    && let Some((line, rect)) =
+                        hovered_icon(registry, &text_edit.galley, text_edit.galley_pos, pointer)
+                {
+                    result.hover = Some((line, rect));
+                }
 
                 if let Some((line, column)) = *pending_focus {
                     let start: usize = tab
@@ -826,6 +966,7 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                 {
                     completion.word = word.clone();
                     completion.selected = 0;
+                    completion.needs_scroll = true;
                     completion.items = if word.is_empty() {
                         Vec::new()
                     } else {
@@ -847,6 +988,7 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                             completion.selected = (completion.selected as i32 + move_selection)
                                 .rem_euclid(len)
                                 as usize;
+                            completion.needs_scroll = true;
                         }
                         if accept {
                             let inserted = insert_completion(
@@ -894,15 +1036,6 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                                 .show(ui.ctx(), |ui| {
                                     let style = ui.style();
                                     let font_id = TextStyle::Monospace.resolve(style);
-                                    let glyph_width = completion
-                                        .items
-                                        .iter()
-                                        .map(|item| {
-                                            ui.fonts_mut(|fonts| {
-                                                fonts.glyph_width(&font_id, item.glyph)
-                                            })
-                                        })
-                                        .fold(0.0, f32::max);
                                     let label_width = completion
                                         .items
                                         .iter()
@@ -925,13 +1058,10 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                                             })
                                         })
                                         .fold(0.0, f32::max);
-                                    let column_gap = 8.0;
                                     let chrome = egui::Frame::popup(style);
                                     let chrome_width =
                                         chrome.inner_margin.sum().x + 2.0 * chrome.stroke.width;
-                                    let content_width = (glyph_width
-                                        + column_gap
-                                        + text_width
+                                    let content_width = (text_width
                                         + 2.0 * style.spacing.button_padding.x
                                         + style.spacing.scroll.allocated_width())
                                     .max(300.0);
@@ -943,46 +1073,47 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                                     // would otherwise cap this frame's available size.
                                     ui.set_max_width(total_width);
                                     ui.set_max_height(COMPLETION_MAX_HEIGHT);
+                                    let needs_scroll = completion.needs_scroll;
+                                    let selected = completion.selected;
                                     egui::Frame::popup(ui.style()).show(ui, |ui| {
                                         ui.set_min_width(content_width);
                                         ui.set_max_width(content_width);
                                         egui::ScrollArea::vertical()
+                                            .id_salt(("completion_scroll", active))
                                             .max_height(COMPLETION_MAX_HEIGHT)
                                             .show(ui, |ui| {
-                                                egui::Grid::new(("completion_rows", active))
-                                                    .num_columns(2)
-                                                    .spacing([column_gap, 2.0])
-                                                    .show(ui, |ui| {
-                                                        for (index, item) in
-                                                            completion.items.iter().enumerate()
-                                                        {
-                                                            ui.label(
-                                                                RichText::new(
-                                                                    item.glyph.to_string(),
-                                                                )
-                                                                .monospace(),
-                                                            );
-                                                            let job = completion_layout_job(
-                                                                item,
-                                                                label_width,
-                                                                index == completion.selected,
-                                                                &font_id,
-                                                                ui.visuals(),
-                                                            );
-                                                            if ui
-                                                                .selectable_label(
-                                                                    index == completion.selected,
-                                                                    job,
-                                                                )
-                                                                .clicked()
-                                                            {
-                                                                clicked = Some(index);
-                                                            }
-                                                            ui.end_row();
-                                                        }
-                                                    });
+                                                for (index, item) in
+                                                    completion.items.iter().enumerate()
+                                                {
+                                                    let job = completion_layout_job(
+                                                        item,
+                                                        label_width,
+                                                        index == selected,
+                                                        &font_id,
+                                                        ui.visuals(),
+                                                    );
+                                                    let response =
+                                                        ui.selectable_label(index == selected, job);
+                                                    if response.clicked() {
+                                                        clicked = Some(index);
+                                                    }
+                                                    #[cfg(test)]
+                                                    if index == selected {
+                                                        completion.selected_rect =
+                                                            Some(response.rect);
+                                                    }
+                                                    if needs_scroll && index == selected {
+                                                        ui.scroll_to_rect(
+                                                            response.rect,
+                                                            Some(egui::Align::Center),
+                                                        );
+                                                    }
+                                                }
                                             });
                                     });
+                                    if needs_scroll {
+                                        completion.needs_scroll = false;
+                                    }
                                 });
                             if let Some(index) = clicked {
                                 let inserted = insert_completion(
@@ -1075,13 +1206,15 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                         weak
                     };
                     let text = truncate_text(painter, &text, &font_id, gutter_room);
-                    painter.text(
-                        egui::pos2(gutter_x, y),
-                        egui::Align2::LEFT_TOP,
-                        text,
-                        font_id.clone(),
-                        color,
-                    );
+                    let pos = egui::pos2(gutter_x, y);
+                    let galley = painter.layout_no_wrap(text, font_id.clone(), color);
+                    painter.galley(pos, galley.clone(), color);
+                    if let Some(pointer) = ui.ctx().pointer_hover_pos()
+                        && !pointer_over_popup(ui.ctx(), active, pointer)
+                        && let Some((_, rect)) = hovered_icon(registry, &galley, pos, pointer)
+                    {
+                        result.hover = Some((index, rect));
+                    }
                 }
             });
         });
@@ -1105,6 +1238,11 @@ struct CompletionState {
     items: Vec<CompletionItem>,
     selected: usize,
     dismissed: Option<String>,
+    /// Whether the next render should scroll the selected row into view.
+    needs_scroll: bool,
+    /// The selected row's rect from the last render.
+    #[cfg(test)]
+    selected_rect: Option<egui::Rect>,
 }
 
 #[derive(Clone)]
@@ -1353,7 +1491,9 @@ fn completion_padding(item: &CompletionItem, label_width: usize) -> usize {
 
 /// The full row text used for measuring.
 fn completion_row_text(item: &CompletionItem, label_width: usize) -> String {
-    let mut text = item.label.clone();
+    let mut text = item.glyph.to_string();
+    text.push(' ');
+    text.push_str(&item.label);
     text.extend(std::iter::repeat_n(
         ' ',
         completion_padding(item, label_width),
@@ -1435,6 +1575,8 @@ fn completion_layout_job(
     };
 
     let mut job = egui::text::LayoutJob::default();
+    job.append(&item.glyph.to_string(), 0.0, normal.clone());
+    job.append(" ", 0.0, normal.clone());
     append_matched_text(&mut job, &item.label, &item.matched, &normal, &highlighted);
     if let Some(name) = &item.name {
         job.append(
@@ -1477,7 +1619,27 @@ fn truncate_text(
     shortened
 }
 
-fn detail_ui(ui: &mut Ui, statement: &StatementOutput, settings: &Settings, registry: &Registry) {
+/// Draws a monospace value and returns the rect of any hovered icon glyph in it.
+fn icon_label(ui: &mut Ui, text: &str, registry: &Registry) -> Option<egui::Rect> {
+    let font_id = TextStyle::Monospace.resolve(ui.style());
+    let color = ui.visuals().text_color();
+    let galley = ui
+        .painter()
+        .layout(text.to_string(), font_id, color, ui.available_width());
+    let (rect, _response) = ui.allocate_exact_size(galley.size(), Sense::hover());
+    ui.painter().galley(rect.min, galley.clone(), color);
+
+    let pointer = ui.ctx().pointer_hover_pos()?;
+    hovered_icon(registry, &galley, rect.min, pointer).map(|(_, rect)| rect)
+}
+
+fn detail_ui(
+    ui: &mut Ui,
+    statement: &StatementOutput,
+    settings: &Settings,
+    registry: &Registry,
+) -> Option<egui::Rect> {
+    let mut hovered = None;
     match &statement.output {
         LineOutput::Nothing => {}
         LineOutput::Error(error) => {
@@ -1485,10 +1647,10 @@ fn detail_ui(ui: &mut Ui, statement: &StatementOutput, settings: &Settings, regi
         }
         LineOutput::Value(value) => {
             let formatted = format_output(value, settings, registry);
-            ui.label(RichText::new(formatted.headline).monospace());
+            hovered = icon_label(ui, &formatted.headline, registry);
 
             let Output::Recipe(recipe) = value else {
-                return;
+                return hovered;
             };
             let rate = matches!(recipe.quantity, RecipeQuantity::Machines(_));
 
@@ -1520,14 +1682,10 @@ fn detail_ui(ui: &mut Ui, statement: &StatementOutput, settings: &Settings, regi
                     ui.label(RichText::new("consumes").weak());
                     ui.end_row();
                     for row in 0..produces.len().max(consumes.len()) {
-                        ui.label(
-                            RichText::new(produces.get(row).map(String::as_str).unwrap_or(""))
-                                .monospace(),
-                        );
-                        ui.label(
-                            RichText::new(consumes.get(row).map(String::as_str).unwrap_or(""))
-                                .monospace(),
-                        );
+                        let produce = produces.get(row).map(String::as_str).unwrap_or("");
+                        let consume = consumes.get(row).map(String::as_str).unwrap_or("");
+                        hovered = hovered.or(icon_label(ui, produce, registry));
+                        hovered = hovered.or(icon_label(ui, consume, registry));
                         ui.end_row();
                     }
                 });
@@ -1538,35 +1696,43 @@ fn detail_ui(ui: &mut Ui, statement: &StatementOutput, settings: &Settings, regi
                 } else {
                     Value::crafts(craft)
                 };
-                ui.label(RichText::new(format_value(&value, settings, registry)).monospace());
+                hovered = hovered.or(icon_label(
+                    ui,
+                    &format_value(&value, settings, registry),
+                    registry,
+                ));
             }
 
             let glyph = registry.entry_by_index(recipe.machine).glyph;
-            ui.label(
-                RichText::new(format!(
+            hovered = hovered.or(icon_label(
+                ui,
+                &format!(
                     "{}/{glyph}",
                     format_power(recipe.per_machine_power_w, settings)
-                ))
-                .monospace(),
-            );
+                ),
+                registry,
+            ));
             let count = recipe.quantity.magnitude();
             if rate && count != 1.0 {
-                ui.label(
-                    RichText::new(format!(
+                hovered = hovered.or(icon_label(
+                    ui,
+                    &format!(
                         "{} total",
                         format_power(recipe.per_machine_power_w * count, settings)
-                    ))
-                    .monospace(),
-                );
+                    ),
+                    registry,
+                ));
             }
             if !rate && let Some(energy) = recipe.total_energy_j {
-                ui.label(
-                    RichText::new(format!("{} total energy", format_energy(energy, settings)))
-                        .monospace(),
-                );
+                hovered = hovered.or(icon_label(
+                    ui,
+                    &format!("{} total energy", format_energy(energy, settings)),
+                    registry,
+                ));
             }
         }
     }
+    hovered
 }
 
 fn unit_label(registry: &Registry, unit: BaseUnit) -> String {
@@ -1654,6 +1820,249 @@ mod tests {
         assert!(!saved.contains(glyph), "{saved}");
 
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn tooltip_is_open(harness: &Harness<'_, Option<HactorioApp>>) -> bool {
+        harness.ctx.memory(|memory| {
+            memory
+                .layer_ids()
+                .any(|layer| layer.order == egui::Order::Tooltip)
+        })
+    }
+
+    #[test]
+    fn clicking_a_completion_item_accepts_it() {
+        let document = editor_document("# Main\n", 0, 6);
+        let (mut harness, dir) = completion_harness("click-accept", document);
+        harness.run();
+        type_into_editor(&mut harness, " i");
+
+        let glyph = harness
+            .state()
+            .as_ref()
+            .expect("app")
+            .completion
+            .items
+            .first()
+            .expect("completions")
+            .insert
+            .clone();
+        let popup = harness
+            .ctx
+            .memory(|memory| memory.area_rect(egui::Id::unique(("completion", 0usize))))
+            .expect("popup");
+        let pos = popup.left_top() + egui::vec2(70.0, 17.0);
+        harness.hover_at(pos);
+        for pressed in [true, false] {
+            harness.input_mut().events.push(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            });
+        }
+        harness.run();
+
+        let app = harness.state().as_ref().expect("app");
+        assert_eq!(app.tabs[0].text, format!("# Main {glyph}\n"));
+        assert!(app.completion.items.is_empty());
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn completion_scrolls_to_the_selected_item() {
+        let items: Vec<String> = (0..40)
+            .map(|index| {
+                format!(
+                    r#""test-item-{index:02}": {{"type": "item", "name": "test-item-{index:02}", "stack_size": 1}}"#
+                )
+            })
+            .collect();
+        let fixture = format!(r#"{{"item": {{{}}}}}"#, items.join(","));
+        let document = editor_document("# Main\n", 0, 6);
+        let (mut harness, dir) = completion_harness_with("scroll", document, &fixture);
+        harness.run();
+        type_into_editor(&mut harness, " i");
+        assert_eq!(
+            harness
+                .state()
+                .as_ref()
+                .expect("app")
+                .completion
+                .items
+                .len(),
+            40
+        );
+
+        for _ in 0..20 {
+            harness.key_press(Key::ArrowDown);
+            harness.run();
+        }
+        let app = harness.state().as_ref().expect("app");
+        assert_eq!(app.completion.selected, 20);
+        let selected = app.completion.selected_rect.expect("selected row");
+        let popup = harness
+            .ctx
+            .memory(|memory| memory.area_rect(egui::Id::unique(("completion", 0usize))))
+            .expect("popup");
+        assert!(popup.contains_rect(selected), "{popup:?} {selected:?}");
+
+        // Reopening after being closed scrolls back to the new selection.
+        harness.key_press(Key::Escape);
+        harness.run();
+        assert!(
+            harness
+                .state()
+                .as_ref()
+                .expect("app")
+                .completion
+                .items
+                .is_empty()
+        );
+        type_into_editor(&mut harness, "t");
+        let app = harness.state().as_ref().expect("app");
+        assert_eq!(app.completion.selected, 0);
+        let selected = app.completion.selected_rect.expect("selected row");
+        let popup = harness
+            .ctx
+            .memory(|memory| memory.area_rect(egui::Id::unique(("completion", 0usize))))
+            .expect("popup");
+        assert!(popup.contains_rect(selected), "{popup:?} {selected:?}");
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn hovering_an_editor_icon_opens_the_breakdown() {
+        let document = editor_document("# Main\n3 :iron-plate:\n", 1, 0);
+        let (mut harness, dir) = completion_harness("hover", document);
+        harness.run();
+
+        let rect = harness
+            .ctx
+            .memory(|memory| memory.focused())
+            .and_then(|id| harness.ctx.read_response(id))
+            .map(|response| response.rect)
+            .expect("focused editor");
+
+        let left = rect.left() as i32;
+        let top = rect.top() as i32;
+        let mut shown = false;
+        'search: for y in (top..=top + 60).step_by(3) {
+            for x in (left..=left + 100).step_by(2) {
+                harness.hover_at(egui::pos2(x as f32, y as f32));
+                harness.run();
+                if tooltip_is_open(&harness) {
+                    shown = true;
+                    break 'search;
+                }
+            }
+        }
+        assert!(shown, "no breakdown tooltip appeared");
+        if std::env::var_os("HACTORIO_UI_SNAPSHOT").is_some() {
+            harness.snapshot("breakdown");
+        }
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn hovering_an_output_icon_opens_the_breakdown() {
+        let document = editor_document("# Main\n3 :iron-plate:\n", 0, 0);
+        let (mut harness, dir) = completion_harness("output-hover", document);
+        harness.run();
+
+        let editor = harness
+            .ctx
+            .memory(|memory| memory.focused())
+            .and_then(|id| harness.ctx.read_response(id))
+            .map(|response| response.rect)
+            .expect("focused editor");
+        let left = editor.right() as i32 + 4;
+        let top = editor.top() as i32;
+        let mut shown = false;
+        'search: for y in (top..=top + 60).step_by(3) {
+            for x in (left..=left + 300).step_by(4) {
+                harness.hover_at(egui::pos2(x as f32, y as f32));
+                harness.run();
+                if tooltip_is_open(&harness) {
+                    shown = true;
+                    break 'search;
+                }
+            }
+        }
+        assert!(shown, "no breakdown tooltip appeared");
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn hovering_a_detail_popup_icon_opens_the_breakdown() {
+        let document = editor_document("# Main\n3 :iron-plate:\n", 1, 0);
+        let (mut harness, dir) = completion_harness("detail-hover", document);
+        harness.run();
+
+        let area = harness
+            .ctx
+            .memory(|memory| memory.area_rect(egui::Id::unique("line_detail")))
+            .expect("detail popup");
+        let left = area.left() as i32;
+        let top = area.top() as i32;
+        let mut shown = false;
+        'search: for y in (top..=top + 40).step_by(3) {
+            for x in (left..=left + 120).step_by(3) {
+                harness.hover_at(egui::pos2(x as f32, y as f32));
+                harness.run();
+                if tooltip_is_open(&harness) {
+                    shown = true;
+                    break 'search;
+                }
+            }
+        }
+        assert!(shown, "no breakdown tooltip appeared");
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn font_size_is_restored_and_saved() {
+        let dir = std::env::temp_dir().join(format!("hactorio-font-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let ctx = egui::Context::default();
+        let mut app = HactorioApp::new(
+            &ctx,
+            Document {
+                font_size: 18.0,
+                ..Document::default()
+            },
+            dir.clone(),
+        );
+        assert_eq!(app.font_size, 18.0);
+        assert_eq!(
+            ctx.style_of(ctx.theme()).text_styles[&TextStyle::Monospace].size,
+            18.0
+        );
+
+        app.save();
+        let saved = Document::load(&dir.join("document.json")).unwrap();
+        assert_eq!(saved.font_size, 18.0);
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn detail_popup_content_starts_at_the_anchor() {
+        let style = egui::Style::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0));
+        let anchor = egui::pos2(400.0, 300.0);
+        let pos = detail_popup_pos(&style, anchor, screen, 300.0);
+        let content = pos + detail_popup_inset(&style);
+        assert!((content.x - anchor.x).abs() < 0.01, "{content:?}");
+        assert!((content.y - anchor.y).abs() < 0.01, "{content:?}");
+        assert!(detail_popup_inset(&style).x > 0.0);
     }
 
     #[test]
@@ -1905,7 +2314,7 @@ mod tests {
         );
         assert_eq!(
             short_row.find("Advanced circuit"),
-            Some(label_width + COMPLETION_NAME_GAP)
+            Some(label_width + COMPLETION_NAME_GAP + 2)
         );
     }
 
@@ -1972,22 +2381,27 @@ mod tests {
             .save(&app_dir.join("cache.json"))
             .unwrap();
 
-        let harness = Harness::builder()
+        let builder = Harness::builder()
             .with_size(egui::vec2(800.0, 600.0))
             .with_accessibility_check(false)
-            .allow_missing_glyphs()
-            .build_ui_state(
-                {
-                    let app_dir = app_dir.clone();
-                    move |ui, app: &mut Option<HactorioApp>| {
-                        let app = app.get_or_insert_with(|| {
-                            HactorioApp::new(ui.ctx(), document.clone(), app_dir.clone())
-                        });
-                        app.ui(ui);
-                    }
-                },
-                None,
-            );
+            .allow_missing_glyphs();
+        let builder = if std::env::var_os("HACTORIO_UI_SNAPSHOT").is_some() {
+            builder.wgpu()
+        } else {
+            builder
+        };
+        let harness = builder.build_ui_state(
+            {
+                let app_dir = app_dir.clone();
+                move |ui, app: &mut Option<HactorioApp>| {
+                    let app = app.get_or_insert_with(|| {
+                        HactorioApp::new(ui.ctx(), document.clone(), app_dir.clone())
+                    });
+                    app.ui(ui);
+                }
+            },
+            None,
+        );
         (harness, app_dir)
     }
 
