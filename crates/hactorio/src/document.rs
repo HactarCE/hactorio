@@ -60,11 +60,22 @@ pub struct Document {
     /// Width of the results column.
     #[serde(default = "default_results_width")]
     pub results_width: f32,
+    /// Global GUI zoom factor.
+    #[serde(default = "default_zoom")]
+    pub zoom: f32,
 }
 
 pub fn default_results_width() -> f32 {
     380.0
 }
+
+pub fn default_zoom() -> f32 {
+    1.0
+}
+
+/// Zoom range accepted by egui's keyboard and scroll zooming.
+pub const MIN_ZOOM: f32 = 0.2;
+pub const MAX_ZOOM: f32 = 5.0;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub struct Cursor {
@@ -92,6 +103,7 @@ impl Default for Document {
             window: None,
             settings: Settings::default(),
             results_width: default_results_width(),
+            zoom: default_zoom(),
         }
     }
 }

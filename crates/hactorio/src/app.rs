@@ -17,7 +17,7 @@ use hactorio_core::{
 };
 use hactorio_data::{GameInstall, Registry, locate};
 
-use crate::document::{Cursor, DOCUMENT_VERSION, Document, Tab, Window};
+use crate::document::{Cursor, DOCUMENT_VERSION, Document, MAX_ZOOM, MIN_ZOOM, Tab, Window};
 use crate::evaluator::Evaluator;
 use crate::icons;
 
@@ -89,6 +89,8 @@ pub struct HactorioApp {
     sized: bool,
     window: Option<Window>,
     results_width: f32,
+    /// The GUI zoom factor currently shown, as saved in the document.
+    zoom: f32,
     /// Cursor to restore on the first frame, as `(line, column)`.
     pending_focus: Option<(usize, usize)>,
     /// Generation whose results are currently displayed.
@@ -144,6 +146,9 @@ impl HactorioApp {
             icons::install(ctx, Arc::clone(registry), &install.icon_source());
         }
 
+        let zoom = document.zoom.clamp(MIN_ZOOM, MAX_ZOOM);
+        ctx.set_zoom_factor(zoom);
+
         HactorioApp {
             tabs,
             active,
@@ -164,6 +169,7 @@ impl HactorioApp {
             sized: false,
             window: document.window,
             results_width: document.results_width,
+            zoom,
             pending_focus: document
                 .cursors
                 .get(active)
@@ -496,6 +502,16 @@ impl HactorioApp {
             window: self.window,
             settings: self.settings.clone(),
             results_width: self.results_width,
+            zoom: self.zoom,
+        }
+    }
+
+    /// Marks the document dirty when the GUI zoom changed.
+    fn sync_zoom(&mut self, ctx: &Context) {
+        let zoom = ctx.zoom_factor();
+        if zoom != self.zoom {
+            self.zoom = zoom;
+            self.dirty = true;
         }
     }
 
@@ -514,6 +530,7 @@ impl HactorioApp {
     /// One frame of the whole app.
     pub fn ui(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
+        self.sync_zoom(&ctx);
         if !self.sized {
             if let Some(size) = self.initial_size {
                 ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size.into()));
@@ -1325,6 +1342,38 @@ mod tests {
         assert!(saved.contains(":iron-plate:"), "{saved}");
         assert!(saved.contains("results_width"), "{saved}");
         assert!(!saved.contains(glyph), "{saved}");
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn zoom_is_restored_and_saved() {
+        let dir = std::env::temp_dir().join(format!("hactorio-zoom-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let ctx = egui::Context::default();
+        let document = Document {
+            zoom: 1.4,
+            ..Document::default()
+        };
+        let mut app = HactorioApp::new(&ctx, document, dir.clone());
+        assert_eq!(app.zoom, 1.4);
+
+        ctx.run_ui(egui::RawInput::default(), |ui| app.ui(ui))
+            .drop_without_applying_deltas();
+        assert_eq!(ctx.zoom_factor(), 1.4);
+        assert!(!app.dirty);
+
+        ctx.set_zoom_factor(0.8);
+        ctx.run_ui(egui::RawInput::default(), |ui| app.ui(ui))
+            .drop_without_applying_deltas();
+        assert_eq!(app.zoom, 0.8);
+        assert!(app.dirty);
+
+        app.save();
+        let saved = Document::load(&dir.join("document.json")).unwrap();
+        assert_eq!(saved.zoom, 0.8);
 
         std::fs::remove_dir_all(dir).unwrap();
     }
