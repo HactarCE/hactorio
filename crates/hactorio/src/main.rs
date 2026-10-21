@@ -25,6 +25,12 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "hactorio",
         options,
-        Box::new(move |cc| Ok(Box::new(app::HactorioApp::new(&cc.egui_ctx, document, app_dir)))),
+        Box::new(move |cc| {
+            Ok(Box::new(app::HactorioApp::new(
+                &cc.egui_ctx,
+                document,
+                app_dir,
+            )))
+        }),
     )
 }

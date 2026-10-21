@@ -202,11 +202,7 @@ fn lex_number(line: &str, index: &mut usize) -> Result<f64, ParseError> {
     Ok(value)
 }
 
-fn lex_prototype(
-    line: &str,
-    index: &mut usize,
-    registry: &Registry,
-) -> Result<Token, ParseError> {
+fn lex_prototype(line: &str, index: &mut usize, registry: &Registry) -> Result<Token, ParseError> {
     let start = *index;
     *index += 1; // ':'
     let id_start = *index;

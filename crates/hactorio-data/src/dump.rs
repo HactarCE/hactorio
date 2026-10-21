@@ -44,10 +44,15 @@ pub fn locate() -> Option<GameInstall> {
     #[cfg(target_os = "macos")]
     {
         let home = PathBuf::from(std::env::var_os("HOME")?);
-        let contents = home
-            .join("Library/Application Support/Steam/steamapps/common/Factorio/factorio.app/Contents");
+        let contents = home.join(
+            "Library/Application Support/Steam/steamapps/common/Factorio/factorio.app/Contents",
+        );
         let user_data = home.join("Library/Application Support/factorio");
-        install(contents.join("MacOS/factorio"), contents.join("data"), user_data)
+        install(
+            contents.join("MacOS/factorio"),
+            contents.join("data"),
+            user_data,
+        )
     }
     #[cfg(target_os = "linux")]
     {

@@ -44,8 +44,14 @@ fn scalars_use_the_decimal_limit_and_trim_zeros() {
     let registry = registry();
     let settings = Settings::default();
 
-    assert_eq!(format_value(&Value::scalar(1.0 / 3.0), &settings, &registry), "0.333");
-    assert_eq!(format_value(&Value::scalar(2.5), &settings, &registry), "2.5");
+    assert_eq!(
+        format_value(&Value::scalar(1.0 / 3.0), &settings, &registry),
+        "0.333"
+    );
+    assert_eq!(
+        format_value(&Value::scalar(2.5), &settings, &registry),
+        "2.5"
+    );
     assert_eq!(format_value(&Value::scalar(2.0), &settings, &registry), "2");
     assert_eq!(format_value(&Value::scalar(0.0), &settings, &registry), "0");
 
@@ -53,7 +59,10 @@ fn scalars_use_the_decimal_limit_and_trim_zeros() {
         max_decimals: 1,
         ..Settings::default()
     };
-    assert_eq!(format_value(&Value::scalar(1.0 / 3.0), &terse, &registry), "0.3");
+    assert_eq!(
+        format_value(&Value::scalar(1.0 / 3.0), &terse, &registry),
+        "0.3"
+    );
 }
 
 #[test]
@@ -205,19 +214,13 @@ fn belt_modes_ignore_fluids_and_composite_units() {
         ..Settings::default()
     };
 
-    let fluid_rate = Value::new(
-        3.0,
-        [(water(&registry), 1), (BaseUnit::Second, -1)],
-    );
+    let fluid_rate = Value::new(3.0, [(water(&registry), 1), (BaseUnit::Second, -1)]);
     assert_eq!(
         format_value(&fluid_rate, &belts, &registry),
         format!("3 {}/s", glyph(&registry, "water"))
     );
 
-    let composite = Value::new(
-        3.0,
-        [(plate(&registry), 1), (BaseUnit::Second, -2)],
-    );
+    let composite = Value::new(3.0, [(plate(&registry), 1), (BaseUnit::Second, -2)]);
     assert_eq!(
         format_value(&composite, &belts, &registry),
         format!("3 {}/s^2", glyph(&registry, "iron-plate"))

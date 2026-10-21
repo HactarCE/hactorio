@@ -234,11 +234,7 @@ pub fn format_output(output: &Output, settings: &Settings, registry: &Registry) 
     }
 }
 
-fn format_recipe(
-    recipe: &RecipeOutput,
-    settings: &Settings,
-    registry: &Registry,
-) -> Formatted {
+fn format_recipe(recipe: &RecipeOutput, settings: &Settings, registry: &Registry) -> Formatted {
     let rate = matches!(recipe.quantity, RecipeQuantity::Machines(_));
     let machine_glyph = registry.entry_by_index(recipe.machine).glyph;
     let headline = if rate {
@@ -368,9 +364,7 @@ fn format_si(value: f64, unit: &str, settings: &Settings) -> String {
 
 fn unit_name(unit: BaseUnit, registry: &Registry) -> String {
     match unit {
-        BaseUnit::Item(id) | BaseUnit::Fluid(id) => {
-            registry.entry_by_index(id).id.to_string()
-        }
+        BaseUnit::Item(id) | BaseUnit::Fluid(id) => registry.entry_by_index(id).id.to_string(),
         BaseUnit::Second => "second".to_string(),
         BaseUnit::Joule => "joule".to_string(),
         BaseUnit::Craft => "craft".to_string(),

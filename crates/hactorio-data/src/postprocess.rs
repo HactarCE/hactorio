@@ -7,8 +7,8 @@ use std::path::Path;
 use serde_json::{Map, Value};
 
 use crate::registry::{
-    AllowedEffects, Entry, Ingredient, Item, Machine, Module, ModuleEffect, Product,
-    PrototypeKind, Recipe, RecipeId, Registry, glyph_for,
+    AllowedEffects, Entry, Ingredient, Item, Machine, Module, ModuleEffect, Product, PrototypeKind,
+    Recipe, RecipeId, Registry, glyph_for,
 };
 use crate::{Error, Result};
 
@@ -331,11 +331,13 @@ fn collect_resource_recipes(
                 id: recipe_id,
                 display_name: None,
                 icon: icon_path(proto),
-                categories: vec![proto
-                    .get("category")
-                    .and_then(Value::as_str)
-                    .unwrap_or("basic-solid")
-                    .into()],
+                categories: vec![
+                    proto
+                        .get("category")
+                        .and_then(Value::as_str)
+                        .unwrap_or("basic-solid")
+                        .into(),
+                ],
                 craft_time: minable
                     .get("mining_time")
                     .and_then(Value::as_f64)
@@ -360,7 +362,10 @@ fn parse_ingredients(value: Option<&Value>) -> Vec<Ingredient> {
             Some(Ingredient {
                 kind: kind_of(ingredient)?,
                 name: ingredient.get("name")?.as_str()?.into(),
-                amount: ingredient.get("amount").and_then(Value::as_f64).unwrap_or(0.0),
+                amount: ingredient
+                    .get("amount")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0),
             })
         })
         .collect()
@@ -480,7 +485,9 @@ fn uint(proto: &Value, key: &str, default: u64) -> u64 {
 
 /// Parses a Factorio energy or power string such as `375kW` or `2.5MW`.
 fn parse_watts(value: &str) -> Option<f64> {
-    let split = value.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(value.len());
+    let split = value
+        .find(|c: char| c.is_ascii_alphabetic())
+        .unwrap_or(value.len());
     let (number, unit) = value.split_at(split);
     let number: f64 = number.trim().parse().ok()?;
     let multiplier = match unit.trim() {

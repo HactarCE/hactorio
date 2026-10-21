@@ -109,7 +109,10 @@ fn rejects_non_decimal_numbers() {
 #[test]
 fn parses_plaintext_and_glyph_tokens_identically() {
     let registry = registry();
-    let expected = Expr::Literal(Value::new(1.0, [(BaseUnit::Item(registry.entry_id("iron-plate").unwrap()), 1)]));
+    let expected = Expr::Literal(Value::new(
+        1.0,
+        [(BaseUnit::Item(registry.entry_id("iron-plate").unwrap()), 1)],
+    ));
 
     assert_eq!(expr(":iron-plate:"), expected);
     let glyph = registry.entry("iron-plate").unwrap().glyph.to_string();
@@ -117,7 +120,10 @@ fn parses_plaintext_and_glyph_tokens_identically() {
 
     assert_eq!(
         literal(":water:"),
-        Value::new(1.0, [(BaseUnit::Fluid(registry.entry_id("water").unwrap()), 1)])
+        Value::new(
+            1.0,
+            [(BaseUnit::Fluid(registry.entry_id("water").unwrap()), 1)]
+        )
     );
 }
 
@@ -154,7 +160,11 @@ fn unary_minus_binds_looser_than_power() {
     // ^ is right-associative.
     assert_eq!(
         expr("2^3^2"),
-        binary(BinaryOp::Pow, lit(2.0), binary(BinaryOp::Pow, lit(3.0), lit(2.0)))
+        binary(
+            BinaryOp::Pow,
+            lit(2.0),
+            binary(BinaryOp::Pow, lit(3.0), lit(2.0))
+        )
     );
     // Unary minus binds tighter than multiplication.
     assert_eq!(
@@ -167,11 +177,19 @@ fn unary_minus_binds_looser_than_power() {
 fn multiplication_binds_tighter_than_addition() {
     assert_eq!(
         expr("1+2*3"),
-        binary(BinaryOp::Add, lit(1.0), binary(BinaryOp::Mul, lit(2.0), lit(3.0)))
+        binary(
+            BinaryOp::Add,
+            lit(1.0),
+            binary(BinaryOp::Mul, lit(2.0), lit(3.0))
+        )
     );
     assert_eq!(
         expr("(1+2)*3"),
-        binary(BinaryOp::Mul, binary(BinaryOp::Add, lit(1.0), lit(2.0)), lit(3.0))
+        binary(
+            BinaryOp::Mul,
+            binary(BinaryOp::Add, lit(1.0), lit(2.0)),
+            lit(3.0)
+        )
     );
 }
 
@@ -209,19 +227,28 @@ fn rejects_reserved_and_prototype_names() {
 #[test]
 fn parses_machine_specs() {
     let registry = registry();
-    let spec = match expr(
-        "3 @:assembling-machine-3: 2 :speed-module-3: making :iron-plate:",
-    ) {
+    let spec = match expr("3 @:assembling-machine-3: 2 :speed-module-3: making :iron-plate:") {
         Expr::Machine(spec) => spec,
         other => panic!("expected a machine, got {other:?}"),
     };
 
-    assert_eq!(spec.machine, registry.entry_id("assembling-machine-3").unwrap());
+    assert_eq!(
+        spec.machine,
+        registry.entry_id("assembling-machine-3").unwrap()
+    );
     assert_eq!(spec.count, 3.0);
     assert_eq!(spec.modules.len(), 1);
-    assert_eq!(spec.modules[0].module, registry.entry_id("speed-module-3").unwrap());
+    assert_eq!(
+        spec.modules[0].module,
+        registry.entry_id("speed-module-3").unwrap()
+    );
     assert_eq!(spec.modules[0].count, 2.0);
-    assert_eq!(spec.recipe, registry.entry_id("iron-plate").and_then(|id| registry.entry_by_index(id).recipe));
+    assert_eq!(
+        spec.recipe,
+        registry
+            .entry_id("iron-plate")
+            .and_then(|id| registry.entry_by_index(id).recipe)
+    );
 }
 
 #[test]
@@ -280,7 +307,12 @@ fn parses_belt_literals() {
 
 #[test]
 fn belt_literals_require_a_positive_count_and_an_item() {
-    for line in ["0 yb :iron-plate:", "yb :water:", "yb :advanced-circuit:", "yb 3"] {
+    for line in [
+        "0 yb :iron-plate:",
+        "yb :water:",
+        "yb :advanced-circuit:",
+        "yb 3",
+    ] {
         assert!(parse(line).is_err(), "{line:?} should not parse");
     }
 }
@@ -290,7 +322,13 @@ fn parses_in_expressions() {
     let registry = registry();
     let machine = match expr("100 :iron-plate: / second in @:assembling-machine-3:") {
         Expr::In { quantity, machine } => {
-            assert!(matches!(*quantity, Expr::Binary { op: BinaryOp::Div, .. }));
+            assert!(matches!(
+                *quantity,
+                Expr::Binary {
+                    op: BinaryOp::Div,
+                    ..
+                }
+            ));
             match *machine {
                 Expr::Machine(spec) => spec,
                 other => panic!("expected a machine spec, got {other:?}"),
@@ -298,19 +336,31 @@ fn parses_in_expressions() {
         }
         other => panic!("expected an in expression, got {other:?}"),
     };
-    assert_eq!(machine.machine, registry.entry_id("assembling-machine-3").unwrap());
+    assert_eq!(
+        machine.machine,
+        registry.entry_id("assembling-machine-3").unwrap()
+    );
     assert_eq!(machine.count, 1.0);
 
     // Q in M * 2 is (Q in M) * 2, because the right operand ends at `*`.
     assert!(matches!(
         expr("Q in @:assembling-machine-3: * 2"),
-        Expr::Binary { op: BinaryOp::Mul, .. }
+        Expr::Binary {
+            op: BinaryOp::Mul,
+            ..
+        }
     ));
 
     // a + b in M is (a + b) in M.
     match expr("Q + R in @:assembling-machine-3:") {
         Expr::In { quantity, .. } => {
-            assert!(matches!(*quantity, Expr::Binary { op: BinaryOp::Add, .. }))
+            assert!(matches!(
+                *quantity,
+                Expr::Binary {
+                    op: BinaryOp::Add,
+                    ..
+                }
+            ))
         }
         other => panic!("expected an in expression, got {other:?}"),
     }
@@ -390,7 +440,10 @@ fn text_round_trips_between_plaintext_and_glyphs() {
     let plain = "3 :iron-plate: / second";
     let glyphs = from_plaintext(plain, &registry);
 
-    assert_eq!(glyphs.chars().count(), plain.chars().count() - ":iron-plate:".chars().count() + 1);
+    assert_eq!(
+        glyphs.chars().count(),
+        plain.chars().count() - ":iron-plate:".chars().count() + 1
+    );
     assert_eq!(to_plaintext(&glyphs, &registry), plain);
 
     // Unknown tokens stay readable.

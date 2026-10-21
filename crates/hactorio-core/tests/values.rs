@@ -1,4 +1,7 @@
-use hactorio_core::{BaseUnit, BeltTier, Settings, TimeUnit, Value, ValueError, belt_capacity, belt_value, stack_size};
+use hactorio_core::{
+    BaseUnit, BeltTier, Settings, TimeUnit, Value, ValueError, belt_capacity, belt_value,
+    stack_size,
+};
 
 fn item() -> BaseUnit {
     BaseUnit::Item(hactorio_data::EntryId::from_index(0))
@@ -13,8 +16,14 @@ fn zero_exponents_are_canonicalized() {
 
 #[test]
 fn aliases_fold_into_base_units() {
-    assert_eq!(Value::minutes(3.0), Value::new(180.0, [(BaseUnit::Second, 1)]));
-    assert_eq!(Value::hours(1.0), Value::new(3600.0, [(BaseUnit::Second, 1)]));
+    assert_eq!(
+        Value::minutes(3.0),
+        Value::new(180.0, [(BaseUnit::Second, 1)])
+    );
+    assert_eq!(
+        Value::hours(1.0),
+        Value::new(3600.0, [(BaseUnit::Second, 1)])
+    );
     assert_eq!(
         Value::watts(2.0),
         Value::new(2.0, [(BaseUnit::Joule, 1), (BaseUnit::Second, -1)])

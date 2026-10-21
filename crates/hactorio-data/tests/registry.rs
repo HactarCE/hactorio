@@ -100,7 +100,12 @@ fn blueprint_parameters_are_excluded() {
 #[test]
 fn modules_are_namespace_entries() {
     let registry = registry();
-    let module = registry.entry("speed-module-3").unwrap().module.as_ref().unwrap();
+    let module = registry
+        .entry("speed-module-3")
+        .unwrap()
+        .module
+        .as_ref()
+        .unwrap();
 
     assert_eq!(&*module.category, "speed");
     assert_eq!(module.tier, 3);
@@ -245,7 +250,11 @@ fn locale_supplies_display_names() {
     let registry = postprocess(DUMP, &Locale::load(&dir)).unwrap();
 
     assert_eq!(
-        registry.entry("iron-plate").unwrap().display_name.as_deref(),
+        registry
+            .entry("iron-plate")
+            .unwrap()
+            .display_name
+            .as_deref(),
         Some("Iron plate")
     );
     assert_eq!(

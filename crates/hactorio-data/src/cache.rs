@@ -106,7 +106,8 @@ mod tests {
 
     #[test]
     fn unsupported_cache_versions_are_rejected() {
-        let error = Registry::from_json(br#"{"version":99,"entries":[],"recipes":[]}"#).unwrap_err();
+        let error =
+            Registry::from_json(br#"{"version":99,"entries":[],"recipes":[]}"#).unwrap_err();
         assert!(matches!(error, Error::UnsupportedVersion(99)));
     }
 }

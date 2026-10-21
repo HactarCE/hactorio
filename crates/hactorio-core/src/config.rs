@@ -237,10 +237,7 @@ fn unit_of(
     span: Span,
 ) -> Result<BaseUnit, EvalError> {
     let Some(id) = registry.entry_id(name) else {
-        return Err(EvalError::new(
-            span,
-            format!("`{name}` is not a prototype"),
-        ));
+        return Err(EvalError::new(span, format!("`{name}` is not a prototype")));
     };
     Ok(match kind {
         hactorio_data::PrototypeKind::Item => BaseUnit::Item(id),

@@ -1,6 +1,6 @@
 use hactorio_core::{
-    Breakdown, BeltTier, LineCache, LineOutput, Output, RecipeQuantity, Settings,
-    StatementOutput, breakdown, evaluate, format_output,
+    BeltTier, Breakdown, LineCache, LineOutput, Output, RecipeQuantity, Settings, StatementOutput,
+    breakdown, evaluate, format_output,
 };
 use hactorio_data::{Locale, Registry, postprocess};
 
@@ -87,24 +87,33 @@ fn machine_rates_render_produces_consumes_craft_and_power() {
     let circuit = registry.entry("electronic-circuit").unwrap().glyph;
     let plate = registry.entry("iron-plate").unwrap().glyph;
 
-    assert_eq!(formatted.headline, format!("40 {}", registry.entry("assembling-machine-3").unwrap().glyph));
+    assert_eq!(
+        formatted.headline,
+        format!(
+            "40 {}",
+            registry.entry("assembling-machine-3").unwrap().glyph
+        )
+    );
     assert!(
-        formatted
-            .rows
-            .contains(&format!("+100 {circuit}/s")),
+        formatted.rows.contains(&format!("+100 {circuit}/s")),
         "{:?}",
         formatted.rows
     );
     assert!(
-        formatted
-            .rows
-            .contains(&format!("-100 {plate}/s")),
+        formatted.rows.contains(&format!("-100 {plate}/s")),
         "{:?}",
         formatted.rows
     );
-    assert!(formatted.rows.contains(&"100 craft/s".to_string()), "{:?}", formatted.rows);
     assert!(
-        formatted.rows.contains(&format!("375 kW/{}", registry.entry("assembling-machine-3").unwrap().glyph)),
+        formatted.rows.contains(&"100 craft/s".to_string()),
+        "{:?}",
+        formatted.rows
+    );
+    assert!(
+        formatted.rows.contains(&format!(
+            "375 kW/{}",
+            registry.entry("assembling-machine-3").unwrap().glyph
+        )),
         "{:?}",
         formatted.rows
     );
@@ -123,7 +132,13 @@ fn machine_seconds_render_totals_and_energy() {
     let formatted = format_output(output(&outputs[0]), &settings, &registry);
     let plate = registry.entry("iron-plate").unwrap().glyph;
 
-    assert_eq!(formatted.headline, format!("160 {}·s", registry.entry("electric-furnace").unwrap().glyph));
+    assert_eq!(
+        formatted.headline,
+        format!(
+            "160 {}·s",
+            registry.entry("electric-furnace").unwrap().glyph
+        )
+    );
     assert!(
         formatted.rows.contains(&format!("+100 {plate}")),
         "{:?}",
@@ -168,10 +183,7 @@ fn belt_mode_applies_to_rate_rows() {
 fn infinity_renders_in_the_header() {
     let registry = registry();
     let settings = Settings::default();
-    let outputs = run(
-        &registry,
-        ":catalyst: / second in @:assembling-machine-3:",
-    );
+    let outputs = run(&registry, ":catalyst: / second in @:assembling-machine-3:");
     let formatted = format_output(output(&outputs[0]), &settings, &registry);
     let glyph = registry.entry("assembling-machine-3").unwrap().glyph;
 
@@ -194,18 +206,9 @@ fn breakdown_covers_configuration_recipe_items_power_and_pollution() {
     let breakdown = breakdown_of(&outputs[0], &settings, &registry);
 
     assert_eq!(row_value(&breakdown, "machine", "slots"), "2 / 4");
-    assert_eq!(
-        row_value(&breakdown, "machine", "productivity"),
-        "20%"
-    );
-    assert_eq!(
-        row_value(&breakdown, "machine", "consumption"),
-        "160%"
-    );
-    assert_eq!(
-        row_value(&breakdown, "recipe", "craft time"),
-        "0.5 s"
-    );
+    assert_eq!(row_value(&breakdown, "machine", "productivity"), "20%");
+    assert_eq!(row_value(&breakdown, "machine", "consumption"), "160%");
+    assert_eq!(row_value(&breakdown, "recipe", "craft time"), "0.5 s");
     assert_eq!(
         row_value(&breakdown, "recipe", "productivity allowed"),
         "yes"
@@ -236,15 +239,9 @@ fn machine_seconds_breakdown_has_machine_time_and_total_energy() {
     let outputs = run(&registry, "100 :iron-plate: in @:electric-furnace:");
     let breakdown = breakdown_of(&outputs[0], &settings, &registry);
 
-    assert_eq!(
-        row_value(&breakdown, "machine", "machine time"),
-        "160 s"
-    );
+    assert_eq!(row_value(&breakdown, "machine", "machine time"), "160 s");
     assert_eq!(row_value(&breakdown, "power", "total energy"), "28.8 MJ");
-    assert_eq!(
-        row_value(&breakdown, "pollution", "total"),
-        "5.333/min"
-    );
+    assert_eq!(row_value(&breakdown, "pollution", "total"), "5.333/min");
 }
 
 #[test]

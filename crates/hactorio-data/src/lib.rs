@@ -14,10 +14,10 @@ use thiserror::Error;
 
 pub use dump::{GameInstall, locate};
 pub use icons::{IconImage, IconSource};
-pub use postprocess::{postprocess, Locale};
+pub use postprocess::{Locale, postprocess};
 pub use registry::{
-    AllowedEffects, Entry, EntryId, Ingredient, Item, Machine, Module, ModuleEffect,
-    Product, PrototypeKind, Recipe, RecipeId, Registry, PUA_COUNT, PUA_FIRST, glyph_for,
+    AllowedEffects, Entry, EntryId, Ingredient, Item, Machine, Module, ModuleEffect, PUA_COUNT,
+    PUA_FIRST, Product, PrototypeKind, Recipe, RecipeId, Registry, glyph_for,
 };
 
 /// Errors from loading, validating, or post-processing prototype data.

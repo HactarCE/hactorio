@@ -25,11 +25,7 @@ fn reads_base_icons() {
             .as_deref(),
         Some(&b"png-bytes"[..])
     );
-    assert!(
-        source
-            .read("__base__/graphics/icons/missing.png")
-            .is_none()
-    );
+    assert!(source.read("__base__/graphics/icons/missing.png").is_none());
     assert!(source.read("not-a-path").is_none());
 
     fs::remove_dir_all(dir).unwrap();
@@ -66,11 +62,7 @@ fn reads_mod_icons_from_directories_and_zips() {
         source.read("__zipmod__/graphics/icons/b.png").as_deref(),
         Some(&b"b"[..])
     );
-    assert!(
-        source
-            .read("__othermod__/graphics/icons/a.png")
-            .is_none()
-    );
+    assert!(source.read("__othermod__/graphics/icons/a.png").is_none());
 
     fs::remove_dir_all(dir).unwrap();
 }
@@ -115,7 +107,9 @@ fn crops_icon_mip_strips() {
     strip.save(icons.join("plate.png")).unwrap();
 
     let source = IconSource::new(&dir, dir.join("mods"));
-    let decoded = source.read_rgba("__base__/graphics/icons/plate.png").unwrap();
+    let decoded = source
+        .read_rgba("__base__/graphics/icons/plate.png")
+        .unwrap();
 
     assert_eq!((decoded.width, decoded.height), (4, 4));
     assert_eq!(&decoded.rgba[..4], &[200, 40, 40, 255]);

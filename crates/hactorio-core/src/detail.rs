@@ -43,11 +43,7 @@ pub fn breakdown(value: &Eval, settings: &Settings, registry: &Registry) -> Brea
     }
 }
 
-fn machine_breakdown(
-    value: &MachineValue,
-    settings: &Settings,
-    registry: &Registry,
-) -> Breakdown {
+fn machine_breakdown(value: &MachineValue, settings: &Settings, registry: &Registry) -> Breakdown {
     let mut rows = vec![
         row("machine", entry_label(registry, value.machine)),
         row("count", format_plain_number(value.count, settings)),
@@ -58,9 +54,16 @@ fn machine_breakdown(
         let modifiers = config::modifiers(registry, value.machine, &value.modules, None);
         rows.push(row(
             "slots",
-            format!("{} / {}", module_count(&value.modules), machine.module_slots),
+            format!(
+                "{} / {}",
+                module_count(&value.modules),
+                machine.module_slots
+            ),
         ));
-        rows.push(row("base speed", format_plain_number(machine.speed, settings)));
+        rows.push(row(
+            "base speed",
+            format_plain_number(machine.speed, settings),
+        ));
         rows.push(row("speed", format_plain_number(modifiers.speed, settings)));
     }
 
@@ -72,11 +75,7 @@ fn machine_breakdown(
     }
 }
 
-fn recipe_breakdown(
-    value: &RecipeValue,
-    settings: &Settings,
-    registry: &Registry,
-) -> Breakdown {
+fn recipe_breakdown(value: &RecipeValue, settings: &Settings, registry: &Registry) -> Breakdown {
     let recipe = registry.recipe(value.recipe);
     let Some(machine) = registry.entry_by_index(value.machine).machine() else {
         return Breakdown {
@@ -93,7 +92,11 @@ fn recipe_breakdown(
         row("modules", modules_label(&value.modules, registry, settings)),
         row(
             "slots",
-            format!("{} / {}", module_count(&value.modules), machine.module_slots),
+            format!(
+                "{} / {}",
+                module_count(&value.modules),
+                machine.module_slots
+            ),
         ),
         row("base speed", format_plain_number(machine.speed, settings)),
         row("speed", format_plain_number(modifiers.speed, settings)),
@@ -124,7 +127,12 @@ fn recipe_breakdown(
         ),
         row(
             "productivity allowed",
-            if recipe.allow_productivity { "yes" } else { "no" }.to_string(),
+            if recipe.allow_productivity {
+                "yes"
+            } else {
+                "no"
+            }
+            .to_string(),
         ),
     ];
 
@@ -207,7 +215,10 @@ fn recipe_breakdown(
     let pollution_rows = vec![
         row(
             "per machine",
-            format!("{}/min", format_plain_number(per_machine_pollution, settings)),
+            format!(
+                "{}/min",
+                format_plain_number(per_machine_pollution, settings)
+            ),
         ),
         row(
             "total",

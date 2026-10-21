@@ -6,7 +6,7 @@ use hactorio_data::{EntryId, Registry};
 
 use crate::ast::{BinaryOp, Expr, MachineSpec, ModuleUse, Span, Statement, StatementKind};
 use crate::belt::BeltTier;
-use crate::lexer::{lex, Token, TokenKind};
+use crate::lexer::{Token, TokenKind, lex};
 use crate::settings::TimeUnit;
 use crate::value::{BaseUnit, Value};
 
@@ -406,12 +406,7 @@ impl Parser<'_> {
         })
     }
 
-    fn module_use(
-        &self,
-        id: EntryId,
-        span: Span,
-        count: f64,
-    ) -> Result<ModuleUse, ParseError> {
+    fn module_use(&self, id: EntryId, span: Span, count: f64) -> Result<ModuleUse, ParseError> {
         let entry = self.registry.entry_by_index(id);
         if entry.module.is_none() {
             return Err(ParseError::new(
@@ -419,10 +414,7 @@ impl Parser<'_> {
                 format!("`{}` is not a module", entry.id),
             ));
         }
-        Ok(ModuleUse {
-            module: id,
-            count,
-        })
+        Ok(ModuleUse { module: id, count })
     }
 
     fn expect(&mut self, kind: TokenKind, message: &str) -> Result<Token, ParseError> {
@@ -466,9 +458,7 @@ impl Parser<'_> {
             Some(TokenKind::Joule) => Follow::Joule,
             Some(TokenKind::Watt) => Follow::Watt,
             Some(TokenKind::Craft) => Follow::Craft,
-            Some(TokenKind::Prototype(id)) => {
-                Follow::Prototype(*id, self.peek().unwrap().span)
-            }
+            Some(TokenKind::Prototype(id)) => Follow::Prototype(*id, self.peek().unwrap().span),
             _ => Follow::None,
         }
     }

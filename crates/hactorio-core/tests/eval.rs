@@ -96,10 +96,7 @@ fn redefinition_keeps_the_first_binding() {
 #[test]
 fn failed_definitions_poison_the_name() {
     let registry = registry();
-    let outputs = run(
-        &registry,
-        "a = :iron-plate: + :iron-ore:\nb = a + 1\na",
-    );
+    let outputs = run(&registry, "a = :iron-plate: + :iron-ore:\nb = a + 1\na");
 
     let original = error(&outputs[0]).message.clone();
     assert!(original.contains("different units"), "{original}");
@@ -146,7 +143,11 @@ fn machine_configurations_must_match_to_add() {
         &registry,
         "@:assembling-machine-3: + @:assembling-machine-3: :speed-module-3:",
     );
-    assert!(error(&outputs[0]).message.contains("different configurations"));
+    assert!(
+        error(&outputs[0])
+            .message
+            .contains("different configurations")
+    );
 }
 
 #[test]
@@ -294,7 +295,10 @@ fn craft_quantities_need_making() {
 #[test]
 fn in_requires_exactly_one_machine() {
     let registry = registry();
-    let outputs = run(&registry, "100 :iron-plate: / second in 2 @:electric-furnace:");
+    let outputs = run(
+        &registry,
+        "100 :iron-plate: / second in 2 @:electric-furnace:",
+    );
     assert!(error(&outputs[0]).message.contains("exactly one machine"));
 }
 

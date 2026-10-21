@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap};
 use hactorio_data::{EntryId, RecipeId, Registry};
 use thiserror::Error;
 
-use crate::ast::{BinaryOp, Expr, MachineSpec, Span, StatementKind, ModuleUse};
+use crate::ast::{BinaryOp, Expr, MachineSpec, ModuleUse, Span, StatementKind};
 use crate::belt::belt_value;
 use crate::config;
 use crate::line_cache::LineCache;
@@ -152,13 +152,8 @@ pub fn evaluate(
             ),
             Ok(statement) => {
                 let span = statement.span;
-                let (output, eval) = evaluate_statement(
-                    &statement.kind,
-                    &mut variables,
-                    settings,
-                    registry,
-                    span,
-                );
+                let (output, eval) =
+                    evaluate_statement(&statement.kind, &mut variables, settings, registry, span);
                 (span, output, eval)
             }
         };
@@ -184,24 +179,22 @@ fn evaluate_statement(
 ) -> (LineOutput, Option<Eval>) {
     match kind {
         StatementKind::Blank | StatementKind::Comment => (LineOutput::Nothing, None),
-        StatementKind::Expression(expr) => match eval_expr(expr, variables, settings, registry, span)
-        {
-            Ok(value) => {
-                let output = match output_of(&value, registry, span) {
-                    Ok(output) => LineOutput::Value(output),
-                    Err(error) => LineOutput::Error(error),
-                };
-                (output, Some(value))
+        StatementKind::Expression(expr) => {
+            match eval_expr(expr, variables, settings, registry, span) {
+                Ok(value) => {
+                    let output = match output_of(&value, registry, span) {
+                        Ok(output) => LineOutput::Value(output),
+                        Err(error) => LineOutput::Error(error),
+                    };
+                    (output, Some(value))
+                }
+                Err(error) => (LineOutput::Error(error), None),
             }
-            Err(error) => (LineOutput::Error(error), None),
-        },
+        }
         StatementKind::Definition { name, value } => {
             if variables.contains_key(name) {
                 return (
-                    LineOutput::Error(EvalError::new(
-                        span,
-                        format!("`{name}` is already defined"),
-                    )),
+                    LineOutput::Error(EvalError::new(span, format!("`{name}` is already defined"))),
                     None,
                 );
             }
@@ -232,10 +225,7 @@ fn eval_expr(
         Expr::Variable(name) => match variables.get(name) {
             Some(Ok(value)) => Ok(value.clone()),
             Some(Err(error)) => Err(EvalError::new(span, error.message.clone())),
-            None => Err(EvalError::new(
-                span,
-                format!("unknown variable `{name}`"),
-            )),
+            None => Err(EvalError::new(span, format!("unknown variable `{name}`"))),
         },
         Expr::Belt {
             count,
@@ -349,10 +339,7 @@ fn eval_in(
             (recipe.machine, recipe.modules, Some(recipe.recipe))
         }
         Eval::Scalar(_) => {
-            return Err(EvalError::new(
-                span,
-                "`in` needs a machine on the right",
-            ));
+            return Err(EvalError::new(span, "`in` needs a machine on the right"));
         }
     };
 
@@ -440,12 +427,7 @@ fn selection(value: &Value) -> Option<Selection> {
     })
 }
 
-fn eval_binary(
-    op: BinaryOp,
-    lhs: Eval,
-    rhs: Eval,
-    span: Span,
-) -> Result<Eval, EvalError> {
+fn eval_binary(op: BinaryOp, lhs: Eval, rhs: Eval, span: Span) -> Result<Eval, EvalError> {
     match op {
         BinaryOp::Pow => match (lhs, rhs) {
             (Eval::Scalar(lhs), Eval::Scalar(rhs)) => lhs
@@ -466,7 +448,9 @@ fn eval_binary(
                     } else {
                         lhs.add(&rhs)
                     };
-                    result.map(Eval::Scalar).map_err(|error| value_error(error, span))
+                    result
+                        .map(Eval::Scalar)
+                        .map_err(|error| value_error(error, span))
                 }
                 (Eval::Machine(lhs), Eval::Machine(rhs)) => {
                     same_machine(&lhs, &rhs, span)?;
@@ -543,9 +527,7 @@ fn eval_binary(
                     count: machine.count / scalar.coef(),
                 }))
             }
-            (Eval::Recipe(recipe), Eval::Scalar(scalar)) => {
-                divide_recipe(recipe, &scalar, span)
-            }
+            (Eval::Recipe(recipe), Eval::Scalar(scalar)) => divide_recipe(recipe, &scalar, span),
             (lhs, rhs) => Err(EvalError::new(
                 span,
                 format!("cannot divide {} by {}", describe(&lhs), describe(&rhs)),
@@ -554,11 +536,7 @@ fn eval_binary(
     }
 }
 
-fn scale_machine(
-    machine: MachineValue,
-    scalar: &Value,
-    span: Span,
-) -> Result<Eval, EvalError> {
+fn scale_machine(machine: MachineValue, scalar: &Value, span: Span) -> Result<Eval, EvalError> {
     if !scalar.is_dimensionless() {
         return Err(EvalError::new(
             span,
@@ -572,11 +550,7 @@ fn scale_machine(
     }))
 }
 
-fn multiply_recipe(
-    recipe: RecipeValue,
-    scalar: &Value,
-    span: Span,
-) -> Result<Eval, EvalError> {
+fn multiply_recipe(recipe: RecipeValue, scalar: &Value, span: Span) -> Result<Eval, EvalError> {
     if scalar.is_dimensionless() {
         return Ok(Eval::Recipe(RecipeValue {
             quantity: with_magnitude(recipe.quantity, recipe.quantity.magnitude() * scalar.coef()),
@@ -601,11 +575,7 @@ fn multiply_recipe(
     }
 }
 
-fn divide_recipe(
-    recipe: RecipeValue,
-    scalar: &Value,
-    span: Span,
-) -> Result<Eval, EvalError> {
+fn divide_recipe(recipe: RecipeValue, scalar: &Value, span: Span) -> Result<Eval, EvalError> {
     if scalar.is_dimensionless() {
         return Ok(Eval::Recipe(RecipeValue {
             quantity: with_magnitude(recipe.quantity, recipe.quantity.magnitude() / scalar.coef()),
@@ -648,10 +618,7 @@ fn same_quantity_kind(
     match (lhs, rhs) {
         (RecipeQuantity::Machines(_), RecipeQuantity::Machines(_))
         | (RecipeQuantity::MachineSeconds(_), RecipeQuantity::MachineSeconds(_)) => Ok(()),
-        _ => Err(EvalError::new(
-            span,
-            "cannot add machines to machine time",
-        )),
+        _ => Err(EvalError::new(span, "cannot add machines to machine time")),
     }
 }
 
@@ -685,12 +652,8 @@ fn output_of(value: &Eval, registry: &Registry, span: Span) -> Result<Output, Ev
                     scaled.insert(unit, amount);
                 }
             }
-            let modifiers = config::modifiers(
-                registry,
-                recipe.machine,
-                &recipe.modules,
-                Some(recipe_data),
-            );
+            let modifiers =
+                config::modifiers(registry, recipe.machine, &recipe.modules, Some(recipe_data));
             let total_energy_j = match recipe.quantity {
                 RecipeQuantity::MachineSeconds(tau) => Some(tau * modifiers.power_w),
                 RecipeQuantity::Machines(_) => None,
