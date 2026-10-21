@@ -64,6 +64,10 @@ pub struct HactorioApp {
     initial_size: Option<[f32; 2]>,
     sized: bool,
     window: Option<Window>,
+    /// Cursor to restore on the first frame, as `(line, column)`.
+    pending_focus: Option<(usize, usize)>,
+    /// Generation whose results are currently displayed.
+    applied: u64,
 }
 
 enum LoadState {
@@ -72,7 +76,7 @@ enum LoadState {
 }
 
 impl HactorioApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, document: Document, app_dir: PathBuf) -> Self {
+    pub fn new(ctx: &egui::Context, document: Document, app_dir: PathBuf) -> Self {
         let mut tabs: Vec<Tab> = if document.tabs.is_empty() {
             vec![Tab::from_text("# Main\n")]
         } else {
@@ -95,11 +99,7 @@ impl HactorioApp {
         };
         let install = locate();
         if let (Some(registry), Some(install)) = (&registry, &install) {
-            icons::install(
-                &cc.egui_ctx,
-                Arc::clone(registry),
-                &install.icon_source(),
-            );
+            icons::install(ctx, Arc::clone(registry), &install.icon_source());
         }
 
         HactorioApp {
@@ -121,6 +121,11 @@ impl HactorioApp {
             initial_size: document.window.map(|window| [window.width, window.height]),
             sized: false,
             window: document.window,
+            pending_focus: document
+                .cursors
+                .get(active)
+                .map(|cursor| (cursor.line, cursor.column)),
+            applied: 0,
         }
     }
 
@@ -135,6 +140,7 @@ impl HactorioApp {
         while let Some(response) = self.evaluator.poll() {
             if response.generation == self.pending {
                 self.outputs = response.outputs;
+                self.applied = response.generation;
             }
         }
     }
@@ -363,7 +369,7 @@ impl HactorioApp {
     }
 
     /// Full results for the line under the caret, floating beside it.
-    fn detail_panel(&self, ctx: &Context, anchor: egui::Pos2, line: usize) {
+    fn detail_panel(&self, ctx: &Context, anchor: egui::Pos2, line: usize, width: f32) {
         let (Some(registry), Some(tab)) = (&self.registry, self.tabs.get(self.active)) else {
             return;
         };
@@ -378,8 +384,9 @@ impl HactorioApp {
         }
 
         let screen = ctx.viewport_rect();
+        let width = width.clamp(240.0, 420.0);
         let pos = egui::pos2(
-            anchor.x.min(screen.right() - 420.0).max(screen.left() + 8.0),
+            anchor.x.min(screen.right() - width).max(screen.left() + 8.0),
             anchor.y.min(screen.bottom() - 160.0).max(screen.top() + 8.0),
         );
         egui::Area::new(egui::Id::unique("line_detail"))
@@ -388,7 +395,8 @@ impl HactorioApp {
             .interactable(false)
             .show(ctx, |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.set_max_width(420.0);
+                    ui.set_min_width((width - 20.0).max(240.0));
+                    ui.set_max_width(width);
                     detail_ui(ui, statement, &self.settings, registry);
                 });
             });
@@ -424,8 +432,9 @@ impl HactorioApp {
     }
 }
 
-impl eframe::App for HactorioApp {
-    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+impl HactorioApp {
+    /// One frame of the whole app.
+    pub fn ui(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         if !self.sized {
             if let Some(size) = self.initial_size {
@@ -446,6 +455,9 @@ impl eframe::App for HactorioApp {
         self.poll_load(&ctx);
         self.poll_evaluator();
         self.maybe_request();
+        if self.applied < self.pending {
+            ctx.request_repaint_after(Duration::from_millis(16));
+        }
 
         egui::Panel::top("tabs").show(ui, |ui| {
             self.tabs_bar(ui);
@@ -491,6 +503,7 @@ impl eframe::App for HactorioApp {
                 &self.outputs,
                 &self.settings,
                 self.registry.as_deref(),
+                &mut self.pending_focus,
             );
             if result.changed {
                 self.dirty = true;
@@ -499,8 +512,8 @@ impl eframe::App for HactorioApp {
             if let Some(line) = result.focused {
                 self.focus_line = Some(line);
             }
-            if let Some((line, anchor)) = result.detail {
-                self.detail_panel(&ctx, anchor, line);
+            if let Some((line, anchor, width)) = result.detail {
+                self.detail_panel(&ctx, anchor, line, width);
             }
         });
 
@@ -509,8 +522,15 @@ impl eframe::App for HactorioApp {
         }
     }
 
+}
+
+impl eframe::App for HactorioApp {
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        HactorioApp::ui(self, ui);
+    }
+
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {
-        self.save();
+        HactorioApp::save(self);
     }
 }
 
@@ -518,8 +538,8 @@ struct EditorResult {
     changed: bool,
     /// The line the caret is on, while the editor has focus.
     focused: Option<usize>,
-    /// Where to place the full-results panel for the focused line.
-    detail: Option<(usize, egui::Pos2)>,
+    /// Where to place the full-results panel for the focused line, and its width.
+    detail: Option<(usize, egui::Pos2, f32)>,
 }
 
 /// Renders the tab as one multiline editor, with line numbers and outputs
@@ -531,6 +551,7 @@ fn editor_ui(
     outputs: &[StatementOutput],
     settings: &Settings,
     registry: Option<&Registry>,
+    pending_focus: &mut Option<(usize, usize)>,
 ) -> EditorResult {
     let mut result = EditorResult {
         changed: false,
@@ -550,10 +571,10 @@ fn editor_ui(
         .max()
         .unwrap_or(0);
     let number_width = 44.0;
-    let gutter_width = (ui.available_width() * 0.45).max(180.0);
-    let editor_width = (ui.available_width() - number_width - gutter_width - 24.0)
-        .max(longest as f32 * char_width + 24.0)
-        .max(200.0);
+    let central_width = ui.available_width();
+    let gutter_width = (central_width * 0.45).max(180.0);
+    let editor_width = (central_width - number_width - gutter_width - 28.0).max(200.0);
+    let editor_content_width = (longest as f32 * char_width + 24.0).max(editor_width);
 
     let mut layouter = |ui: &Ui, buffer: &dyn egui::TextBuffer, _wrap_width: f32| {
         let mut job = egui::text::LayoutJob::simple(
@@ -566,21 +587,53 @@ fn editor_ui(
         ui.fonts_mut(|fonts| fonts.layout_job(job))
     };
 
-    let scroll = ScrollArea::both()
+    let scroll = ScrollArea::vertical()
         .id_salt(("editor", active))
         .vertical_scroll_offset(tab.scroll)
         .show(ui, |ui| {
             ui.horizontal_top(|ui| {
                 ui.add_space(number_width);
-                let text_edit = TextEdit::multiline(&mut tab.text)
-                    .code_editor()
-                    .desired_width(editor_width)
-                    .desired_rows(line_count.max(6))
-                    .margin(egui::Margin::symmetric(4, 4))
-                    .layouter(&mut layouter)
-                    .id_salt(("text", active))
-                    .show(ui);
+                let text_id = ui.make_persistent_id(("text", active));
+                let hscroll = ScrollArea::horizontal()
+                    .id_salt(("text_scroll", active))
+                    .max_width(editor_width)
+                    .show(ui, |ui| {
+                        TextEdit::multiline(&mut tab.text)
+                            .code_editor()
+                            .desired_width(editor_content_width)
+                            .desired_rows(line_count.max(6))
+                            .margin(egui::Margin::symmetric(4, 4))
+                            .layouter(&mut layouter)
+                            .id(text_id)
+                            .show(ui)
+                    });
+                let text_edit = hscroll.inner;
                 result.changed |= text_edit.response.changed();
+
+                if let Some((line, column)) = *pending_focus {
+                    let start: usize = tab
+                        .text
+                        .split('\n')
+                        .take(line)
+                        .map(|text| text.chars().count() + 1)
+                        .sum();
+                    let length = tab
+                        .text
+                        .split('\n')
+                        .nth(line)
+                        .map(|text| text.chars().count())
+                        .unwrap_or(0);
+                    let index = start + column.min(length);
+                    let stored = egui::text_edit::TextEditState::load(ui.ctx(), text_id);
+                    if let Some(mut state) = stored {
+                        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                            egui::text::CCursor::new(index),
+                        )));
+                        state.store(ui.ctx(), text_id);
+                        *pending_focus = None;
+                    }
+                    ui.memory_mut(|memory| memory.request_focus(text_id));
+                }
 
                 if let Some(range) = text_edit.cursor_range {
                     let line = tab
@@ -595,9 +648,11 @@ fn editor_ui(
                     }
                 }
 
-                let frame = text_edit.response.rect;
-                let galley = &text_edit.galley;
+                let viewport = hscroll.inner_rect;
                 let origin = text_edit.galley_pos;
+                let galley = &text_edit.galley;
+                let gutter_x = viewport.right() + 12.0;
+                let gutter_room = (ui.available_width() - 16.0).max(120.0);
                 let weak = ui.visuals().weak_text_color();
                 let error_color = Color32::from_rgb(220, 90, 90);
                 let painter = ui.painter();
@@ -608,7 +663,7 @@ fn editor_ui(
                     };
                     let y = origin.y + row.pos.y;
                     painter.text(
-                        egui::pos2(origin.x - 10.0, y),
+                        egui::pos2(viewport.left() - 10.0, y),
                         egui::Align2::RIGHT_TOP,
                         format!("{}", index + 1),
                         font_id.clone(),
@@ -625,10 +680,7 @@ fn editor_ui(
                         continue;
                     };
                     if result.focused == Some(index) {
-                        result.detail = Some((
-                            index,
-                            egui::pos2(frame.max.x + 4.0, y),
-                        ));
+                        result.detail = Some((index, egui::pos2(gutter_x, y), gutter_room));
                         continue;
                     }
                     let color = if matches!(statement.output, LineOutput::Error(_)) {
@@ -636,9 +688,9 @@ fn editor_ui(
                     } else {
                         weak
                     };
-                    let text = truncate_text(painter, &text, &font_id, gutter_width - 8.0);
+                    let text = truncate_text(painter, &text, &font_id, gutter_room);
                     painter.text(
-                        egui::pos2(frame.max.x + 12.0, y),
+                        egui::pos2(gutter_x, y),
                         egui::Align2::LEFT_TOP,
                         text,
                         font_id.clone(),
@@ -728,6 +780,7 @@ fn detail_ui(
 
             egui::Grid::new("detail_items")
                 .num_columns(2)
+                .min_col_width(90.0)
                 .spacing([18.0, 2.0])
                 .show(ui, |ui| {
                     ui.label(RichText::new("produces").weak());
@@ -762,7 +815,7 @@ fn detail_ui(
             let glyph = registry.entry_by_index(recipe.machine).glyph;
             ui.label(
                 RichText::new(format!(
-                    "{} /{glyph}",
+                    "{}/{glyph}",
                     format_power(recipe.per_machine_power_w, settings)
                 ))
                 .monospace(),
@@ -818,5 +871,67 @@ fn output_text(
             }
             Some(text)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::{Cursor, Document};
+    use egui_kittest::Harness;
+
+    fn sample_document() -> Document {
+        let text = "# Main\n\
+            rate = 3 :iron-plate: / second\n\
+            100 :electronic-circuit: / second in @:assembling-machine-3: making :electronic-circuit:\n\
+            @:electric-furnace: 2 :productivity-module-3: making :iron-plate:\n\
+            100 :iron-plate: in @:electric-furnace:\n\
+            2 sgb :iron-plate:\n\
+            3 m + 4\n";
+        Document {
+            tabs: vec![text.to_string()],
+            cursors: vec![Cursor {
+                line: 3,
+                column: 0,
+                scroll: 0.0,
+            }],
+            ..Document::default()
+        }
+    }
+
+    /// Renders the app offscreen and writes a snapshot.
+    ///
+    /// Opt-in: set `HACTORIO_UI_SNAPSHOT=1` and run with `UPDATE_SNAPSHOTS=force`.
+    /// It needs a post-processed cache and the game's icon files.
+    #[test]
+    fn ui_snapshot() {
+        if std::env::var_os("HACTORIO_UI_SNAPSHOT").is_none() {
+            return;
+        }
+        let app_dir = data_dir();
+        if !app_dir.join("cache.json").is_file() || locate().is_none() {
+            eprintln!("skipping: no game data cache or Factorio install");
+            return;
+        }
+
+        let document = sample_document();
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(1280.0, 800.0))
+            .with_accessibility_check(false)
+            .allow_missing_glyphs()
+            .wgpu()
+            .with_max_steps(60)
+            .build_ui_state(
+                move |ui, app: &mut Option<HactorioApp>| {
+                    let app = app.get_or_insert_with(|| {
+                        HactorioApp::new(ui.ctx(), document.clone(), app_dir.clone())
+                    });
+                    app.ui(ui);
+                },
+                None,
+            );
+
+        harness.run();
+        harness.snapshot("app");
     }
 }

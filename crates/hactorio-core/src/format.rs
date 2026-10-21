@@ -277,7 +277,7 @@ fn format_recipe(
 
     if rate {
         rows.push(format!(
-            "{} /{machine_glyph}",
+            "{}/{machine_glyph}",
             format_power(recipe.per_machine_power_w, settings)
         ));
         let count = recipe.quantity.magnitude();

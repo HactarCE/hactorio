@@ -104,7 +104,7 @@ fn machine_rates_render_produces_consumes_craft_and_power() {
     );
     assert!(formatted.rows.contains(&"100 craft/s".to_string()), "{:?}", formatted.rows);
     assert!(
-        formatted.rows.contains(&format!("375 kW /{}", registry.entry("assembling-machine-3").unwrap().glyph)),
+        formatted.rows.contains(&format!("375 kW/{}", registry.entry("assembling-machine-3").unwrap().glyph)),
         "{:?}",
         formatted.rows
     );
