@@ -1103,9 +1103,10 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                                                             Some(response.rect);
                                                     }
                                                     if needs_scroll && index == selected {
-                                                        ui.scroll_to_rect(
+                                                        ui.scroll_to_rect_animation(
                                                             response.rect,
                                                             Some(egui::Align::Center),
+                                                            egui::style::ScrollAnimation::none(),
                                                         );
                                                     }
                                                 }
