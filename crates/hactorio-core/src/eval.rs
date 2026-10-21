@@ -86,6 +86,8 @@ pub struct StatementOutput {
     pub source_hash: u64,
     pub span: Span,
     pub output: LineOutput,
+    /// The evaluated value, kept so the focused line can show a breakdown.
+    pub eval: Option<Eval>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -104,11 +106,13 @@ pub enum Output {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MachineOutput {
+    pub machine: EntryId,
     pub count: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecipeOutput {
+    pub machine: EntryId,
     pub quantity: RecipeQuantity,
     /// Net amounts per base unit: rates for `Machines`, totals for
     /// `MachineSeconds`. Rows are signed and never zero.
@@ -137,24 +141,25 @@ pub fn evaluate(
 
     for (index, line) in lines.iter().enumerate() {
         seen.insert(*line);
-        let (span, output) = match cache.statement(line, registry) {
+        let (span, output, eval) = match cache.statement(line, registry) {
             Err(error) => (
                 error.span,
                 LineOutput::Error(EvalError {
                     span: error.span,
                     message: error.message,
                 }),
+                None,
             ),
             Ok(statement) => {
                 let span = statement.span;
-                let output = evaluate_statement(
+                let (output, eval) = evaluate_statement(
                     &statement.kind,
                     &mut variables,
                     settings,
                     registry,
                     span,
                 );
-                (span, output)
+                (span, output, eval)
             }
         };
         outputs.push(StatementOutput {
@@ -162,6 +167,7 @@ pub fn evaluate(
             source_hash: hash_line(line),
             span,
             output,
+            eval,
         });
     }
 
@@ -175,33 +181,40 @@ fn evaluate_statement(
     settings: &Settings,
     registry: &Registry,
     span: Span,
-) -> LineOutput {
+) -> (LineOutput, Option<Eval>) {
     match kind {
-        StatementKind::Blank | StatementKind::Comment => LineOutput::Nothing,
+        StatementKind::Blank | StatementKind::Comment => (LineOutput::Nothing, None),
         StatementKind::Expression(expr) => match eval_expr(expr, variables, settings, registry, span)
         {
-            Ok(value) => match output_of(&value, registry, span) {
-                Ok(output) => LineOutput::Value(output),
-                Err(error) => LineOutput::Error(error),
-            },
-            Err(error) => LineOutput::Error(error),
+            Ok(value) => {
+                let output = match output_of(&value, registry, span) {
+                    Ok(output) => LineOutput::Value(output),
+                    Err(error) => LineOutput::Error(error),
+                };
+                (output, Some(value))
+            }
+            Err(error) => (LineOutput::Error(error), None),
         },
         StatementKind::Definition { name, value } => {
             if variables.contains_key(name) {
-                return LineOutput::Error(EvalError::new(
-                    span,
-                    format!("`{name}` is already defined"),
-                ));
+                return (
+                    LineOutput::Error(EvalError::new(
+                        span,
+                        format!("`{name}` is already defined"),
+                    )),
+                    None,
+                );
             }
             let result = eval_expr(value, variables, settings, registry, span);
             let output = match &result {
                 Ok(value) => output_of(value, registry, span),
                 Err(error) => Err(error.clone()),
             };
+            let eval = result.as_ref().ok().cloned();
             variables.insert(name.clone(), result);
             match output {
-                Ok(output) => LineOutput::Value(output),
-                Err(error) => LineOutput::Error(error),
+                Ok(output) => (LineOutput::Value(output), eval),
+                Err(error) => (LineOutput::Error(error), eval),
             }
         }
     }
@@ -657,6 +670,7 @@ fn output_of(value: &Eval, registry: &Registry, span: Span) -> Result<Output, Ev
     match value {
         Eval::Scalar(value) => Ok(Output::Scalar(value.clone())),
         Eval::Machine(machine) => Ok(Output::Machine(MachineOutput {
+            machine: machine.machine,
             count: machine.count,
         })),
         Eval::Recipe(recipe) => {
@@ -682,6 +696,7 @@ fn output_of(value: &Eval, registry: &Registry, span: Span) -> Result<Output, Ev
                 RecipeQuantity::Machines(_) => None,
             };
             Ok(Output::Recipe(RecipeOutput {
+                machine: recipe.machine,
                 quantity: recipe.quantity,
                 net: scaled,
                 per_machine_power_w: modifiers.power_w,

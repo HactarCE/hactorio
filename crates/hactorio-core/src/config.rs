@@ -19,6 +19,8 @@ pub(crate) struct Modifiers {
     pub power_w: f64,
     /// Pollution per minute of one machine.
     pub pollution_per_minute: f64,
+    /// `1 + sum of consumption effects`.
+    pub consumption_multiplier: f64,
 }
 
 /// Checks a machine configuration, and the recipe against it when one is known.
@@ -103,6 +105,7 @@ pub(crate) fn modifiers(
             productivity: 0.0,
             power_w: 0.0,
             pollution_per_minute: 0.0,
+            consumption_multiplier: 1.0,
         };
     };
     let allowed = data.allowed_effects;
@@ -142,6 +145,7 @@ pub(crate) fn modifiers(
         pollution_per_minute: data.pollution_per_minute
             * (1.0 + consumption_sum)
             * (1.0 + pollution_sum),
+        consumption_multiplier: 1.0 + consumption_sum,
     }
 }
 

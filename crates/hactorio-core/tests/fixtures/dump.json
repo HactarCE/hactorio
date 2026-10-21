@@ -1,0 +1,78 @@
+{
+  "item": {
+    "iron-plate": {"type": "item", "name": "iron-plate", "stack_size": 100, "icon": "a.png"},
+    "iron-ore": {"type": "item", "name": "iron-ore", "stack_size": 50, "icon": "b.png"},
+    "copper-plate": {"type": "item", "name": "copper-plate", "stack_size": 100, "icon": "b2.png"},
+    "electronic-circuit": {"type": "item", "name": "electronic-circuit", "stack_size": 200, "icon": "c.png"},
+    "catalyst": {"type": "item", "name": "catalyst", "stack_size": 1, "icon": "d.png"},
+    "assembling-machine-3": {"type": "item", "name": "assembling-machine-3", "stack_size": 50, "icon": "e.png"},
+    "electric-furnace": {"type": "item", "name": "electric-furnace", "stack_size": 50, "icon": "f.png"},
+    "stone-furnace": {"type": "item", "name": "stone-furnace", "stack_size": 50, "icon": "g.png"}
+  },
+  "fluid": {
+    "water": {"type": "fluid", "name": "water", "icon": "h.png"}
+  },
+  "module": {
+    "speed-module-3": {
+      "type": "module", "name": "speed-module-3", "category": "speed",
+      "tier": 3, "stack_size": 50,
+      "effect": {"speed": 0.5, "consumption": 0.7, "quality": -0.025}
+    },
+    "productivity-module-3": {
+      "type": "module", "name": "productivity-module-3", "category": "productivity",
+      "tier": 3, "stack_size": 50,
+      "effect": {"speed": -0.15, "productivity": 0.1, "consumption": 0.8, "pollution": 0.1}
+    }
+  },
+  "recipe": {
+    "iron-plate": {
+      "type": "recipe", "name": "iron-plate", "categories": ["smelting"],
+      "energy_required": 3.2,
+      "ingredients": [{"type": "item", "name": "iron-ore", "amount": 1}],
+      "results": [{"type": "item", "name": "iron-plate", "amount": 1}],
+      "allow_productivity": true
+    },
+    "copper-plate": {
+      "type": "recipe", "name": "copper-plate", "categories": ["smelting"],
+      "energy_required": 3.2,
+      "ingredients": [{"type": "item", "name": "iron-ore", "amount": 1}],
+      "results": [{"type": "item", "name": "copper-plate", "amount": 1}],
+      "allow_productivity": true
+    },
+    "electronic-circuit": {
+      "type": "recipe", "name": "electronic-circuit", "categories": ["crafting"],
+      "energy_required": 0.5,
+      "ingredients": [{"type": "item", "name": "iron-plate", "amount": 1}],
+      "results": [{"type": "item", "name": "electronic-circuit", "amount": 1}],
+      "allow_productivity": true
+    },
+    "catalyst-cycle": {
+      "type": "recipe", "name": "catalyst-cycle", "categories": ["crafting"],
+      "energy_required": 1,
+      "ingredients": [{"type": "item", "name": "catalyst", "amount": 1}],
+      "results": [{"type": "item", "name": "catalyst", "amount": 1}],
+      "allow_productivity": false
+    }
+  },
+  "assembling-machine": {
+    "assembling-machine-3": {
+      "type": "assembling-machine", "name": "assembling-machine-3",
+      "crafting_categories": ["crafting"], "crafting_speed": 1.25, "module_slots": 4,
+      "allowed_effects": ["speed", "productivity", "consumption", "pollution"], "energy_usage": "375kW",
+      "energy_source": {"type": "electric", "emissions_per_minute": {"pollution": 2}}
+    }
+  },
+  "furnace": {
+    "electric-furnace": {
+      "type": "furnace", "name": "electric-furnace",
+      "crafting_categories": ["smelting"], "crafting_speed": 2, "module_slots": 2,
+      "allowed_effects": ["speed", "productivity", "consumption", "pollution"], "energy_usage": "180kW",
+      "energy_source": {"type": "electric", "emissions_per_minute": {"pollution": 2}}
+    },
+    "stone-furnace": {
+      "type": "furnace", "name": "stone-furnace",
+      "crafting_categories": ["smelting"], "crafting_speed": 1, "module_slots": 2,
+      "allowed_effects": ["speed", "consumption"], "energy_usage": "90kW"
+    }
+  }
+}

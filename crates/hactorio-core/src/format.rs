@@ -3,6 +3,7 @@
 use hactorio_data::{EntryId, Registry};
 
 use crate::belt::belt_capacity;
+use crate::eval::{Output, RecipeOutput, RecipeQuantity};
 use crate::settings::{Settings, TimeUnit};
 use crate::value::{BaseUnit, Value};
 
@@ -200,4 +201,163 @@ fn format_decimal(value: f64, max_decimals: usize) -> String {
         }
     }
     text
+}
+
+/// A rendered gutter output: one headline and optional detail rows.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Formatted {
+    pub headline: String,
+    pub rows: Vec<String>,
+}
+
+/// Renders the gutter output for one statement.
+pub fn format_output(output: &Output, settings: &Settings, registry: &Registry) -> Formatted {
+    match output {
+        Output::Scalar(value) => Formatted {
+            headline: format_value(value, settings, registry),
+            rows: Vec::new(),
+        },
+        Output::Machine(machine) => Formatted {
+            headline: machine_headline(machine.machine, machine.count, settings, registry),
+            rows: Vec::new(),
+        },
+        Output::Recipe(recipe) => format_recipe(recipe, settings, registry),
+    }
+}
+
+fn format_recipe(
+    recipe: &RecipeOutput,
+    settings: &Settings,
+    registry: &Registry,
+) -> Formatted {
+    let rate = matches!(recipe.quantity, RecipeQuantity::Machines(_));
+    let headline = if rate {
+        machine_headline(
+            recipe.machine,
+            recipe.quantity.magnitude(),
+            settings,
+            registry,
+        )
+    } else {
+        format_value(
+            &Value::seconds(recipe.quantity.magnitude()),
+            settings,
+            registry,
+        )
+    };
+
+    let mut rows = Vec::new();
+    let mut units: Vec<(BaseUnit, f64)> = recipe
+        .net
+        .iter()
+        .filter(|(unit, _)| **unit != BaseUnit::Craft)
+        .map(|(unit, amount)| (*unit, *amount))
+        .collect();
+    units.sort_by_key(|(unit, _)| unit_name(*unit, registry));
+
+    for (unit, amount) in units {
+        let direction = if amount > 0.0 { "produces" } else { "consumes" };
+        rows.push(format!(
+            "{direction} {}",
+            format_amount(amount.abs(), unit, rate, settings, registry)
+        ));
+    }
+
+    if let Some(craft) = recipe.net.get(&BaseUnit::Craft).copied() {
+        let value = if rate {
+            Value::new(craft, [(BaseUnit::Craft, 1), (BaseUnit::Second, -1)])
+        } else {
+            Value::crafts(craft)
+        };
+        rows.push(format_value(&value, settings, registry));
+    }
+
+    if rate {
+        rows.push(format!(
+            "{} per machine",
+            format_power(recipe.per_machine_power_w, settings)
+        ));
+        let count = recipe.quantity.magnitude();
+        if count != 1.0 {
+            rows.push(format!(
+                "{} total",
+                format_power(recipe.per_machine_power_w * count, settings)
+            ));
+        }
+    } else if let Some(energy) = recipe.total_energy_j {
+        rows.push(format!("{} total energy", format_energy(energy, settings)));
+    }
+
+    Formatted { headline, rows }
+}
+
+fn machine_headline(
+    machine: EntryId,
+    count: f64,
+    settings: &Settings,
+    registry: &Registry,
+) -> String {
+    format!(
+        "{} {}",
+        format_value(&Value::scalar(count), settings, registry),
+        registry.entry_by_index(machine).glyph
+    )
+}
+
+pub(crate) fn format_amount(
+    amount: f64,
+    unit: BaseUnit,
+    rate: bool,
+    settings: &Settings,
+    registry: &Registry,
+) -> String {
+    let value = if rate {
+        Value::new(amount, [(unit, 1), (BaseUnit::Second, -1)])
+    } else {
+        Value::new(amount, [(unit, 1)])
+    };
+    format_value(&value, settings, registry)
+}
+
+pub(crate) fn format_power(watts: f64, settings: &Settings) -> String {
+    format_si(watts, "W", settings)
+}
+
+pub(crate) fn format_energy(joules: f64, settings: &Settings) -> String {
+    format_si(joules, "J", settings)
+}
+
+pub(crate) fn format_plain_number(value: f64, settings: &Settings) -> String {
+    if value.is_nan() {
+        return "NaN".to_string();
+    }
+    if value.is_infinite() {
+        return if value < 0.0 { "-inf" } else { "inf" }.to_string();
+    }
+    format_decimal(value, settings.max_decimals)
+}
+
+fn format_si(value: f64, unit: &str, settings: &Settings) -> String {
+    if value.is_nan() {
+        return format!("NaN {unit}");
+    }
+    if value.is_infinite() {
+        return format!("{} {unit}", if value < 0.0 { "-inf" } else { "inf" });
+    }
+    let (scaled, prefix) = metric_scale(value);
+    format!(
+        "{} {prefix}{unit}",
+        format_decimal(scaled, settings.max_decimals)
+    )
+}
+
+fn unit_name(unit: BaseUnit, registry: &Registry) -> String {
+    match unit {
+        BaseUnit::Item(id) | BaseUnit::Fluid(id) => {
+            registry.entry_by_index(id).id.to_string()
+        }
+        BaseUnit::Second => "second".to_string(),
+        BaseUnit::Joule => "joule".to_string(),
+        BaseUnit::Craft => "craft".to_string(),
+    }
 }
