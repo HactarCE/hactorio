@@ -11,6 +11,7 @@ hactorio-data.workspace = true
 image.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sublime_fuzzy.workspace = true
 
 [dev-dependencies]
 egui_kittest = { version = "0.37.0", features = ["snapshot", "wgpu"] }

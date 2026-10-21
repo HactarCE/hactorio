@@ -894,6 +894,21 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                                 .show(ui.ctx(), |ui| {
                                     let style = ui.style();
                                     let font_id = TextStyle::Monospace.resolve(style);
+                                    let glyph_width = completion
+                                        .items
+                                        .iter()
+                                        .map(|item| {
+                                            ui.fonts_mut(|fonts| {
+                                                fonts.glyph_width(&font_id, item.glyph)
+                                            })
+                                        })
+                                        .fold(0.0, f32::max);
+                                    let label_width = completion
+                                        .items
+                                        .iter()
+                                        .map(|item| item.label.chars().count())
+                                        .max()
+                                        .unwrap_or(0);
                                     let text_width = completion
                                         .items
                                         .iter()
@@ -901,7 +916,7 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                                             ui.fonts_mut(|fonts| {
                                                 fonts
                                                     .layout_no_wrap(
-                                                        completion_label(item),
+                                                        completion_row_text(item, label_width),
                                                         font_id.clone(),
                                                         Color32::WHITE,
                                                     )
@@ -910,10 +925,13 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                                             })
                                         })
                                         .fold(0.0, f32::max);
+                                    let column_gap = 8.0;
                                     let chrome = egui::Frame::popup(style);
                                     let chrome_width =
                                         chrome.inner_margin.sum().x + 2.0 * chrome.stroke.width;
-                                    let content_width = (text_width
+                                    let content_width = (glyph_width
+                                        + column_gap
+                                        + text_width
                                         + 2.0 * style.spacing.button_padding.x
                                         + style.spacing.scroll.allocated_width())
                                     .max(300.0);
@@ -931,20 +949,38 @@ fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorR
                                         egui::ScrollArea::vertical()
                                             .max_height(COMPLETION_MAX_HEIGHT)
                                             .show(ui, |ui| {
-                                                for (index, item) in
-                                                    completion.items.iter().enumerate()
-                                                {
-                                                    if ui
-                                                        .selectable_label(
-                                                            index == completion.selected,
-                                                            RichText::new(completion_label(item))
+                                                egui::Grid::new(("completion_rows", active))
+                                                    .num_columns(2)
+                                                    .spacing([column_gap, 2.0])
+                                                    .show(ui, |ui| {
+                                                        for (index, item) in
+                                                            completion.items.iter().enumerate()
+                                                        {
+                                                            ui.label(
+                                                                RichText::new(
+                                                                    item.glyph.to_string(),
+                                                                )
                                                                 .monospace(),
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        clicked = Some(index);
-                                                    }
-                                                }
+                                                            );
+                                                            let job = completion_layout_job(
+                                                                item,
+                                                                label_width,
+                                                                index == completion.selected,
+                                                                &font_id,
+                                                                ui.visuals(),
+                                                            );
+                                                            if ui
+                                                                .selectable_label(
+                                                                    index == completion.selected,
+                                                                    job,
+                                                                )
+                                                                .clicked()
+                                                            {
+                                                                clicked = Some(index);
+                                                            }
+                                                            ui.end_row();
+                                                        }
+                                                    });
                                             });
                                     });
                                 });
@@ -1075,8 +1111,14 @@ struct CompletionState {
 struct CompletionItem {
     insert: String,
     glyph: char,
-    id: String,
-    description: Option<String>,
+    /// The name or alias that matched best, as shown in the popup.
+    label: String,
+    /// Character indices in `label` that matched the query.
+    matched: Vec<usize>,
+    /// The localized prototype name, when it differs from `label`.
+    name: Option<String>,
+    /// Character indices in `name` that matched the query.
+    name_matched: Vec<usize>,
 }
 
 /// Consumes a key press only when its modifiers match exactly.
@@ -1119,6 +1161,19 @@ fn completion_word(text: &str, cursor: usize) -> (usize, String) {
     while start > 0 && !is_completion_boundary(chars[start - 1]) {
         start -= 1;
     }
+
+    // `-` separates words in arithmetic, but aliases and prototype IDs contain
+    // it. When the word under the caret starts with a letter, rejoin the
+    // dash-separated segments so `green-chip` is matched (and replaced) whole.
+    if chars.get(start).is_some_and(|ch| ch.is_ascii_alphabetic()) {
+        while start >= 2 && chars[start - 1] == '-' && !is_completion_boundary(chars[start - 2]) {
+            start -= 1;
+            while start > 0 && !is_completion_boundary(chars[start - 1]) {
+                start -= 1;
+            }
+        }
+    }
+
     (start, chars[start..cursor].iter().collect())
 }
 
@@ -1148,9 +1203,78 @@ fn previous_word(before: &[char]) -> String {
     word.into_iter().collect()
 }
 
-fn is_subsequence(haystack: &str, needle: &str) -> bool {
-    let mut chars = haystack.chars();
-    needle.chars().all(|wanted| chars.any(|ch| ch == wanted))
+/// Common community names for prototypes.
+const ALIASES: &[(&str, &[&str])] = &[
+    ("electronic-circuit", &["green-chip", "green-circuit"]),
+    ("advanced-circuit", &["red-chip", "red-circuit"]),
+    ("processing-unit", &["blue-chip", "blue-circuit"]),
+    ("transport-belt", &["yellow-belt"]),
+    ("fast-transport-belt", &["red-belt"]),
+    ("express-transport-belt", &["blue-belt"]),
+    ("turbo-transport-belt", &["green-belt"]),
+    ("electromagnetic-plant", &["em-plant"]),
+    ("automation-science-pack", &["red-science-pack"]),
+    ("logistic-science-pack", &["green-science-pack"]),
+    (
+        "military-science-pack",
+        &[
+            "gray-science-pack",
+            "grey-science-pack",
+            "black-science-pack",
+        ],
+    ),
+    ("chemical-science-pack", &["blue-science-pack"]),
+    ("production-science-pack", &["purple-science-pack"]),
+    ("utility-science-pack", &["yellow-science-pack"]),
+    ("space-science-pack", &["white-science-pack"]),
+    (
+        "metallurgic-science-pack",
+        &["orange-science-pack", "vulcanus-science-pack"],
+    ),
+    (
+        "agricultural-science-pack",
+        &["lime-science-pack", "gleba-science-pack"],
+    ),
+    (
+        "electromagnetic-science-pack",
+        &["pink-science-pack", "fulgora-science-pack"],
+    ),
+    (
+        "cryogenic-science-pack",
+        &["cyan-science-pack", "aquilo-science-pack"],
+    ),
+];
+
+fn aliases_for(id: &str) -> &'static [&'static str] {
+    ALIASES
+        .iter()
+        .find_map(|(canonical, aliases)| (*canonical == id).then_some(*aliases))
+        .unwrap_or(&[])
+}
+
+/// The name of `entry` that best matches `needle`, with the matched char indices
+/// and whether the localized display name was the best match.
+fn best_name_match<'a>(
+    entry: &'a hactorio_data::Entry,
+    needle: &str,
+) -> Option<(isize, &'a str, Vec<usize>, bool)> {
+    let display_name = entry.display_name.as_deref();
+    std::iter::once(entry.id.as_ref())
+        .chain(display_name)
+        .chain(aliases_for(&entry.id).iter().copied())
+        .filter_map(|name| {
+            let found = sublime_fuzzy::best_match(needle, name)?;
+            let mut matched: Vec<usize> = found.matched_indices().copied().collect();
+            matched.sort_unstable();
+            Some((found.score(), name, matched, Some(name) == display_name))
+        })
+        .reduce(|best, candidate| {
+            if candidate.0 > best.0 {
+                candidate
+            } else {
+                best
+            }
+        })
 }
 
 fn completion_items(
@@ -1159,11 +1283,8 @@ fn completion_items(
     word_start: usize,
     word: &str,
 ) -> Vec<CompletionItem> {
-    if word.is_empty() {
-        return Vec::new();
-    }
-    let needle = word.strip_prefix(':').unwrap_or(word).to_lowercase();
-    if needle.starts_with(|ch: char| ch.is_ascii_digit()) {
+    let needle = word.strip_prefix(':').unwrap_or(word);
+    if needle.is_empty() || needle.chars().next().is_some_and(|ch| ch.is_ascii_digit()) {
         return Vec::new();
     }
     let before: Vec<char> = text.chars().take(word_start).collect();
@@ -1175,7 +1296,7 @@ fn completion_items(
         CompletionContext::Normal
     };
 
-    let mut entries: Vec<&hactorio_data::Entry> = registry
+    let mut items: Vec<(isize, CompletionItem)> = registry
         .entries()
         .iter()
         .filter(|entry| match context {
@@ -1183,38 +1304,147 @@ fn completion_items(
             CompletionContext::Recipe => entry.recipe.is_some(),
             CompletionContext::Normal => true,
         })
-        .filter(|entry| needle.is_empty() || is_subsequence(&entry.id.to_lowercase(), &needle))
+        .filter_map(|entry| {
+            let (score, matched_name, matched, display_matched) = best_name_match(entry, needle)?;
+            let display_name = entry.display_name.as_deref();
+            let (label, matched, name, name_matched) = if display_matched {
+                // Show the canonical ID beside the prototype name that matched.
+                (entry.id.as_ref(), Vec::new(), Some(matched_name), matched)
+            } else if display_name.is_some_and(|name| name != matched_name) {
+                (matched_name, matched, display_name, Vec::new())
+            } else {
+                (matched_name, matched, None, Vec::new())
+            };
+            Some((
+                score,
+                CompletionItem {
+                    insert: entry.glyph.to_string(),
+                    glyph: entry.glyph,
+                    label: label.to_string(),
+                    matched,
+                    name: name.map(str::to_string),
+                    name_matched,
+                },
+            ))
+        })
         .collect();
 
-    entries.sort_by(|a, b| {
-        let a_prefix = !needle.is_empty() && a.id.to_lowercase().starts_with(&needle);
-        let b_prefix = !needle.is_empty() && b.id.to_lowercase().starts_with(&needle);
-        b_prefix
-            .cmp(&a_prefix)
-            .then_with(|| a.id.len().cmp(&b.id.len()))
-            .then_with(|| a.id.cmp(&b.id))
+    items.sort_by(|(a_score, a), (b_score, b)| {
+        b_score
+            .cmp(a_score)
+            .then_with(|| a.label.len().cmp(&b.label.len()))
+            .then_with(|| a.label.cmp(&b.label))
     });
-    entries.truncate(40);
-
-    entries
-        .into_iter()
-        .map(|entry| CompletionItem {
-            insert: entry.glyph.to_string(),
-            glyph: entry.glyph,
-            id: entry.id.to_string(),
-            description: entry.display_name.as_ref().map(|name| name.to_string()),
-        })
-        .collect()
+    items.truncate(40);
+    items.into_iter().map(|(_, item)| item).collect()
 }
 
-/// The text shown for one completion row.
-fn completion_label(item: &CompletionItem) -> String {
-    let mut label = format!("{} {}", item.glyph, item.id);
-    if let Some(description) = &item.description {
-        label.push_str("   ");
-        label.push_str(description);
+/// Spaces that separate the matched name from the prototype name.
+const COMPLETION_NAME_GAP: usize = 4;
+
+/// Number of padding spaces before the prototype name, for column alignment.
+fn completion_padding(item: &CompletionItem, label_width: usize) -> usize {
+    if item.name.is_some() {
+        label_width.saturating_sub(item.label.chars().count()) + COMPLETION_NAME_GAP
+    } else {
+        0
     }
-    label
+}
+
+/// The full row text used for measuring.
+fn completion_row_text(item: &CompletionItem, label_width: usize) -> String {
+    let mut text = item.label.clone();
+    text.extend(std::iter::repeat_n(
+        ' ',
+        completion_padding(item, label_width),
+    ));
+    if let Some(name) = &item.name {
+        text.push_str(name);
+    }
+    text
+}
+
+fn append_matched_text(
+    job: &mut egui::text::LayoutJob,
+    text: &str,
+    matched: &[usize],
+    normal: &egui::TextFormat,
+    highlighted: &egui::TextFormat,
+) {
+    let mut matched = matched.iter().copied().peekable();
+    let mut run = String::new();
+    let mut run_matched = false;
+    for (index, ch) in text.chars().enumerate() {
+        let is_matched = matched.peek() == Some(&index);
+        if is_matched {
+            matched.next();
+        }
+        if is_matched != run_matched && !run.is_empty() {
+            job.append(
+                &run,
+                0.0,
+                if run_matched {
+                    highlighted.clone()
+                } else {
+                    normal.clone()
+                },
+            );
+            run.clear();
+        }
+        run_matched = is_matched;
+        run.push(ch);
+    }
+    if !run.is_empty() {
+        job.append(
+            &run,
+            0.0,
+            if run_matched {
+                highlighted.clone()
+            } else {
+                normal.clone()
+            },
+        );
+    }
+}
+
+/// Builds one completion row, highlighting the fuzzy-matched characters.
+fn completion_layout_job(
+    item: &CompletionItem,
+    label_width: usize,
+    selected: bool,
+    font_id: &egui::FontId,
+    visuals: &egui::Visuals,
+) -> egui::text::LayoutJob {
+    // Selected rows use the standard text color; the dimmed color is hard to
+    // read against the selection background.
+    let normal = egui::TextFormat {
+        font_id: font_id.clone(),
+        color: if selected {
+            visuals.strong_text_color()
+        } else {
+            visuals.text_color()
+        },
+        ..Default::default()
+    };
+    let strong = visuals.strong_text_color();
+    let highlighted = egui::TextFormat {
+        font_id: font_id.clone(),
+        color: strong,
+        underline: egui::Stroke::new(1.0, strong),
+        ..Default::default()
+    };
+
+    let mut job = egui::text::LayoutJob::default();
+    append_matched_text(&mut job, &item.label, &item.matched, &normal, &highlighted);
+    if let Some(name) = &item.name {
+        job.append(
+            &" ".repeat(completion_padding(item, label_width)),
+            0.0,
+            normal.clone(),
+        );
+        append_matched_text(&mut job, name, &item.name_matched, &normal, &highlighted);
+    }
+    job
 }
 
 fn truncate_text(
@@ -1547,6 +1777,158 @@ mod tests {
 
         let inserts = suggested_ids(&registry, "@ipl");
         assert!(!inserts.contains(&plate), "{inserts:?}");
+    }
+
+    #[test]
+    fn completion_fuzzy_matches_highlighted_characters() {
+        let registry = fixture_registry();
+        let cursor = "eec".chars().count();
+        let (start, word) = completion_word("eec", cursor);
+        let item = completion_items(&registry, "eec", start, &word)
+            .into_iter()
+            .find(|item| item.label == "electronic-circuit")
+            .expect("electronic-circuit");
+        let highlighted: String = item
+            .matched
+            .iter()
+            .filter_map(|index| item.label.chars().nth(*index))
+            .collect();
+        assert_eq!(highlighted, "eec");
+    }
+
+    #[test]
+    fn aliases_resolve_to_prototypes() {
+        const ALIAS_FIXTURE: &str = r#"{
+            "item": {
+                "electronic-circuit": {"type": "item", "name": "electronic-circuit", "stack_size": 200},
+                "advanced-circuit": {"type": "item", "name": "advanced-circuit", "stack_size": 200},
+                "processing-unit": {"type": "item", "name": "processing-unit", "stack_size": 100},
+                "transport-belt": {"type": "item", "name": "transport-belt", "stack_size": 100},
+                "turbo-transport-belt": {"type": "item", "name": "turbo-transport-belt", "stack_size": 100},
+                "electromagnetic-plant": {"type": "item", "name": "electromagnetic-plant", "stack_size": 20},
+                "automation-science-pack": {"type": "item", "name": "automation-science-pack", "stack_size": 200},
+                "military-science-pack": {"type": "item", "name": "military-science-pack", "stack_size": 200},
+                "metallurgic-science-pack": {"type": "item", "name": "metallurgic-science-pack", "stack_size": 200},
+                "cryogenic-science-pack": {"type": "item", "name": "cryogenic-science-pack", "stack_size": 200}
+            }
+        }"#;
+        let registry =
+            hactorio_data::postprocess(ALIAS_FIXTURE, &hactorio_data::Locale::empty()).unwrap();
+
+        let cases = [
+            ("green-chip", "green-chip"),
+            ("green-circuit", "green-circuit"),
+            ("red-chip", "red-chip"),
+            ("blue-chip", "blue-chip"),
+            ("yellow-belt", "yellow-belt"),
+            ("green-belt", "green-belt"),
+            ("em-plant", "em-plant"),
+            ("red-science-pack", "red-science-pack"),
+            ("gray-science-pack", "gray-science-pack"),
+            ("black-science-pack", "black-science-pack"),
+            ("vulcanus", "vulcanus-science-pack"),
+            ("aquilo", "aquilo-science-pack"),
+        ];
+        for (query, expected) in cases {
+            let cursor = query.chars().count();
+            let (start, word) = completion_word(query, cursor);
+            let items = completion_items(&registry, query, start, &word);
+            let item = items
+                .iter()
+                .find(|item| item.label == expected)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{query}: {:?}",
+                        items.iter().map(|i| &i.label).collect::<Vec<_>>()
+                    )
+                });
+            let matched: String = item
+                .matched
+                .iter()
+                .filter_map(|index| item.label.chars().nth(*index))
+                .collect();
+            assert_eq!(matched, query, "{query}");
+        }
+
+        // The alias, not the canonical name, is displayed when it is the best match.
+        let cursor = "green-chip".chars().count();
+        let (start, word) = completion_word("green-chip", cursor);
+        let items = completion_items(&registry, "green-chip", start, &word);
+        assert!(items.iter().all(|item| item.label != "electronic-circuit"));
+    }
+
+    #[test]
+    fn completion_shows_the_prototype_name_after_the_matched_alias() {
+        let dir = std::env::temp_dir().join(format!("hactorio-locale-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("recipe-locale.json"),
+            r#"{"names": {"electronic-circuit": "Electronic circuit"}}"#,
+        )
+        .unwrap();
+        let registry =
+            hactorio_data::postprocess(FIXTURE, &hactorio_data::Locale::load(&dir)).unwrap();
+
+        let (start, word) = completion_word("green-chip", "green-chip".chars().count());
+        let items = completion_items(&registry, "green-chip", start, &word);
+        let item = items
+            .iter()
+            .find(|item| item.label == "green-chip")
+            .expect("alias row");
+        assert_eq!(item.name.as_deref(), Some("Electronic circuit"));
+        assert_eq!(item.matched, (0..10).collect::<Vec<_>>());
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn completion_names_start_at_the_same_column() {
+        let short = CompletionItem {
+            insert: String::new(),
+            glyph: 'a',
+            label: "red-chip".to_string(),
+            matched: Vec::new(),
+            name: Some("Advanced circuit".to_string()),
+            name_matched: Vec::new(),
+        };
+        let long = CompletionItem {
+            label: "green-circuit".to_string(),
+            ..short.clone()
+        };
+        let label_width = 13;
+        let short_row = completion_row_text(&short, label_width);
+        let long_row = completion_row_text(&long, label_width);
+        assert_eq!(
+            short_row.find("Advanced circuit"),
+            long_row.find("Advanced circuit")
+        );
+        assert_eq!(
+            short_row.find("Advanced circuit"),
+            Some(label_width + COMPLETION_NAME_GAP)
+        );
+    }
+
+    #[test]
+    fn accepting_an_alias_replaces_the_whole_alias() {
+        let document = editor_document("# Main\n", 0, 6);
+        let (mut harness, dir) = completion_harness("alias-accept", document);
+        harness.run();
+        type_into_editor(&mut harness, " green-chip");
+        harness.key_press(Key::Enter);
+        harness.run();
+
+        let app = harness.state().as_ref().expect("app");
+        let glyph = app
+            .registry
+            .as_ref()
+            .expect("registry")
+            .entry("electronic-circuit")
+            .expect("electronic-circuit")
+            .glyph;
+        assert_eq!(app.tabs[0].text, format!("# Main {glyph}\n"));
+
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
