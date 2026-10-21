@@ -76,6 +76,55 @@ fn reads_mod_icons_from_directories_and_zips() {
 }
 
 #[test]
+fn reads_builtin_mod_icons() {
+    let dir = temp_dir("builtin");
+    let icons = dir.join("space-age/graphics/icons");
+    fs::create_dir_all(&icons).unwrap();
+    fs::write(icons.join("agricultural-science-pack.png"), b"space").unwrap();
+
+    let source = IconSource::new(&dir, dir.join("mods"));
+    assert_eq!(
+        source
+            .read("__space-age__/graphics/icons/agricultural-science-pack.png")
+            .as_deref(),
+        Some(&b"space"[..])
+    );
+
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn crops_icon_mip_strips() {
+    let dir = temp_dir("mips");
+    let icons = dir.join("base/graphics/icons");
+    fs::create_dir_all(&icons).unwrap();
+
+    // A 4x4 base with 2x2 and 1x1 mips laid out to the right.
+    let mut strip = image::RgbaImage::new(7, 4);
+    for y in 0..4 {
+        for x in 0..4 {
+            strip.put_pixel(x, y, image::Rgba([200, 40, 40, 255]));
+        }
+    }
+    for y in 0..2 {
+        for x in 4..6 {
+            strip.put_pixel(x, y, image::Rgba([0, 0, 0, 255]));
+        }
+    }
+    strip.put_pixel(6, 0, image::Rgba([0, 0, 0, 255]));
+    strip.save(icons.join("plate.png")).unwrap();
+
+    let source = IconSource::new(&dir, dir.join("mods"));
+    let decoded = source.read_rgba("__base__/graphics/icons/plate.png").unwrap();
+
+    assert_eq!((decoded.width, decoded.height), (4, 4));
+    assert_eq!(&decoded.rgba[..4], &[200, 40, 40, 255]);
+    assert_eq!(decoded.rgba.len(), 4 * 4 * 4);
+
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn decodes_png_icons() {
     let dir = temp_dir("decode");
     let icons = dir.join("base/graphics/icons");

@@ -32,16 +32,27 @@ impl IconSource {
     pub fn read(&self, icon: &str) -> Option<Vec<u8>> {
         let rest = icon.strip_prefix("__")?;
         let (name, relative) = rest.split_once("__/")?;
-        if name == "base" || name == "core" {
-            return std::fs::read(self.data_dir.join(name).join(relative)).ok();
+        // Built-in mods (base, core, space-age, recycler, quality, ...) are
+        // directories next to the executable's data directory.
+        if let Ok(bytes) = std::fs::read(self.data_dir.join(name).join(relative)) {
+            return Some(bytes);
         }
         self.read_from_mods(name, relative)
     }
 
     /// Decodes an icon to RGBA.
+    ///
+    /// Factorio 2.x icon files are mip strips: the full-size square is on the
+    /// left, followed by smaller copies. Only the full-size square is kept.
     pub fn read_rgba(&self, icon: &str) -> Option<IconImage> {
         let bytes = self.read(icon)?;
         let image = image::load_from_memory(&bytes).ok()?.to_rgba8();
+        let (width, height) = image.dimensions();
+        let image = if width > height {
+            image::imageops::crop_imm(&image, 0, 0, height, height).to_image()
+        } else {
+            image
+        };
         let (width, height) = image.dimensions();
         Some(IconImage {
             width,
