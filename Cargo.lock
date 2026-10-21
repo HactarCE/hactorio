@@ -1384,6 +1384,9 @@ dependencies = [
  "egui",
  "hactorio-core",
  "hactorio-data",
+ "image",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

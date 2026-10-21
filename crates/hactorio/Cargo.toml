@@ -8,3 +8,6 @@ eframe.workspace = true
 egui.workspace = true
 hactorio-core.workspace = true
 hactorio-data.workspace = true
+image.workspace = true
+serde.workspace = true
+serde_json.workspace = true

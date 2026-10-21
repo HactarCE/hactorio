@@ -20,7 +20,7 @@ pub use belt::{BeltTier, belt_capacity, belt_value, stack_size};
 pub use detail::{Breakdown, BreakdownRow, BreakdownSection, breakdown};
 pub use eval::{
     Eval, EvalError, LineOutput, MachineOutput, MachineValue, ModuleCount, Output, RecipeOutput,
-    RecipeQuantity, RecipeValue, StatementOutput, evaluate,
+    RecipeQuantity, RecipeValue, StatementOutput, evaluate, line_hash,
 };
 pub use format::{Formatted, format_output, format_value};
 pub use line_cache::LineCache;

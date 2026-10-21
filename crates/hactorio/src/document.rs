@@ -1,0 +1,106 @@
+//! The document: tabs, cursors, settings, and window geometry.
+
+use std::fs;
+use std::path::Path;
+
+use hactorio_core::Settings;
+use serde::{Deserialize, Serialize};
+
+pub const DOCUMENT_VERSION: u32 = 1;
+
+/// One tab's editable lines.
+#[derive(Debug, Clone)]
+pub struct Tab {
+    pub lines: Vec<String>,
+    pub cursor_line: usize,
+    pub scroll: f32,
+}
+
+impl Tab {
+    pub fn from_text(text: &str) -> Self {
+        Tab {
+            lines: text.split('\n').map(str::to_string).collect(),
+            cursor_line: 0,
+            scroll: 0.0,
+        }
+    }
+
+    pub fn text(&self) -> String {
+        self.lines.join("\n")
+    }
+
+    pub fn set_text(&mut self, text: &str) {
+        self.lines = text.split('\n').map(str::to_string).collect();
+        self.cursor_line = self.cursor_line.min(self.lines.len().saturating_sub(1));
+    }
+
+    /// The first comment line, without the `#`, or `Untitled`.
+    pub fn title(&self) -> String {
+        for line in &self.lines {
+            if let Some(rest) = line.trim_start().strip_prefix('#') {
+                let title = rest.trim();
+                if !title.is_empty() {
+                    return title.to_string();
+                }
+            }
+        }
+        "Untitled".to_string()
+    }
+}
+
+/// The saved document, version first.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Document {
+    pub version: u32,
+    pub tabs: Vec<String>,
+    pub active_tab: usize,
+    #[serde(default)]
+    pub cursors: Vec<Cursor>,
+    #[serde(default)]
+    pub window: Option<Window>,
+    #[serde(default)]
+    pub settings: Settings,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+pub struct Cursor {
+    pub line: usize,
+    pub column: usize,
+    pub scroll: f32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct Window {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub maximized: bool,
+}
+
+impl Default for Document {
+    fn default() -> Self {
+        Document {
+            version: DOCUMENT_VERSION,
+            tabs: vec!["# Main\n".to_string()],
+            active_tab: 0,
+            cursors: Vec::new(),
+            window: None,
+            settings: Settings::default(),
+        }
+    }
+}
+
+impl Document {
+    pub fn load(path: &Path) -> Result<Self, String> {
+        let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
+        serde_json::from_str(&text).map_err(|error| error.to_string())
+    }
+
+    pub fn save(&self, path: &Path) -> Result<(), String> {
+        let text = serde_json::to_string_pretty(self).map_err(|error| error.to_string())?;
+        let temp = path.with_extension("tmp");
+        fs::write(&temp, &text).map_err(|error| error.to_string())?;
+        fs::rename(&temp, path).map_err(|error| error.to_string())
+    }
+}

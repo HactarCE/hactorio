@@ -164,7 +164,7 @@ pub fn evaluate(
         };
         outputs.push(StatementOutput {
             line: index,
-            source_hash: hash_line(line),
+            source_hash: line_hash(line),
             span,
             output,
             eval,
@@ -718,7 +718,8 @@ fn value_error(error: ValueError, span: Span) -> EvalError {
     EvalError::new(span, error.to_string())
 }
 
-fn hash_line(line: &str) -> u64 {
+/// Hash of a source line, used to detect stale outputs.
+pub fn line_hash(line: &str) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     line.hash(&mut hasher);
