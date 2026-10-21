@@ -98,6 +98,13 @@ impl HactorioApp {
             Err(error) if cache_path.exists() => (None, format!("Game data failed: {error}")),
             Err(_) => (None, "No game data yet; use \"Load game data\".".to_string()),
         };
+        if let Some(registry) = &registry {
+            for tab in &mut tabs {
+                let converted = from_plaintext(&tab.text, registry);
+                tab.set_text(&converted);
+            }
+        }
+
         let install = locate();
         if let (Some(registry), Some(install)) = (&registry, &install) {
             icons::install(ctx, Arc::clone(registry), &install.icon_source());
@@ -407,7 +414,14 @@ impl HactorioApp {
     fn snapshot(&self) -> Document {
         Document {
             version: DOCUMENT_VERSION,
-            tabs: self.tabs.iter().map(|tab| tab.text.clone()).collect(),
+            tabs: self
+                .tabs
+                .iter()
+                .map(|tab| match &self.registry {
+                    Some(registry) => to_plaintext(&tab.text, registry),
+                    None => tab.text.clone(),
+                })
+                .collect(),
             active_tab: self.active,
             cursors: self
                 .tabs
@@ -1187,6 +1201,38 @@ mod tests {
             }],
             ..Document::default()
         }
+    }
+
+    #[test]
+    fn save_and_load_convert_between_plaintext_and_glyphs() {
+        let dir = std::env::temp_dir().join(format!("hactorio-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let registry = fixture_registry();
+        registry.save(&dir.join("cache.json")).unwrap();
+        let document = Document {
+            tabs: vec!["# Main\n3 :iron-plate: / second\n".to_string()],
+            ..Document::default()
+        };
+        let mut app = HactorioApp::new(&egui::Context::default(), document, dir.clone());
+
+        let glyph = app
+            .registry
+            .as_ref()
+            .unwrap()
+            .entry("iron-plate")
+            .unwrap()
+            .glyph;
+        assert!(app.tabs[0].text.contains(glyph), "{:?}", app.tabs[0].text);
+        assert!(!app.tabs[0].text.contains(":iron-plate:"));
+
+        app.save();
+        let saved = std::fs::read_to_string(dir.join("document.json")).unwrap();
+        assert!(saved.contains(":iron-plate:"), "{saved}");
+        assert!(!saved.contains(glyph), "{saved}");
+
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// Renders the app offscreen and writes a snapshot.
