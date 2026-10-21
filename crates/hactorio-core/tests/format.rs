@@ -96,7 +96,7 @@ fn time_unit_scales_the_displayed_coefficient() {
     };
     assert_eq!(
         format_value(&value, &minute, &registry),
-        format!("180 {glyph} / minute")
+        format!("180 {glyph} / m")
     );
 
     let hour = Settings {
@@ -105,7 +105,7 @@ fn time_unit_scales_the_displayed_coefficient() {
     };
     assert_eq!(
         format_value(&Value::seconds(3600.0), &hour, &registry),
-        "1 hour"
+        "1 h"
     );
 }
 
@@ -131,7 +131,7 @@ fn numerator_and_denominator_are_rendered_explicitly() {
     let glyph = glyph(&registry, "iron-plate");
 
     let rate = Value::new(2.0, [(BaseUnit::Second, -1)]);
-    assert_eq!(format_value(&rate, &settings, &registry), "2 / second");
+    assert_eq!(format_value(&rate, &settings, &registry), "2 / s");
 
     let inverse_square = Value::new(4.0, [(plate(&registry), -2)]);
     assert_eq!(
@@ -149,7 +149,7 @@ fn numerator_and_denominator_are_rendered_explicitly() {
     );
     assert_eq!(
         format_value(&combined, &settings, &registry),
-        format!("2 {glyph} / (joule * second)")
+        format!("2 {glyph} / (joule * s)")
     );
 }
 
@@ -162,7 +162,7 @@ fn electricity_always_uses_metric_prefixes() {
     };
     assert_eq!(
         format_value(&Value::watts(1_500_000.0), &plain_items, &registry),
-        "1.5M joule / second"
+        "1.5M joule / s"
     );
 }
 
@@ -210,7 +210,7 @@ fn belt_modes_ignore_fluids_and_composite_units() {
     );
     assert_eq!(
         format_value(&fluid_rate, &belts, &registry),
-        format!("3 {} / second", glyph(&registry, "water"))
+        format!("3 {} / s", glyph(&registry, "water"))
     );
 
     let composite = Value::new(
@@ -219,7 +219,7 @@ fn belt_modes_ignore_fluids_and_composite_units() {
     );
     assert_eq!(
         format_value(&composite, &belts, &registry),
-        format!("3 {} / second^2", glyph(&registry, "iron-plate"))
+        format!("3 {} / s^2", glyph(&registry, "iron-plate"))
     );
 }
 

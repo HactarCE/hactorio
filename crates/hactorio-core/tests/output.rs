@@ -91,14 +91,14 @@ fn machine_rates_render_produces_consumes_craft_and_power() {
     assert!(
         formatted
             .rows
-            .contains(&format!("produces 100 {circuit} / second")),
+            .contains(&format!("produces 100 {circuit} / s")),
         "{:?}",
         formatted.rows
     );
     assert!(
         formatted
             .rows
-            .contains(&format!("consumes 100 {plate} / second")),
+            .contains(&format!("consumes 100 {plate} / s")),
         "{:?}",
         formatted.rows
     );
@@ -123,7 +123,7 @@ fn machine_seconds_render_totals_and_energy() {
     let formatted = format_output(output(&outputs[0]), &settings, &registry);
     let plate = registry.entry("iron-plate").unwrap().glyph;
 
-    assert_eq!(formatted.headline, "160 second");
+    assert_eq!(formatted.headline, "160 s");
     assert!(
         formatted.rows.contains(&format!("produces 100 {plate}")),
         "{:?}",
@@ -204,7 +204,7 @@ fn breakdown_covers_configuration_recipe_items_power_and_pollution() {
     );
     assert_eq!(
         row_value(&breakdown, "recipe", "craft time"),
-        "0.5 second"
+        "0.5 s"
     );
     assert_eq!(
         row_value(&breakdown, "recipe", "productivity allowed"),
@@ -238,7 +238,7 @@ fn machine_seconds_breakdown_has_machine_time_and_total_energy() {
 
     assert_eq!(
         row_value(&breakdown, "machine", "machine time"),
-        "160 second"
+        "160 s"
     );
     assert_eq!(row_value(&breakdown, "power", "total energy"), "28.8 MJ");
     assert_eq!(

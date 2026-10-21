@@ -128,7 +128,7 @@ fn number_style(value: &Value, settings: &Settings) -> NumberStyle {
 fn unit_name_of(unit: BaseUnit, time_unit: TimeUnit, registry: &Registry) -> String {
     match unit {
         BaseUnit::Item(id) | BaseUnit::Fluid(id) => registry.entry_by_index(id).glyph.to_string(),
-        BaseUnit::Second => time_unit.name().to_string(),
+        BaseUnit::Second => time_unit.short_name().to_string(),
         BaseUnit::Joule => "joule".to_string(),
         BaseUnit::Craft => "craft".to_string(),
     }

@@ -31,6 +31,15 @@ impl TimeUnit {
         }
     }
 
+    /// The compact form used in outputs.
+    pub fn short_name(self) -> &'static str {
+        match self {
+            TimeUnit::Second => "s",
+            TimeUnit::Minute => "m",
+            TimeUnit::Hour => "h",
+        }
+    }
+
     /// Resolves a time-unit word, including the `s`/`m`/`h` aliases.
     ///
     /// Matching is case-sensitive: `M` is a numeric suffix, not a minute.

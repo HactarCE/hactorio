@@ -361,6 +361,41 @@ impl HactorioApp {
         }
     }
 
+    /// Full results for the line under the caret, floating beside it.
+    fn detail_panel(&self, ctx: &Context, anchor: egui::Pos2, line: usize) {
+        let (Some(registry), Some(tab)) = (&self.registry, self.tabs.get(self.active)) else {
+            return;
+        };
+        let Some(text) = tab.text.split('\n').nth(line) else {
+            return;
+        };
+        let Some(statement) = self.outputs.get(line) else {
+            return;
+        };
+        if statement.source_hash != line_hash(text) {
+            return;
+        }
+        let Some(body) = output_text_full(statement, &self.settings, registry) else {
+            return;
+        };
+
+        let screen = ctx.viewport_rect();
+        let pos = egui::pos2(
+            anchor.x.min(screen.right() - 400.0).max(screen.left() + 8.0),
+            anchor.y.min(screen.bottom() - 140.0).max(screen.top() + 8.0),
+        );
+        egui::Area::new(egui::Id::unique("line_detail"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(pos)
+            .interactable(false)
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_max_width(380.0);
+                    ui.label(RichText::new(body).monospace().small());
+                });
+            });
+    }
+
     fn snapshot(&self) -> Document {
         Document {
             version: DOCUMENT_VERSION,
@@ -466,6 +501,9 @@ impl eframe::App for HactorioApp {
             if let Some(line) = result.focused {
                 self.focus_line = Some(line);
             }
+            if let Some((line, anchor)) = result.detail {
+                self.detail_panel(&ctx, anchor, line);
+            }
         });
 
         if self.dirty && self.last_save.elapsed() >= SAVE_INTERVAL {
@@ -482,6 +520,8 @@ struct EditorResult {
     changed: bool,
     /// The line the caret is on, while the editor has focus.
     focused: Option<usize>,
+    /// Where to place the full-results panel for the focused line.
+    detail: Option<(usize, egui::Pos2)>,
 }
 
 /// Renders the tab as one multiline editor, with line numbers and outputs
@@ -497,24 +537,14 @@ fn editor_ui(
     let mut result = EditorResult {
         changed: false,
         focused: None,
+        detail: None,
     };
 
     let font_id = TextStyle::Monospace.resolve(ui.style());
-    let char_width = ui
-        .fonts_mut(|fonts| fonts.glyph_width(&font_id, 'M'))
-        .max(1.0);
     let line_count = tab.text.split('\n').count();
-    let longest = tab
-        .text
-        .split('\n')
-        .map(|line| line.chars().count())
-        .max()
-        .unwrap_or(0);
-
     let number_width = 44.0;
-    let output_width = (ui.available_width() * 0.4).max(220.0);
-    let min_editor = (ui.available_width() - number_width - output_width).max(320.0);
-    let editor_width = (longest as f32 * char_width + 24.0).max(min_editor);
+    let gutter_width = (ui.available_width() * 0.45).max(180.0);
+    let editor_width = (ui.available_width() - number_width - gutter_width - 24.0).max(200.0);
 
     let mut layouter = |ui: &Ui, buffer: &dyn egui::TextBuffer, _wrap_width: f32| {
         let mut job = egui::text::LayoutJob::simple(
@@ -527,7 +557,7 @@ fn editor_ui(
         ui.fonts_mut(|fonts| fonts.layout_job(job))
     };
 
-    let scroll = ScrollArea::both()
+    let scroll = ScrollArea::vertical()
         .id_salt(("editor", active))
         .vertical_scroll_offset(tab.scroll)
         .show(ui, |ui| {
@@ -590,6 +620,7 @@ fn editor_ui(
                     } else {
                         weak
                     };
+                    let text = truncate_text(painter, &text, &font_id, gutter_width - 8.0);
                     painter.text(
                         egui::pos2(frame.max.x + 12.0, y),
                         egui::Align2::LEFT_TOP,
@@ -597,15 +628,68 @@ fn editor_ui(
                         font_id.clone(),
                         color,
                     );
+                    if result.focused == Some(index) {
+                        result.detail = Some((
+                            index,
+                            egui::pos2(frame.max.x + gutter_width + 8.0, y),
+                        ));
+                    }
                 }
-
-                ui.add_space(8.0);
-                ui.allocate_space(egui::vec2(output_width, 0.0));
             });
         });
     tab.scroll = scroll.state.clamped_offset().y;
 
     result
+}
+
+fn truncate_text(
+    painter: &egui::Painter,
+    text: &str,
+    font_id: &egui::FontId,
+    max_width: f32,
+) -> String {
+    let galley = painter.layout_no_wrap(text.to_string(), font_id.clone(), Color32::WHITE);
+    if galley.size().x <= max_width {
+        return text.to_string();
+    }
+    let ellipsis = painter
+        .layout_no_wrap("…".to_string(), font_id.clone(), Color32::WHITE)
+        .size()
+        .x;
+    let limit = (max_width - ellipsis).max(0.0);
+    let mut keep = 0;
+    if let Some(row) = galley.rows.first() {
+        for glyph in &row.row.glyphs {
+            if glyph.pos.x + glyph.advance_width <= limit {
+                keep += 1;
+            } else {
+                break;
+            }
+        }
+    }
+    let mut shortened: String = text.chars().take(keep).collect();
+    shortened.push('…');
+    shortened
+}
+
+fn output_text_full(
+    statement: &StatementOutput,
+    settings: &Settings,
+    registry: &Registry,
+) -> Option<String> {
+    match &statement.output {
+        LineOutput::Nothing => None,
+        LineOutput::Error(error) => Some(error.message.clone()),
+        LineOutput::Value(value) => {
+            let formatted = format_output(value, settings, registry);
+            let mut text = formatted.headline;
+            for row in formatted.rows {
+                text.push('\n');
+                text.push_str(&row);
+            }
+            Some(text)
+        }
+    }
 }
 
 fn output_text(
