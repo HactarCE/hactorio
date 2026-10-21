@@ -91,20 +91,20 @@ fn machine_rates_render_produces_consumes_craft_and_power() {
     assert!(
         formatted
             .rows
-            .contains(&format!("produces 100 {circuit} / s")),
+            .contains(&format!("+100 {circuit}/s")),
         "{:?}",
         formatted.rows
     );
     assert!(
         formatted
             .rows
-            .contains(&format!("consumes 100 {plate} / s")),
+            .contains(&format!("-100 {plate}/s")),
         "{:?}",
         formatted.rows
     );
     assert!(formatted.rows.contains(&"100 craft/s".to_string()), "{:?}", formatted.rows);
     assert!(
-        formatted.rows.contains(&"375 kW per machine".to_string()),
+        formatted.rows.contains(&format!("375 kW /{}", registry.entry("assembling-machine-3").unwrap().glyph)),
         "{:?}",
         formatted.rows
     );
@@ -123,9 +123,9 @@ fn machine_seconds_render_totals_and_energy() {
     let formatted = format_output(output(&outputs[0]), &settings, &registry);
     let plate = registry.entry("iron-plate").unwrap().glyph;
 
-    assert_eq!(formatted.headline, "160 s");
+    assert_eq!(formatted.headline, format!("160 {}·s", registry.entry("electric-furnace").unwrap().glyph));
     assert!(
-        formatted.rows.contains(&format!("produces 100 {plate}")),
+        formatted.rows.contains(&format!("+100 {plate}")),
         "{:?}",
         formatted.rows
     );
@@ -158,7 +158,7 @@ fn belt_mode_applies_to_rate_rows() {
     let plate = registry.entry("iron-plate").unwrap().glyph;
 
     assert!(
-        formatted.rows.contains(&format!("produces 1 gb {plate}")),
+        formatted.rows.contains(&format!("+1 gb {plate}")),
         "{:?}",
         formatted.rows
     );

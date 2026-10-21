@@ -58,11 +58,11 @@ pub fn format_value(value: &Value, settings: &Settings, registry: &Registry) -> 
         .collect();
 
     if numerator.is_empty() {
-        return format!("{number} / {}", join_units(&denominator));
+        return format!("{number}/{}", join_units(&denominator));
     }
     let mut text = format!("{number} {}", numerator.join(" * "));
     if !denominator.is_empty() {
-        text.push_str(" / ");
+        text.push('/');
         text.push_str(&join_units(&denominator));
     }
     text
@@ -231,6 +231,7 @@ fn format_recipe(
     registry: &Registry,
 ) -> Formatted {
     let rate = matches!(recipe.quantity, RecipeQuantity::Machines(_));
+    let machine_glyph = registry.entry_by_index(recipe.machine).glyph;
     let headline = if rate {
         machine_headline(
             recipe.machine,
@@ -239,10 +240,12 @@ fn format_recipe(
             registry,
         )
     } else {
-        format_value(
-            &Value::seconds(recipe.quantity.magnitude()),
-            settings,
-            registry,
+        let unit = settings.time_unit;
+        let magnitude = recipe.quantity.magnitude() / unit.seconds();
+        format!(
+            "{} {machine_glyph}·{}",
+            format_plain_number(magnitude, settings),
+            unit.short_name()
         )
     };
 
@@ -256,9 +259,9 @@ fn format_recipe(
     units.sort_by_key(|(unit, _)| unit_name(*unit, registry));
 
     for (unit, amount) in units {
-        let direction = if amount > 0.0 { "produces" } else { "consumes" };
+        let sign = if amount > 0.0 { "+" } else { "-" };
         rows.push(format!(
-            "{direction} {}",
+            "{sign}{}",
             format_amount(amount.abs(), unit, rate, settings, registry)
         ));
     }
@@ -274,7 +277,7 @@ fn format_recipe(
 
     if rate {
         rows.push(format!(
-            "{} per machine",
+            "{} /{machine_glyph}",
             format_power(recipe.per_machine_power_w, settings)
         ));
         let count = recipe.quantity.magnitude();
@@ -304,7 +307,8 @@ fn machine_headline(
     )
 }
 
-pub(crate) fn format_amount(
+/// Formats one unit amount, as a rate or a total.
+pub fn format_amount(
     amount: f64,
     unit: BaseUnit,
     rate: bool,
@@ -319,11 +323,13 @@ pub(crate) fn format_amount(
     format_value(&value, settings, registry)
 }
 
-pub(crate) fn format_power(watts: f64, settings: &Settings) -> String {
+/// Formats watts with a metric prefix.
+pub fn format_power(watts: f64, settings: &Settings) -> String {
     format_si(watts, "W", settings)
 }
 
-pub(crate) fn format_energy(joules: f64, settings: &Settings) -> String {
+/// Formats joules with a metric prefix.
+pub fn format_energy(joules: f64, settings: &Settings) -> String {
     format_si(joules, "J", settings)
 }
 

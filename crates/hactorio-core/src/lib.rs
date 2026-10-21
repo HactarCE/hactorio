@@ -22,7 +22,9 @@ pub use eval::{
     Eval, EvalError, LineOutput, MachineOutput, MachineValue, ModuleCount, Output, RecipeOutput,
     RecipeQuantity, RecipeValue, StatementOutput, evaluate, line_hash,
 };
-pub use format::{Formatted, format_output, format_value};
+pub use format::{
+    Formatted, format_amount, format_energy, format_output, format_power, format_value,
+};
 pub use line_cache::LineCache;
 pub use parser::{ParseError, parse_line};
 pub use settings::{ItemRateDisplay, Settings, TimeUnit};

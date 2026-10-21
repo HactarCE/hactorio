@@ -11,8 +11,9 @@ use egui::{
     Ui,
 };
 use hactorio_core::{
-    ItemRateDisplay, LineOutput, Settings, StatementOutput, TimeUnit, breakdown, format_output,
-    from_plaintext, line_hash, to_plaintext,
+    BaseUnit, ItemRateDisplay, LineOutput, Output, RecipeQuantity, Settings, StatementOutput,
+    TimeUnit, Value, breakdown, format_amount, format_energy, format_output, format_power,
+    format_value, from_plaintext, line_hash, to_plaintext,
 };
 use hactorio_data::{GameInstall, Registry, locate};
 
@@ -375,14 +376,11 @@ impl HactorioApp {
         if statement.source_hash != line_hash(text) {
             return;
         }
-        let Some(body) = output_text_full(statement, &self.settings, registry) else {
-            return;
-        };
 
         let screen = ctx.viewport_rect();
         let pos = egui::pos2(
-            anchor.x.min(screen.right() - 400.0).max(screen.left() + 8.0),
-            anchor.y.min(screen.bottom() - 140.0).max(screen.top() + 8.0),
+            anchor.x.min(screen.right() - 420.0).max(screen.left() + 8.0),
+            anchor.y.min(screen.bottom() - 160.0).max(screen.top() + 8.0),
         );
         egui::Area::new(egui::Id::unique("line_detail"))
             .order(egui::Order::Foreground)
@@ -390,8 +388,8 @@ impl HactorioApp {
             .interactable(false)
             .show(ctx, |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.set_max_width(380.0);
-                    ui.label(RichText::new(body).monospace().small());
+                    ui.set_max_width(420.0);
+                    detail_ui(ui, statement, &self.settings, registry);
                 });
             });
     }
@@ -541,10 +539,21 @@ fn editor_ui(
     };
 
     let font_id = TextStyle::Monospace.resolve(ui.style());
+    let char_width = ui
+        .fonts_mut(|fonts| fonts.glyph_width(&font_id, 'M'))
+        .max(1.0);
     let line_count = tab.text.split('\n').count();
+    let longest = tab
+        .text
+        .split('\n')
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0);
     let number_width = 44.0;
     let gutter_width = (ui.available_width() * 0.45).max(180.0);
-    let editor_width = (ui.available_width() - number_width - gutter_width - 24.0).max(200.0);
+    let editor_width = (ui.available_width() - number_width - gutter_width - 24.0)
+        .max(longest as f32 * char_width + 24.0)
+        .max(200.0);
 
     let mut layouter = |ui: &Ui, buffer: &dyn egui::TextBuffer, _wrap_width: f32| {
         let mut job = egui::text::LayoutJob::simple(
@@ -557,7 +566,7 @@ fn editor_ui(
         ui.fonts_mut(|fonts| fonts.layout_job(job))
     };
 
-    let scroll = ScrollArea::vertical()
+    let scroll = ScrollArea::both()
         .id_salt(("editor", active))
         .vertical_scroll_offset(tab.scroll)
         .show(ui, |ui| {
@@ -615,6 +624,13 @@ fn editor_ui(
                     let Some(text) = output_text(statement, settings, registry) else {
                         continue;
                     };
+                    if result.focused == Some(index) {
+                        result.detail = Some((
+                            index,
+                            egui::pos2(frame.max.x + 4.0, y),
+                        ));
+                        continue;
+                    }
                     let color = if matches!(statement.output, LineOutput::Error(_)) {
                         error_color
                     } else {
@@ -628,13 +644,10 @@ fn editor_ui(
                         font_id.clone(),
                         color,
                     );
-                    if result.focused == Some(index) {
-                        result.detail = Some((
-                            index,
-                            egui::pos2(frame.max.x + gutter_width + 8.0, y),
-                        ));
-                    }
                 }
+
+                ui.add_space(8.0);
+                ui.allocate_space(egui::vec2(gutter_width, 0.0));
             });
         });
     tab.scroll = scroll.state.clamped_offset().y;
@@ -672,23 +685,119 @@ fn truncate_text(
     shortened
 }
 
-fn output_text_full(
+fn detail_ui(
+    ui: &mut Ui,
     statement: &StatementOutput,
     settings: &Settings,
     registry: &Registry,
-) -> Option<String> {
+) {
     match &statement.output {
-        LineOutput::Nothing => None,
-        LineOutput::Error(error) => Some(error.message.clone()),
+        LineOutput::Nothing => {}
+        LineOutput::Error(error) => {
+            ui.label(
+                RichText::new(&error.message).color(Color32::from_rgb(220, 90, 90)),
+            );
+        }
         LineOutput::Value(value) => {
             let formatted = format_output(value, settings, registry);
-            let mut text = formatted.headline;
-            for row in formatted.rows {
-                text.push('\n');
-                text.push_str(&row);
+            ui.label(RichText::new(formatted.headline).monospace());
+
+            let Output::Recipe(recipe) = value else {
+                return;
+            };
+            let rate = matches!(recipe.quantity, RecipeQuantity::Machines(_));
+
+            let mut units: Vec<(BaseUnit, f64)> = recipe
+                .net
+                .iter()
+                .filter(|(unit, _)| **unit != BaseUnit::Craft)
+                .map(|(unit, amount)| (*unit, *amount))
+                .collect();
+            units.sort_by_key(|(unit, _)| unit_label(registry, *unit));
+
+            let mut produces = Vec::new();
+            let mut consumes = Vec::new();
+            for (unit, amount) in units {
+                let text = format_amount(amount.abs(), unit, rate, settings, registry);
+                if amount > 0.0 {
+                    produces.push(text);
+                } else {
+                    consumes.push(text);
+                }
             }
-            Some(text)
+
+            egui::Grid::new("detail_items")
+                .num_columns(2)
+                .spacing([18.0, 2.0])
+                .show(ui, |ui| {
+                    ui.label(RichText::new("produces").weak());
+                    ui.label(RichText::new("consumes").weak());
+                    ui.end_row();
+                    for row in 0..produces.len().max(consumes.len()) {
+                        ui.label(
+                            RichText::new(
+                                produces.get(row).map(String::as_str).unwrap_or(""),
+                            )
+                            .monospace(),
+                        );
+                        ui.label(
+                            RichText::new(
+                                consumes.get(row).map(String::as_str).unwrap_or(""),
+                            )
+                            .monospace(),
+                        );
+                        ui.end_row();
+                    }
+                });
+
+            if let Some(craft) = recipe.net.get(&BaseUnit::Craft).copied() {
+                let value = if rate {
+                    Value::new(craft, [(BaseUnit::Craft, 1), (BaseUnit::Second, -1)])
+                } else {
+                    Value::crafts(craft)
+                };
+                ui.label(RichText::new(format_value(&value, settings, registry)).monospace());
+            }
+
+            let glyph = registry.entry_by_index(recipe.machine).glyph;
+            ui.label(
+                RichText::new(format!(
+                    "{} /{glyph}",
+                    format_power(recipe.per_machine_power_w, settings)
+                ))
+                .monospace(),
+            );
+            let count = recipe.quantity.magnitude();
+            if rate && count != 1.0 {
+                ui.label(
+                    RichText::new(format!(
+                        "{} total",
+                        format_power(recipe.per_machine_power_w * count, settings)
+                    ))
+                    .monospace(),
+                );
+            }
+            if !rate && let Some(energy) = recipe.total_energy_j {
+                ui.label(
+                    RichText::new(format!(
+                        "{} total energy",
+                        format_energy(energy, settings)
+                    ))
+                    .monospace(),
+                );
+            }
         }
+    }
+}
+
+fn unit_label(registry: &Registry, unit: BaseUnit) -> String {
+    match unit {
+        BaseUnit::Item(id) | BaseUnit::Fluid(id) => {
+            registry.entry_by_index(id).id.to_string()
+        }
+        BaseUnit::Craft => "craft".to_string(),
+        BaseUnit::Second => "second".to_string(),
+        BaseUnit::Joule => "joule".to_string(),
     }
 }
 
