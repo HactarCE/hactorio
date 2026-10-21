@@ -1389,6 +1389,12 @@ dependencies = [
 [[package]]
 name = "hactorio-core"
 version = "0.1.0"
+dependencies = [
+ "hactorio-data",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "hactorio-data"
