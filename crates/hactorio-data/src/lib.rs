@@ -5,11 +5,15 @@
 //! namespace entry.
 
 mod cache;
+mod dump;
+mod icons;
 mod postprocess;
 mod registry;
 
 use thiserror::Error;
 
+pub use dump::{GameInstall, locate};
+pub use icons::{IconImage, IconSource};
 pub use postprocess::{postprocess, Locale};
 pub use registry::{
     AllowedEffects, Entry, EntryId, Ingredient, Item, Machine, Module, ModuleEffect,
@@ -27,6 +31,8 @@ pub enum Error {
     UnsupportedVersion(u32),
     #[error("invalid registry: {0}")]
     Invalid(String),
+    #[error("game data: {0}")]
+    GameData(String),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
