@@ -69,12 +69,13 @@ pub(super) struct DetailContext<'a> {
     pub active: usize,
     pub outputs: &'a [StatementOutput],
     pub settings: &'a Settings,
-    pub registry: Option<&'a Registry>,
+    pub registry: &'a Registry,
 }
 
 impl DetailContext<'_> {
     fn breakdown_ui(&self, ui: &mut Ui, line: usize) {
-        let (Some(registry), Some(tab)) = (self.registry, self.tabs.get(self.active)) else {
+        let registry = self.registry;
+        let Some(tab) = self.tabs.get(self.active) else {
             return;
         };
         let (Some(text), Some(output)) = (tab.text.split('\n').nth(line), self.outputs.get(line))
@@ -141,7 +142,8 @@ impl DetailContext<'_> {
         line: usize,
         width: f32,
     ) {
-        let (Some(registry), Some(tab)) = (self.registry, self.tabs.get(self.active)) else {
+        let registry = self.registry;
+        let Some(tab) = self.tabs.get(self.active) else {
             return;
         };
         let Some(text) = tab.text.split('\n').nth(line) else {

@@ -30,7 +30,7 @@ pub(super) struct EditorState<'a> {
     active: usize,
     outputs: &'a [StatementOutput],
     settings: &'a Settings,
-    registry: Option<&'a Registry>,
+    registry: &'a Registry,
     pending_focus: &'a mut Option<(usize, usize)>,
     completion: &'a mut CompletionState,
     results_width: &'a mut f32,
@@ -41,7 +41,7 @@ impl<'a> EditorState<'a> {
         active: usize,
         outputs: &'a [StatementOutput],
         settings: &'a Settings,
-        registry: Option<&'a Registry>,
+        registry: &'a Registry,
         pending_focus: &'a mut Option<(usize, usize)>,
         completion: &'a mut CompletionState,
         results_width: &'a mut f32,
@@ -175,8 +175,7 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                 let text_edit = hscroll.inner;
                 result.changed |= text_edit.response.changed();
 
-                if let Some(registry) = registry
-                    && let Some(pointer) = ui.ctx().pointer_hover_pos()
+                if let Some(pointer) = ui.ctx().pointer_hover_pos()
                     && text_edit.response.rect.contains(pointer)
                     && !pointer_over_popup(ui.ctx(), active, pointer)
                     && let Some((line, rect)) =
@@ -238,10 +237,7 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                     completion.items.clear();
                 }
 
-                if let Some(registry) = registry
-                    && typed
-                    && text_edit.response.has_focus()
-                {
+                if typed && text_edit.response.has_focus() {
                     completion.word = word.clone();
                     completion.selected = 0;
                     completion.needs_scroll = true;
@@ -322,7 +318,7 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                         weak,
                     );
 
-                    let (Some(statement), Some(registry)) = (outputs.get(index), registry) else {
+                    let Some(statement) = outputs.get(index) else {
                         continue;
                     };
                     if statement.source_hash != line_hash(line) {

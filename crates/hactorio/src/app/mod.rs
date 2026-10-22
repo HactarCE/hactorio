@@ -71,10 +71,15 @@ fn icon_button_height(ui: &Ui) -> f32 {
 }
 
 /// Formats the productivity a research grants at `level` for one recipe.
-fn research_effect_label(registry: &Registry, recipe: &str, change: f64, level: u32) -> String {
-    let percent = change * f64::from(level) * 100.0;
+fn research_effect_label(
+    registry: &Registry,
+    effect: &hactorio_data::RecipeProductivity,
+    level: u32,
+) -> String {
+    let percent = effect.change * f64::from(level) * 100.0;
     let percent = (percent * 1e6).round() / 1e6;
     let percent = format!("{percent}");
+    let recipe = effect.recipe.as_ref();
     let name = registry
         .find_recipe(recipe)
         .and_then(|recipe| recipe.display_name.as_deref())
@@ -157,10 +162,7 @@ impl HactorioApp {
                 (Some(Arc::new(registry)), status)
             }
             Err(error) if cache_path.exists() => (None, format!("Game data failed: {error}")),
-            Err(_) => (
-                None,
-                "No game data yet; use \"Load game data\".".to_string(),
-            ),
+            Err(_) => (None, String::new()),
         };
         if let Some(registry) = &registry {
             for tab in &mut tabs {
@@ -243,8 +245,12 @@ impl HactorioApp {
         }
     }
 
+    fn loading(&self) -> bool {
+        matches!(self.load, LoadState::Running(_))
+    }
+
     fn start_load(&mut self) {
-        if matches!(self.load, LoadState::Running(_)) {
+        if self.loading() {
             return;
         }
         let (tx, rx) = std::sync::mpsc::channel();
@@ -278,12 +284,17 @@ impl HactorioApp {
     }
 
     fn install_data(&mut self, registry: Registry, install: GameInstall, ctx: &Context) {
-        if let Some(old) = &self.registry {
-            for tab in &mut self.tabs {
-                let plain = to_plaintext(&tab.text, old);
-                let relexed = from_plaintext(&plain, &registry);
-                tab.set_text(&relexed);
-            }
+        // Canonicalize to plaintext with the old table (when there is one),
+        // then re-lex the whole document with the new table. This also runs on
+        // the first load, so `:id:` tokens typed before any data was loaded
+        // gain their glyphs immediately.
+        for tab in &mut self.tabs {
+            let plain = match &self.registry {
+                Some(old) => to_plaintext(&tab.text, old),
+                None => tab.text.clone(),
+            };
+            let relexed = from_plaintext(&plain, &registry);
+            tab.set_text(&relexed);
         }
 
         let registry = Arc::new(registry);
@@ -323,11 +334,11 @@ impl HactorioApp {
             }
 
             ui.separator();
-            let loading = matches!(self.load, LoadState::Running(_));
+            let loading = self.loading();
             let label = if loading {
                 "Loading…".to_string()
             } else {
-                "Load game data".to_string()
+                "Reload game data".to_string()
             };
             if ui.add_enabled(!loading, egui::Button::new(label)).clicked() {
                 self.start_load();
@@ -351,16 +362,9 @@ impl HactorioApp {
         }
     }
 
-    fn display_bar(&mut self, ui: &mut Ui) {
+    fn display_bar(&mut self, ui: &mut Ui, registry: &Registry) {
         let before = self.settings.clone();
-        let belt_icons = BeltTier::ALL.map(|tier| {
-            let glyph = self
-                .registry
-                .as_deref()
-                .and_then(|registry| belt_tier_glyph(registry, tier));
-            (tier, glyph)
-        });
-        let has_icons = self.registry.is_some();
+        let belt_icons = BeltTier::ALL.map(|tier| (tier, belt_tier_glyph(registry, tier)));
 
         ui.horizontal_wrapped(|ui| {
             // Reserve the tallest control's height so labels and controls align.
@@ -398,11 +402,7 @@ impl HactorioApp {
                     .on_hover_text(format!("{} belts", tier.name()));
             }
             ui.add_enabled_ui(self.settings.item_rate_belt.is_some(), |ui| {
-                let stack_label = if has_icons {
-                    RichText::new(icons::STACK_SIZE.to_string()).size(ICON_SIZE)
-                } else {
-                    RichText::new("stacked")
-                };
+                let stack_label = RichText::new(icons::STACK_SIZE.to_string()).size(ICON_SIZE);
                 ui.toggle_value(&mut self.settings.stacked_belts, stack_label)
                     .on_hover_text("Show item rates as stacks on stacked belts");
             });
@@ -418,13 +418,9 @@ impl HactorioApp {
         self.settings_changed(before);
     }
 
-    fn research_bar(&mut self, ui: &mut Ui) {
+    fn research_bar(&mut self, ui: &mut Ui, registry: &Registry) {
         let before = self.settings.clone();
-        let registry = self.registry.clone();
-        let researches = registry
-            .as_deref()
-            .map(Registry::productivity_researches)
-            .unwrap_or_default();
+        let researches = registry.productivity_researches();
 
         ui.horizontal_wrapped(|ui| {
             // Reserve the tallest control's height so labels and controls align.
@@ -452,7 +448,7 @@ impl HactorioApp {
                             .invisible()
                             .sizing_pass(),
                     );
-                    self.research_menu_contents(&mut measure, registry.as_deref(), researches);
+                    self.research_menu_contents(&mut measure, registry, researches);
                     measure.min_rect().width()
                 };
 
@@ -467,8 +463,7 @@ impl HactorioApp {
                     }))
                     .show(|ui| {
                         ui.set_width(measured_width.max(260.0));
-                        let resized =
-                            self.research_menu_contents(ui, registry.as_deref(), researches);
+                        let resized = self.research_menu_contents(ui, registry, researches);
                         if resized {
                             ui.ctx().request_repaint();
                         }
@@ -486,7 +481,7 @@ impl HactorioApp {
     fn research_menu_contents(
         &mut self,
         ui: &mut Ui,
-        registry: Option<&Registry>,
+        registry: &Registry,
         researches: &[hactorio_data::ProductivityResearch],
     ) -> bool {
         let sizing = ui.is_sizing_pass();
@@ -513,15 +508,8 @@ impl HactorioApp {
                         .insert(research.id.clone(), level);
                     resized = true;
                 }
-                if let Some(registry) = registry {
-                    for effect in &research.effects {
-                        ui.label(research_effect_label(
-                            registry,
-                            &effect.recipe,
-                            effect.change,
-                            level,
-                        ));
-                    }
+                for effect in &research.effects {
+                    ui.label(research_effect_label(registry, effect, level));
                 }
             });
         }
@@ -612,44 +600,58 @@ impl HactorioApp {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
 
-        egui::Panel::top("tabs").show(ui, |ui| {
-            self.tabs_bar(ui);
-        });
+        let loaded = self.registry.clone();
+        if let Some(registry) = &loaded {
+            egui::Panel::top("tabs").show(ui, |ui| {
+                self.tabs_bar(ui);
+            });
 
-        egui::Panel::top("display_settings").show(ui, |ui| {
-            self.display_bar(ui);
-        });
+            egui::Panel::top("display_settings").show(ui, |ui| {
+                self.display_bar(ui, registry);
+            });
 
-        egui::Panel::top("research_settings").show(ui, |ui| {
-            self.research_bar(ui);
-        });
+            egui::Panel::top("research_settings").show(ui, |ui| {
+                self.research_bar(ui, registry);
+            });
 
-        egui::Panel::bottom("status").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(&self.status).small().weak());
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let lines = self.tabs[self.active].text.split('\n').count();
-                    ui.label(RichText::new(format!("{lines} lines")).small().weak());
+            egui::Panel::bottom("status").show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(&self.status).small().weak());
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let lines = self.tabs[self.active].text.split('\n').count();
+                        ui.label(RichText::new(format!("{lines} lines")).small().weak());
+                    });
                 });
             });
-        });
+        }
 
         egui::CentralPanel::default().show(ui, |ui| {
-            if self.registry.is_none() {
-                ui.add_space(12.0);
-                ui.heading("hactorio");
-                ui.label("Game data is not loaded yet.");
-                if ui.button("Load game data").clicked() {
-                    self.start_load();
-                }
-                ui.separator();
-            }
+            let Some(registry) = self.registry.clone() else {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(48.0);
+                    ui.label("Game data is not loaded yet.");
+                    let loading = self.loading();
+                    let label = if loading {
+                        "Loading…"
+                    } else {
+                        "Load game data"
+                    };
+                    if ui.add_enabled(!loading, egui::Button::new(label)).clicked() {
+                        self.start_load();
+                    }
+                    if !self.status.is_empty() {
+                        ui.label(RichText::new(&self.status).small().weak());
+                    }
+                });
+                return;
+            };
+            let registry = registry.as_ref();
             let active = self.active;
             let mut state = EditorState::new(
                 active,
                 &self.outputs,
                 &self.settings,
-                self.registry.as_deref(),
+                registry,
                 &mut self.pending_focus,
                 &mut self.completion,
                 &mut self.results_width,
@@ -667,7 +669,7 @@ impl HactorioApp {
                 active,
                 outputs: &self.outputs,
                 settings: &self.settings,
-                registry: self.registry.as_deref(),
+                registry,
             };
             if let Some((line, anchor, width)) = result.detail
                 && self.completion.items.is_empty()

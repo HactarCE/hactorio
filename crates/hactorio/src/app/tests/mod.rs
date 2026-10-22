@@ -11,6 +11,7 @@ use egui_kittest::Harness;
 
 mod completion;
 mod persistence;
+mod reload;
 mod research;
 mod snapshots;
 mod tooltips;
@@ -76,14 +77,27 @@ fn completion_harness_with(
     document: Document,
     fixture: &str,
 ) -> (Harness<'static, Option<HactorioApp>>, PathBuf) {
+    harness_with(name, document, Some(fixture))
+}
+
+/// Builds a harness over an app directory that holds `fixture` as its cache.
+///
+/// `None` leaves the directory empty, as when game data has never been loaded.
+fn harness_with(
+    name: &str,
+    document: Document,
+    fixture: Option<&str>,
+) -> (Harness<'static, Option<HactorioApp>>, PathBuf) {
     let app_dir =
         std::env::temp_dir().join(format!("hactorio-completion-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&app_dir);
     std::fs::create_dir_all(&app_dir).unwrap();
-    hactorio_data::postprocess(fixture, &hactorio_data::Locale::empty())
-        .unwrap()
-        .save(&app_dir.join("cache.json"))
-        .unwrap();
+    if let Some(fixture) = fixture {
+        hactorio_data::postprocess(fixture, &hactorio_data::Locale::empty())
+            .unwrap()
+            .save(&app_dir.join("cache.json"))
+            .unwrap();
+    }
 
     let builder = Harness::builder()
         .with_size(egui::vec2(800.0, 600.0))
