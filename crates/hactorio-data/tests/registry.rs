@@ -246,6 +246,11 @@ fn locale_supplies_display_names() {
         r#"{"names":{"advanced-circuit":"Advanced circuit"}}"#,
     )
     .unwrap();
+    fs::write(
+        dir.join("technology-locale.json"),
+        r#"{"names":{"iron-plate-productivity":"Iron plate productivity"}}"#,
+    )
+    .unwrap();
 
     let registry = postprocess(DUMP, &Locale::load(&dir)).unwrap();
 
@@ -265,10 +270,34 @@ fn locale_supplies_display_names() {
             .as_deref(),
         Some("Advanced circuit")
     );
+    assert_eq!(
+        registry.productivity_researches()[0]
+            .display_name
+            .as_deref(),
+        Some("Iron plate productivity")
+    );
     // A missing locale file is not an error.
     assert_eq!(registry.entry("water").unwrap().display_name, None);
 
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn productivity_researches_come_from_recipe_productivity_effects() {
+    let registry = registry();
+    let researches = registry.productivity_researches();
+
+    assert_eq!(researches.len(), 1);
+    let research = &researches[0];
+    assert_eq!(&*research.id, "iron-plate-productivity");
+    assert_eq!(research.display_name, None);
+    assert_eq!(
+        research.effects,
+        [hactorio_data::RecipeProductivity {
+            recipe: "iron-plate".into(),
+            change: 0.1,
+        }]
+    );
 }
 
 #[test]

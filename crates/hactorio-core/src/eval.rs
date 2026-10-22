@@ -182,7 +182,7 @@ fn evaluate_statement(
         StatementKind::Expression(expr) => {
             match eval_expr(expr, variables, settings, registry, span) {
                 Ok(value) => {
-                    let output = match output_of(&value, registry, span) {
+                    let output = match output_of(&value, settings, registry, span) {
                         Ok(output) => LineOutput::Value(output),
                         Err(error) => LineOutput::Error(error),
                     };
@@ -200,7 +200,7 @@ fn evaluate_statement(
             }
             let result = eval_expr(value, variables, settings, registry, span);
             let output = match &result {
-                Ok(value) => output_of(value, registry, span),
+                Ok(value) => output_of(value, settings, registry, span),
                 Err(error) => Err(error.clone()),
             };
             let eval = result.as_ref().ok().cloned();
@@ -263,7 +263,7 @@ fn eval_expr(
         Expr::In { quantity, machine } => {
             let quantity = eval_expr(quantity, variables, settings, registry, span)?;
             let machine = eval_expr(machine, variables, settings, registry, span)?;
-            eval_in(quantity, machine, registry, span)
+            eval_in(quantity, machine, settings, registry, span)
         }
     }
 }
@@ -306,6 +306,7 @@ fn merge_modules(modules: &[ModuleUse]) -> Vec<ModuleCount> {
 fn eval_in(
     quantity: Eval,
     machine: Eval,
+    settings: &Settings,
     registry: &Registry,
     span: Span,
 ) -> Result<Eval, EvalError> {
@@ -358,7 +359,7 @@ fn eval_in(
     let recipe_data = registry.recipe(recipe);
     config::validate(registry, machine_id, &modules, Some(recipe_data), span)?;
 
-    let net = config::coefficients(registry, machine_id, &modules, recipe_data, span)?;
+    let net = config::coefficients(registry, machine_id, &modules, recipe_data, settings, span)?;
     let coefficient = net.get(&selection.unit).copied().unwrap_or(0.0);
     let divisor = if selection.item_or_fluid {
         coefficient.abs()
@@ -633,7 +634,12 @@ fn is_time(value: &Value) -> bool {
     value.units().len() == 1 && value.exponent(BaseUnit::Second) == 1
 }
 
-fn output_of(value: &Eval, registry: &Registry, span: Span) -> Result<Output, EvalError> {
+fn output_of(
+    value: &Eval,
+    settings: &Settings,
+    registry: &Registry,
+    span: Span,
+) -> Result<Output, EvalError> {
     match value {
         Eval::Scalar(value) => Ok(Output::Scalar(value.clone())),
         Eval::Machine(machine) => Ok(Output::Machine(MachineOutput {
@@ -642,8 +648,14 @@ fn output_of(value: &Eval, registry: &Registry, span: Span) -> Result<Output, Ev
         })),
         Eval::Recipe(recipe) => {
             let recipe_data = registry.recipe(recipe.recipe);
-            let net =
-                config::coefficients(registry, recipe.machine, &recipe.modules, recipe_data, span)?;
+            let net = config::coefficients(
+                registry,
+                recipe.machine,
+                &recipe.modules,
+                recipe_data,
+                settings,
+                span,
+            )?;
             let multiplier = recipe.quantity.magnitude();
             let mut scaled = BTreeMap::new();
             for (unit, amount) in net {
@@ -652,8 +664,13 @@ fn output_of(value: &Eval, registry: &Registry, span: Span) -> Result<Output, Ev
                     scaled.insert(unit, amount);
                 }
             }
-            let modifiers =
-                config::modifiers(registry, recipe.machine, &recipe.modules, Some(recipe_data));
+            let modifiers = config::modifiers(
+                registry,
+                recipe.machine,
+                &recipe.modules,
+                Some(recipe_data),
+                settings,
+            );
             let total_energy_j = match recipe.quantity {
                 RecipeQuantity::MachineSeconds(tau) => Some(tau * modifiers.power_w),
                 RecipeQuantity::Machines(_) => None,

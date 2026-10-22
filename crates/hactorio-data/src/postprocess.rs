@@ -7,8 +7,8 @@ use std::path::Path;
 use serde_json::{Map, Value};
 
 use crate::registry::{
-    AllowedEffects, Entry, Ingredient, Item, Machine, Module, ModuleEffect, Product, PrototypeKind,
-    Recipe, RecipeId, Registry, glyph_for,
+    AllowedEffects, Entry, Ingredient, Item, Machine, Module, ModuleEffect, Product,
+    ProductivityResearch, PrototypeKind, Recipe, RecipeId, RecipeProductivity, Registry, glyph_for,
 };
 use crate::{Error, Result};
 
@@ -21,6 +21,7 @@ pub struct Locale {
     items: HashMap<Box<str>, Box<str>>,
     fluids: HashMap<Box<str>, Box<str>>,
     recipes: HashMap<Box<str>, Box<str>>,
+    technologies: HashMap<Box<str>, Box<str>>,
 }
 
 impl Locale {
@@ -35,6 +36,7 @@ impl Locale {
             items: read_names(&dir.join("item-locale.json")),
             fluids: read_names(&dir.join("fluid-locale.json")),
             recipes: read_names(&dir.join("recipe-locale.json")),
+            technologies: read_names(&dir.join("technology-locale.json")),
         }
     }
 }
@@ -152,7 +154,55 @@ pub fn postprocess(raw_dump_json: &str, locale: &Locale) -> Result<Registry> {
         });
     }
 
-    Registry::from_parts(entries, recipes.into_values().collect())
+    let researches = collect_productivity_researches(root, locale);
+    Registry::from_parts(entries, recipes.into_values().collect(), researches)
+}
+
+/// Collects technologies whose effects change recipe productivity.
+///
+/// Only `change-recipe-productivity` effects are kept: mining and laboratory
+/// productivity are different effect types and do not target crafting recipes.
+fn collect_productivity_researches(
+    root: &Map<String, Value>,
+    locale: &Locale,
+) -> Vec<ProductivityResearch> {
+    let mut researches = BTreeMap::new();
+    for (id, proto) in table(root, "technology") {
+        let mut effects = Vec::new();
+        for effect in proto
+            .get("effects")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if effect.get("type").and_then(Value::as_str) != Some("change-recipe-productivity") {
+                continue;
+            }
+            let Some(recipe) = effect.get("recipe").and_then(Value::as_str) else {
+                continue;
+            };
+            let change = effect.get("change").and_then(Value::as_f64).unwrap_or(0.0);
+            if change == 0.0 {
+                continue;
+            }
+            effects.push(RecipeProductivity {
+                recipe: recipe.into(),
+                change,
+            });
+        }
+        if effects.is_empty() {
+            continue;
+        }
+        researches.insert(
+            id,
+            ProductivityResearch {
+                id: id.into(),
+                display_name: locale.technologies.get(id).cloned(),
+                effects,
+            },
+        );
+    }
+    researches.into_values().collect()
 }
 
 #[derive(Default)]

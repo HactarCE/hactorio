@@ -6,6 +6,7 @@ use hactorio_data::{EntryId, Recipe, RecipeId, Registry};
 
 use crate::ast::Span;
 use crate::eval::{EvalError, ModuleCount};
+use crate::settings::Settings;
 use crate::value::BaseUnit;
 
 /// The effects of a machine's modules, with only allowed effects applied.
@@ -98,6 +99,7 @@ pub(crate) fn modifiers(
     machine: EntryId,
     modules: &[ModuleCount],
     recipe: Option<&Recipe>,
+    settings: &Settings,
 ) -> Modifiers {
     let Some(data) = registry.entry_by_index(machine).machine() else {
         return Modifiers {
@@ -134,13 +136,17 @@ pub(crate) fn modifiers(
     }
 
     let productivity_allowed = recipe.is_none_or(|recipe| recipe.allow_productivity);
+    let productivity = if productivity_allowed {
+        productivity
+    } else {
+        0.0
+    };
     Modifiers {
         speed: data.speed * (1.0 + speed_sum),
-        productivity: if productivity_allowed {
-            productivity
-        } else {
-            0.0
-        },
+        productivity: productivity
+            + recipe.map_or(0.0, |recipe| {
+                research_productivity(registry, recipe, settings)
+            }),
         power_w: data.energy_usage_w * (1.0 + consumption_sum),
         pollution_per_minute: data.pollution_per_minute
             * (1.0 + consumption_sum)
@@ -157,9 +163,10 @@ pub(crate) fn coefficients(
     machine: EntryId,
     modules: &[ModuleCount],
     recipe: &Recipe,
+    settings: &Settings,
     span: Span,
 ) -> Result<BTreeMap<BaseUnit, f64>, EvalError> {
-    let modifiers = modifiers(registry, machine, modules, Some(recipe));
+    let modifiers = modifiers(registry, machine, modules, Some(recipe), settings);
     let crafts_per_second = modifiers.speed / recipe.craft_time;
 
     let mut net: BTreeMap<BaseUnit, f64> = BTreeMap::new();
@@ -243,6 +250,26 @@ fn unit_of(
         hactorio_data::PrototypeKind::Item => BaseUnit::Item(id),
         hactorio_data::PrototypeKind::Fluid => BaseUnit::Fluid(id),
     })
+}
+
+/// Productivity granted to `recipe` by completed research levels.
+///
+/// Research productivity applies even when the recipe forbids productivity
+/// modules, as with recycling recipes.
+fn research_productivity(registry: &Registry, recipe: &Recipe, settings: &Settings) -> f64 {
+    registry
+        .productivity_researches()
+        .iter()
+        .map(|research| {
+            let level = f64::from(settings.research_level(&research.id));
+            research
+                .effects
+                .iter()
+                .filter(|effect| effect.recipe == recipe.id)
+                .map(|effect| effect.change * level)
+                .sum::<f64>()
+        })
+        .sum()
 }
 
 fn is_productivity(registry: &Registry, module: &ModuleCount) -> bool {

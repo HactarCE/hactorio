@@ -51,7 +51,7 @@ fn machine_breakdown(value: &MachineValue, settings: &Settings, registry: &Regis
     ];
 
     if let Some(machine) = registry.entry_by_index(value.machine).machine() {
-        let modifiers = config::modifiers(registry, value.machine, &value.modules, None);
+        let modifiers = config::modifiers(registry, value.machine, &value.modules, None, settings);
         rows.push(row(
             "slots",
             format!(
@@ -82,7 +82,13 @@ fn recipe_breakdown(value: &RecipeValue, settings: &Settings, registry: &Registr
             sections: Vec::new(),
         };
     };
-    let modifiers = config::modifiers(registry, value.machine, &value.modules, Some(recipe));
+    let modifiers = config::modifiers(
+        registry,
+        value.machine,
+        &value.modules,
+        Some(recipe),
+        settings,
+    );
     let rate = matches!(value.quantity, RecipeQuantity::Machines(_));
     let multiplier = value.quantity.magnitude();
     let crafts_per_second = modifiers.speed / recipe.craft_time;

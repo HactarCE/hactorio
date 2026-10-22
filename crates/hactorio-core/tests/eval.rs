@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use hactorio_core::{
     BaseUnit, EvalError, LineCache, LineOutput, Output, RecipeQuantity, Settings, StatementOutput,
     evaluate,
@@ -351,6 +353,53 @@ fn productivity_applies_to_products_only() {
     assert_close(output.net[&BaseUnit::Craft], rate);
     // Power = 180 kW * (1 + 2 * 0.8).
     assert_close(output.per_machine_power_w, 180_000.0 * 2.6);
+}
+
+#[test]
+fn research_productivity_adds_to_module_productivity() {
+    let registry = registry();
+    let mut research_levels: BTreeMap<Box<str>, u32> = BTreeMap::new();
+    research_levels.insert("iron-plate-productivity".into(), 3);
+    let settings = Settings {
+        research_levels,
+        ..Settings::default()
+    };
+    let outputs = run_with(
+        &registry,
+        &settings,
+        "@:electric-furnace: 2 :productivity-module-3: making :iron-plate:",
+    );
+    let output = recipe_output(&outputs[0]);
+
+    // S = 2 * (1 + 2 * -0.15) = 1.4, T = 3.2, P = 0.2 + 0.3.
+    let rate = 1.4 / 3.2;
+    let plate = BaseUnit::Item(registry.entry_id("iron-plate").unwrap());
+    let ore = BaseUnit::Item(registry.entry_id("iron-ore").unwrap());
+    assert_close(output.net[&plate], rate * 1.5);
+    assert_close(output.net[&ore], -rate);
+    assert_close(output.net[&BaseUnit::Craft], rate);
+}
+
+#[test]
+fn research_productivity_applies_without_modules() {
+    let registry = registry();
+    let mut research_levels: BTreeMap<Box<str>, u32> = BTreeMap::new();
+    research_levels.insert("iron-plate-productivity".into(), 1);
+    let settings = Settings {
+        research_levels,
+        ..Settings::default()
+    };
+    let outputs = run_with(
+        &registry,
+        &settings,
+        "@:electric-furnace: making :iron-plate:",
+    );
+    let output = recipe_output(&outputs[0]);
+
+    // Without modules, the level-1 research alone gives 10% productivity.
+    let rate = 2.0 / 3.2;
+    let plate = BaseUnit::Item(registry.entry_id("iron-plate").unwrap());
+    assert_close(output.net[&plate], rate * 1.1);
 }
 
 #[test]

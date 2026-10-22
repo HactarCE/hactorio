@@ -9,6 +9,7 @@ use egui_kittest::Harness;
 
 mod completion;
 mod persistence;
+mod research;
 mod snapshots;
 mod tooltips;
 
@@ -45,6 +46,12 @@ const FIXTURE: &str = r#"{
   },
   "assembling-machine": {
     "assembling-machine-3": {"type": "assembling-machine", "name": "assembling-machine-3", "crafting_categories": ["crafting"], "crafting_speed": 1.25, "module_slots": 4, "energy_usage": "375kW"}
+  },
+  "technology": {
+    "iron-plate-productivity": {
+      "type": "technology", "name": "iron-plate-productivity", "max_level": "infinite",
+      "effects": [{"type": "change-recipe-productivity", "recipe": "iron-plate", "change": 0.1}]
+    }
   }
 }"#;
 

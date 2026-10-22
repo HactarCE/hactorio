@@ -157,5 +157,22 @@
       "energy_usage": "90kW",
       "energy_source": { "type": "electric", "emissions_per_minute": { "pollution": 10 } }
     }
+  },
+  "technology": {
+    "iron-plate-productivity": {
+      "type": "technology",
+      "name": "iron-plate-productivity",
+      "max_level": "infinite",
+      "effects": [
+        { "type": "change-recipe-productivity", "recipe": "iron-plate", "change": 0.1 }
+      ]
+    },
+    "mining-productivity-1": {
+      "type": "technology",
+      "name": "mining-productivity-1",
+      "effects": [
+        { "type": "mining-drill-productivity-bonus", "change": 0.1 }
+      ]
+    }
   }
 }

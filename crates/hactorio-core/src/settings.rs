@@ -1,5 +1,7 @@
 //! Global settings. Evaluation takes a snapshot, never the UI's copy.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::belt::BeltTier;
@@ -77,6 +79,9 @@ pub struct Settings {
     pub stacked_belts: bool,
     /// Effective belt stacking level, 1 through 4.
     pub belt_stacking: u8,
+    /// Completed levels of each productivity research, keyed by technology id.
+    #[serde(default)]
+    pub research_levels: BTreeMap<Box<str>, u32>,
 }
 
 impl Default for Settings {
@@ -88,6 +93,14 @@ impl Default for Settings {
             item_rate_belt: None,
             stacked_belts: false,
             belt_stacking: 4,
+            research_levels: BTreeMap::new(),
         }
+    }
+}
+
+impl Settings {
+    /// Completed levels of `research`, or zero if it was never set.
+    pub fn research_level(&self, research: &str) -> u32 {
+        self.research_levels.get(research).copied().unwrap_or(0)
     }
 }

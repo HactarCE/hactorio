@@ -171,6 +171,23 @@ pub struct Product {
     pub ignored_by_productivity: f64,
 }
 
+/// One recipe that a research increases productivity for.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecipeProductivity {
+    pub recipe: Box<str>,
+    /// Productivity added to the recipe per research level.
+    pub change: f64,
+}
+
+/// An infinite research that increases productivity for crafting recipes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProductivityResearch {
+    pub id: Box<str>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<Box<str>>,
+    pub effects: Vec<RecipeProductivity>,
+}
+
 /// A recipe prototype, or a synthetic recipe for a minable resource.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Recipe {
@@ -198,6 +215,7 @@ pub struct Recipe {
 pub struct Registry {
     entries: Vec<Entry>,
     recipes: Vec<Recipe>,
+    researches: Vec<ProductivityResearch>,
     by_id: HashMap<Box<str>, EntryId>,
     recipe_by_id: HashMap<Box<str>, RecipeId>,
     /// How many recipe ingredients and products name each entry, indexed by
@@ -206,7 +224,13 @@ pub struct Registry {
 }
 
 impl Registry {
-    pub(crate) fn from_parts(entries: Vec<Entry>, recipes: Vec<Recipe>) -> Result<Self> {
+    pub(crate) fn from_parts(
+        entries: Vec<Entry>,
+        recipes: Vec<Recipe>,
+        mut researches: Vec<ProductivityResearch>,
+    ) -> Result<Self> {
+        researches.sort_by(|r1, r2| r1.display_name.cmp(&r2.display_name));
+
         if entries.len() > PUA_COUNT as usize {
             return Err(Error::Invalid(format!(
                 "{} namespace entries exceed the {} private-use codepoints",
@@ -288,6 +312,7 @@ impl Registry {
         Ok(Registry {
             entries,
             recipes,
+            researches,
             by_id,
             recipe_by_id,
             references,
@@ -301,6 +326,11 @@ impl Registry {
 
     pub fn recipes(&self) -> &[Recipe] {
         &self.recipes
+    }
+
+    /// Every research whose effects change recipe productivity, sorted by id.
+    pub fn productivity_researches(&self) -> &[ProductivityResearch] {
+        &self.researches
     }
 
     pub fn entry(&self, id: &str) -> Option<&Entry> {

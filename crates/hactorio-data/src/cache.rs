@@ -5,17 +5,18 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::registry::{Entry, Recipe, Registry};
+use crate::registry::{Entry, ProductivityResearch, Recipe, Registry};
 use crate::{Error, Result};
 
 /// Bumping this invalidates every existing cache.
-pub(crate) const CACHE_VERSION: u32 = 1;
+pub(crate) const CACHE_VERSION: u32 = 2;
 
 #[derive(Serialize)]
 struct CacheRef<'a> {
     version: u32,
     entries: &'a [Entry],
     recipes: &'a [Recipe],
+    researches: &'a [ProductivityResearch],
 }
 
 #[derive(Deserialize)]
@@ -23,6 +24,8 @@ struct CacheFile {
     version: u32,
     entries: Vec<Entry>,
     recipes: Vec<Recipe>,
+    #[serde(default)]
+    researches: Vec<ProductivityResearch>,
 }
 
 impl Registry {
@@ -32,6 +35,7 @@ impl Registry {
             version: CACHE_VERSION,
             entries: self.entries(),
             recipes: self.recipes(),
+            researches: self.productivity_researches(),
         };
         Ok(serde_json::to_vec(&cache)?)
     }
@@ -41,7 +45,7 @@ impl Registry {
         if cache.version != CACHE_VERSION {
             return Err(Error::UnsupportedVersion(cache.version));
         }
-        Registry::from_parts(cache.entries, cache.recipes)
+        Registry::from_parts(cache.entries, cache.recipes, cache.researches)
     }
 
     /// Loads a cache written by [`Registry::save`].
@@ -79,6 +83,10 @@ mod tests {
 
         assert_eq!(registry.entries(), loaded.entries());
         assert_eq!(registry.recipes(), loaded.recipes());
+        assert_eq!(
+            registry.productivity_researches(),
+            loaded.productivity_researches()
+        );
         assert_eq!(loaded.to_json().unwrap(), bytes);
         assert_eq!(
             loaded
@@ -106,6 +114,10 @@ mod tests {
 
         assert_eq!(registry.entries(), loaded.entries());
         assert_eq!(registry.recipes(), loaded.recipes());
+        assert_eq!(
+            registry.productivity_researches(),
+            loaded.productivity_researches()
+        );
     }
 
     #[test]

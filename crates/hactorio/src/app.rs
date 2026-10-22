@@ -143,6 +143,21 @@ fn icon_button_height(ui: &Ui) -> f32 {
         .max(text_height + 2.0 * ui.spacing().button_padding.y)
 }
 
+/// Formats the productivity a research grants at `level` for one recipe.
+fn research_effect_label(registry: &Registry, recipe: &str, change: f64, level: u32) -> String {
+    let percent = change * f64::from(level) * 100.0;
+    let percent = (percent * 1e6).round() / 1e6;
+    let percent = format!("{percent}");
+    let name = registry
+        .find_recipe(recipe)
+        .and_then(|recipe| recipe.display_name.as_deref())
+        .unwrap_or(recipe);
+    match registry.entry(recipe) {
+        Some(entry) => format!("+{percent}% {} {name}", entry.glyph),
+        None => format!("+{percent}% {name}"),
+    }
+}
+
 /// The game item whose icon represents a belt tier.
 fn belt_tier_glyph(registry: &Registry, tier: BeltTier) -> Option<char> {
     let id = match tier {
@@ -478,6 +493,11 @@ impl HactorioApp {
 
     fn research_bar(&mut self, ui: &mut Ui) {
         let before = self.settings.clone();
+        let registry = self.registry.clone();
+        let researches = registry
+            .as_deref()
+            .map(Registry::productivity_researches)
+            .unwrap_or_default();
 
         ui.horizontal_wrapped(|ui| {
             // Reserve the tallest control's height so labels and controls align.
@@ -487,9 +507,98 @@ impl HactorioApp {
 
             ui.label("Belt stacking");
             ui.add(egui::Slider::new(&mut self.settings.belt_stacking, 1..=4));
+            ui.separator();
+
+            ui.add_enabled_ui(!researches.is_empty(), |ui| {
+                let measured_width = {
+                    let mut measure = Ui::new(
+                        ui.ctx().clone(),
+                        ui.scope_id().with("productivity_menu_measure"),
+                        egui::UiBuilder::new()
+                            .layer_id(ui.layer_id())
+                            .max_rect(egui::Rect::from_min_size(
+                                ui.max_rect().min,
+                                ui.ctx().content_rect().size(),
+                            ))
+                            .layout(egui::Layout::top_down(egui::Align::Min))
+                            .style(ui.style().clone())
+                            .invisible()
+                            .sizing_pass(),
+                    );
+                    self.research_menu_contents(&mut measure, registry.as_deref(), researches);
+                    measure.min_rect().width()
+                };
+
+                let button = ui
+                    .button("Productivity…")
+                    .on_hover_text("Set completed levels of productivity research");
+                egui::Popup::menu(&button)
+                    .layout(egui::Layout::top_down(egui::Align::Min))
+                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                    .style(egui::style::StyleModifier::new(|style| {
+                        style.wrap_mode = Some(egui::TextWrapMode::Extend);
+                    }))
+                    .show(|ui| {
+                        ui.set_width(measured_width.max(260.0));
+                        let resized =
+                            self.research_menu_contents(ui, registry.as_deref(), researches);
+                        if resized {
+                            ui.ctx().request_repaint();
+                        }
+                    });
+            });
         });
 
         self.settings_changed(before);
+    }
+
+    /// Lays out the productivity menu; returns whether a level changed.
+    ///
+    /// A sizing-pass Ui skips the full-width group constraint so the caller can
+    /// measure the natural content width.
+    fn research_menu_contents(
+        &mut self,
+        ui: &mut Ui,
+        registry: Option<&Registry>,
+        researches: &[hactorio_data::ProductivityResearch],
+    ) -> bool {
+        let sizing = ui.is_sizing_pass();
+        let mut resized = false;
+        for research in researches {
+            ui.group(|ui| {
+                if !sizing {
+                    ui.set_min_width(ui.available_width());
+                }
+                let label = research.display_name.as_deref().unwrap_or(&research.id);
+                let mut level = self.settings.research_level(&research.id);
+                let drag = ui.horizontal(|ui| {
+                    let drag = ui.add(
+                        egui::DragValue::new(&mut level)
+                            .range(0..=u32::MAX)
+                            .speed(0.1),
+                    );
+                    ui.label(label);
+                    drag
+                });
+                if drag.inner.changed() {
+                    self.settings
+                        .research_levels
+                        .insert(research.id.clone(), level);
+                    resized = true;
+                }
+                if let Some(registry) = registry {
+                    for effect in &research.effects {
+                        ui.label(research_effect_label(
+                            registry,
+                            &effect.recipe,
+                            effect.change,
+                            level,
+                        ));
+                    }
+                }
+            });
+        }
+        resized
     }
 
     fn settings_changed(&mut self, before: Settings) {

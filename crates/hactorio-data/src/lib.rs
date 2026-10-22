@@ -17,7 +17,8 @@ pub use icons::{IconImage, IconSource};
 pub use postprocess::{Locale, postprocess};
 pub use registry::{
     AllowedEffects, Entry, EntryId, Ingredient, Item, Machine, Module, ModuleEffect, PUA_COUNT,
-    PUA_FIRST, Product, PrototypeKind, Recipe, RecipeId, Registry, glyph_for,
+    PUA_FIRST, Product, ProductivityResearch, PrototypeKind, Recipe, RecipeId, RecipeProductivity,
+    Registry, glyph_for,
 };
 
 /// Errors from loading, validating, or post-processing prototype data.
