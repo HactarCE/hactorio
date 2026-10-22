@@ -91,6 +91,177 @@ fn research_effect_label(
     }
 }
 
+#[derive(Clone, Copy)]
+enum DisplaySetting {
+    Font,
+    TimeUnit,
+    ItemRates,
+    Decimals,
+    Metrics,
+}
+
+const DISPLAY_SETTINGS: [DisplaySetting; 5] = [
+    DisplaySetting::Font,
+    DisplaySetting::TimeUnit,
+    DisplaySetting::ItemRates,
+    DisplaySetting::Decimals,
+    DisplaySetting::Metrics,
+];
+
+#[derive(Clone, Copy)]
+enum ResearchSetting {
+    BeltStacking,
+    Productivity,
+}
+
+const RESEARCH_SETTINGS: [ResearchSetting; 2] =
+    [ResearchSetting::BeltStacking, ResearchSetting::Productivity];
+
+/// Width of the widest settings-bar label, shared so both bars line up.
+fn settings_label_width(ui: &Ui) -> f32 {
+    let font = TextStyle::Body.resolve(ui.style());
+    let color = ui.visuals().text_color();
+    let width = |text: &str| {
+        ui.fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(text.to_owned(), font.clone(), color)
+                .size()
+                .x
+        })
+    };
+    width("Display").max(width("Research"))
+}
+
+/// Splits settings into rows that fit in `available`, given the gap used
+/// between adjacent settings.
+fn pack_settings(widths: &[f32], available: f32, between: f32) -> Vec<(usize, usize)> {
+    let mut rows = Vec::new();
+    let mut start = 0;
+    let mut used = 0.0;
+    for (index, &width) in widths.iter().enumerate() {
+        if index == start {
+            used = width;
+        } else if used + between + width <= available {
+            used += between + width;
+        } else {
+            rows.push((start, index));
+            start = index;
+            used = width;
+        }
+    }
+    if start < widths.len() {
+        rows.push((start, widths.len()));
+    }
+    rows
+}
+
+/// Measures one setting in an invisible sizing pass.
+fn measure_setting<T: Copy>(
+    ui: &Ui,
+    label: &str,
+    index: usize,
+    setting: T,
+    setting_ui: &mut impl FnMut(&mut Ui, T),
+) -> f32 {
+    let mut measure = Ui::new(
+        ui.ctx().clone(),
+        ui.scope_id().with(("settings_measure", label, index)),
+        egui::UiBuilder::new()
+            .max_rect(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(10_000.0, 10_000.0),
+            ))
+            .layout(egui::Layout::left_to_right(Align::Center))
+            .style(ui.style().clone())
+            .invisible()
+            .sizing_pass(),
+    );
+    setting_ui(&mut measure, setting);
+    measure.min_rect().width()
+}
+
+/// Lays out a settings bar: label and vertical separator fixed on the left,
+/// settings flowing into as many rows as fit on the right. Each row scrolls
+/// horizontally if a single setting is wider than the column.
+fn settings_bar<T: Copy>(
+    ui: &mut Ui,
+    label: &str,
+    label_width: f32,
+    settings: &[T],
+    mut setting_ui: impl FnMut(&mut Ui, T),
+) {
+    let gap = ui.spacing().item_spacing.x;
+    let separator = ui.spacing().item_spacing.y;
+    let left_width = label_width + 2.0 * gap + separator;
+    // A vertical separator widget also gets item spacing on both sides.
+    let between = 2.0 * gap + separator;
+
+    let widths: Vec<f32> = settings
+        .iter()
+        .enumerate()
+        .map(|(index, setting)| measure_setting(ui, label, index, *setting, &mut setting_ui))
+        .collect();
+
+    let start_x = ui.cursor().min.x;
+    let column = ui
+        .horizontal(|ui| {
+            ui.add_space(left_width);
+            let rows = pack_settings(&widths, ui.available_width(), between);
+            ui.vertical(|ui| {
+                for (row_index, &(start, end)) in rows.iter().enumerate() {
+                    if row_index > 0 {
+                        ui.add(egui::Separator::default().spacing(separator));
+                    }
+                    let row_response = ui.horizontal(|ui| {
+                        ui.set_min_height(icon_button_height(ui));
+                        egui::ScrollArea::horizontal()
+                            .id_salt(("settings_row", label, row_index))
+                            .scroll_bar_visibility(
+                                egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded,
+                            )
+                            .show(ui, |ui| {
+                                ui.set_min_height(icon_button_height(ui));
+                                ui.with_layout(egui::Layout::left_to_right(Align::Center), |ui| {
+                                    for index in start..end {
+                                        if index > start {
+                                            ui.add(
+                                                egui::Separator::default()
+                                                    .vertical()
+                                                    .spacing(separator),
+                                            );
+                                        }
+                                        setting_ui(ui, settings[index]);
+                                    }
+                                });
+                            });
+                    });
+                }
+            })
+            .response
+            .rect
+        })
+        .inner;
+
+    let label_rect = egui::Rect::from_min_size(
+        egui::pos2(start_x, column.top()),
+        egui::vec2(label_width, column.height()),
+    );
+    let mut label_ui = Ui::new(
+        ui.ctx().clone(),
+        ui.scope_id().with(("settings_label", label)),
+        egui::UiBuilder::new()
+            .max_rect(label_rect)
+            .layout(egui::Layout::left_to_right(Align::Center))
+            .style(ui.style().clone()),
+    );
+    label_ui.strong(label);
+    ui.painter().vline(
+        start_x + label_width + gap + separator / 2.0,
+        column.y_range(),
+        ui.visuals().widgets.noninteractive.bg_stroke,
+    );
+}
+
 /// The game item whose icon represents a belt tier.
 fn belt_tier_glyph(registry: &Registry, tier: BeltTier) -> Option<char> {
     registry.entry(tier.item_id()).map(|entry| entry.glyph)
@@ -365,132 +536,160 @@ impl HactorioApp {
         }
     }
 
-    fn display_bar(&mut self, ui: &mut Ui, registry: &Registry) {
+    fn display_bar(&mut self, ui: &mut Ui, registry: &Registry, label_width: f32) {
         let before = self.settings.clone();
         let belt_icons = BeltTier::ALL.map(|tier| (tier, belt_tier_glyph(registry, tier)));
 
-        ui.horizontal_wrapped(|ui| {
-            // Reserve the tallest control's height so labels and controls align.
-            ui.set_height(icon_button_height(ui));
-            ui.strong("Display");
-            // ui.add_space(8.0);
-            ui.separator();
-
-            ui.label("Font");
-            let mut font = self.font.clone();
-            egui::ComboBox::from_id_salt("editor_font")
-                .selected_text(font.as_deref().unwrap_or("Default"))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut font, None, "Default");
-                    for family in fonts::system_fonts().families() {
-                        ui.selectable_value(&mut font, Some(family.clone()), family);
-                    }
-                });
-            if font != self.font {
-                self.font = font;
-                fonts::system_fonts().apply(ui.ctx(), self.font.as_deref());
-                self.dirty = true;
-            }
-            let font_size = ui.add(
-                egui::DragValue::new(&mut self.font_size)
-                    .range(MIN_FONT_SIZE..=MAX_FONT_SIZE)
-                    .speed(0.1)
-                    .fixed_decimals(0),
-            );
-            if font_size.changed() {
-                set_font_size(ui.ctx(), self.font_size);
-                self.dirty = true;
-            }
-            ui.separator();
-
-            ui.label("Time unit");
-            for unit in [TimeUnit::Second, TimeUnit::Minute, TimeUnit::Hour] {
-                ui.selectable_value(&mut self.settings.time_unit, unit, unit.name());
-            }
-            ui.separator();
-
-            ui.label("Item rates");
-            ui.selectable_value(&mut self.settings.item_rate_belt, None, "item/s");
-            for (tier, glyph) in belt_icons {
-                let label: egui::WidgetText = match glyph {
-                    Some(glyph) => RichText::new(glyph.to_string()).size(ICON_SIZE).into(),
-                    None => tier.token().to_string().into(),
-                };
-                ui.selectable_value(&mut self.settings.item_rate_belt, Some(tier), label)
-                    .on_hover_text(format!("{} item/s", tier.items_per_second()));
-            }
-            ui.add_enabled_ui(self.settings.item_rate_belt.is_some(), |ui| {
-                let stack_label =
-                    RichText::new(hactorio_data::STACK_SIZE_GLYPH.to_string()).size(ICON_SIZE);
-                ui.toggle_value(&mut self.settings.stacked_belts, stack_label)
-                    .on_hover_text("Show item rates as stacks on stacked belts");
-            });
-            ui.separator();
-
-            ui.label("Decimals");
-            ui.add(egui::Slider::new(&mut self.settings.max_decimals, 0..=6));
-            ui.separator();
-
-            ui.checkbox(&mut self.settings.metric_prefixes, "Metric prefixes");
-        });
+        settings_bar(
+            ui,
+            "Display",
+            label_width,
+            &DISPLAY_SETTINGS,
+            |ui, setting| {
+                self.display_setting_ui(ui, setting, &belt_icons);
+            },
+        );
 
         self.settings_changed(before);
     }
 
-    fn research_bar(&mut self, ui: &mut Ui, registry: &Registry) {
+    fn display_setting_ui(
+        &mut self,
+        ui: &mut Ui,
+        setting: DisplaySetting,
+        belt_icons: &[(BeltTier, Option<char>)],
+    ) {
+        match setting {
+            DisplaySetting::Font => {
+                ui.label("Font");
+                let mut font = self.font.clone();
+                egui::ComboBox::from_id_salt("editor_font")
+                    .selected_text(font.as_deref().unwrap_or("Default"))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut font, None, "Default");
+                        for family in fonts::system_fonts().families() {
+                            ui.selectable_value(&mut font, Some(family.clone()), family);
+                        }
+                    });
+                if font != self.font {
+                    self.font = font;
+                    fonts::system_fonts().apply(ui.ctx(), self.font.as_deref());
+                    self.dirty = true;
+                }
+                let font_size = ui.add(
+                    egui::DragValue::new(&mut self.font_size)
+                        .range(MIN_FONT_SIZE..=MAX_FONT_SIZE)
+                        .speed(0.1)
+                        .fixed_decimals(0),
+                );
+                if font_size.changed() {
+                    set_font_size(ui.ctx(), self.font_size);
+                    self.dirty = true;
+                }
+            }
+            DisplaySetting::TimeUnit => {
+                ui.label("Time unit");
+                for unit in [TimeUnit::Second, TimeUnit::Minute, TimeUnit::Hour] {
+                    ui.selectable_value(&mut self.settings.time_unit, unit, unit.name());
+                }
+            }
+            DisplaySetting::ItemRates => {
+                ui.label("Item rates");
+                ui.selectable_value(&mut self.settings.item_rate_belt, None, "item/s");
+                for (tier, glyph) in belt_icons {
+                    let label: egui::WidgetText = match glyph {
+                        Some(glyph) => RichText::new(glyph.to_string()).size(ICON_SIZE).into(),
+                        None => tier.token().to_string().into(),
+                    };
+                    ui.selectable_value(&mut self.settings.item_rate_belt, Some(*tier), label)
+                        .on_hover_text(format!("{} item/s", tier.items_per_second()));
+                }
+                ui.add_enabled_ui(self.settings.item_rate_belt.is_some(), |ui| {
+                    let stack_label =
+                        RichText::new(hactorio_data::STACK_SIZE_GLYPH.to_string()).size(ICON_SIZE);
+                    ui.toggle_value(&mut self.settings.stacked_belts, stack_label)
+                        .on_hover_text("Show item rates as stacks on stacked belts");
+                });
+            }
+            DisplaySetting::Decimals => {
+                ui.label("Decimals");
+                ui.add(egui::Slider::new(&mut self.settings.max_decimals, 0..=6));
+            }
+            DisplaySetting::Metrics => {
+                ui.checkbox(&mut self.settings.metric_prefixes, "Metric prefixes");
+            }
+        }
+    }
+
+    fn research_bar(&mut self, ui: &mut Ui, registry: &Registry, label_width: f32) {
         let before = self.settings.clone();
         let researches = registry.productivity_researches();
 
-        ui.horizontal_wrapped(|ui| {
-            // Reserve the tallest control's height so labels and controls align.
-            ui.set_height(icon_button_height(ui));
-            ui.strong("Research");
-            ui.separator();
-
-            ui.label("Belt stacking");
-            ui.add(egui::Slider::new(&mut self.settings.belt_stacking, 1..=4));
-            ui.separator();
-
-            ui.add_enabled_ui(!researches.is_empty(), |ui| {
-                let measured_width = {
-                    let mut measure = Ui::new(
-                        ui.ctx().clone(),
-                        ui.scope_id().with("productivity_menu_measure"),
-                        egui::UiBuilder::new()
-                            .layer_id(ui.layer_id())
-                            .max_rect(egui::Rect::from_min_size(
-                                ui.max_rect().min,
-                                ui.ctx().content_rect().size(),
-                            ))
-                            .layout(egui::Layout::top_down(egui::Align::Min))
-                            .style(ui.style().clone())
-                            .invisible()
-                            .sizing_pass(),
-                    );
-                    self.research_menu_contents(&mut measure, registry, researches);
-                    measure.min_rect().width()
-                };
-
-                let button = ui
-                    .button("Productivity…")
-                    .on_hover_text("Set completed levels of productivity research");
-                egui::Popup::menu(&button)
-                    .layout(egui::Layout::top_down(egui::Align::Min))
-                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                    .style(egui::style::StyleModifier::new(|style| {
-                        style.wrap_mode = Some(egui::TextWrapMode::Extend);
-                    }))
-                    .show(|ui| {
-                        ui.set_width(measured_width.max(260.0));
-                        let resized = self.research_menu_contents(ui, registry, researches);
-                        if resized {
-                            ui.ctx().request_repaint();
-                        }
-                    });
-            });
-        });
+        settings_bar(
+            ui,
+            "Research",
+            label_width,
+            &RESEARCH_SETTINGS,
+            |ui, setting| {
+                self.research_setting_ui(ui, setting, registry, researches);
+            },
+        );
 
         self.settings_changed(before);
+    }
+
+    fn research_setting_ui(
+        &mut self,
+        ui: &mut Ui,
+        setting: ResearchSetting,
+        registry: &Registry,
+        researches: &[hactorio_data::ProductivityResearch],
+    ) {
+        match setting {
+            ResearchSetting::BeltStacking => {
+                ui.label("Belt stacking");
+                ui.add(egui::Slider::new(&mut self.settings.belt_stacking, 1..=4));
+            }
+            ResearchSetting::Productivity => {
+                ui.add_enabled_ui(!researches.is_empty(), |ui| {
+                    let measured_width = {
+                        let mut measure = Ui::new(
+                            ui.ctx().clone(),
+                            ui.scope_id().with("productivity_menu_measure"),
+                            egui::UiBuilder::new()
+                                .layer_id(ui.layer_id())
+                                .max_rect(egui::Rect::from_min_size(
+                                    ui.max_rect().min,
+                                    ui.ctx().content_rect().size(),
+                                ))
+                                .layout(egui::Layout::top_down(egui::Align::Min))
+                                .style(ui.style().clone())
+                                .invisible()
+                                .sizing_pass(),
+                        );
+                        self.research_menu_contents(&mut measure, registry, researches);
+                        measure.min_rect().width()
+                    };
+
+                    let button = ui
+                        .button("Productivity…")
+                        .on_hover_text("Set completed levels of productivity research");
+                    egui::Popup::menu(&button)
+                        .layout(egui::Layout::top_down(egui::Align::Min))
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                        .style(egui::style::StyleModifier::new(|style| {
+                            style.wrap_mode = Some(egui::TextWrapMode::Extend);
+                        }))
+                        .show(|ui| {
+                            ui.set_width(measured_width.max(260.0));
+                            let resized = self.research_menu_contents(ui, registry, researches);
+                            if resized {
+                                ui.ctx().request_repaint();
+                            }
+                        });
+                });
+            }
+        }
     }
 
     /// Lays out the productivity menu; returns whether a level changed.
@@ -619,17 +818,18 @@ impl HactorioApp {
         }
 
         let loaded = self.registry.clone();
+        let label_width = settings_label_width(ui);
         if let Some(registry) = &loaded {
             egui::Panel::top("tabs").show(ui, |ui| {
                 self.tabs_bar(ui);
             });
 
             egui::Panel::top("display_settings").show(ui, |ui| {
-                self.display_bar(ui, registry);
+                self.display_bar(ui, registry, label_width);
             });
 
             egui::Panel::top("research_settings").show(ui, |ui| {
-                self.research_bar(ui, registry);
+                self.research_bar(ui, registry, label_width);
             });
 
             egui::Panel::bottom("status").show(ui, |ui| {

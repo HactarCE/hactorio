@@ -10,6 +10,7 @@ use crate::document::{Cursor, Document};
 use egui_kittest::Harness;
 
 mod completion;
+mod layout;
 mod persistence;
 mod reload;
 mod research;
