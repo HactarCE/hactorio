@@ -24,15 +24,6 @@ impl BeltTier {
         BeltTier::Green,
     ];
 
-    pub fn name(self) -> &'static str {
-        match self {
-            BeltTier::Yellow => "yellow",
-            BeltTier::Red => "red",
-            BeltTier::Blue => "blue",
-            BeltTier::Green => "green",
-        }
-    }
-
     pub fn items_per_second(self) -> f64 {
         match self {
             BeltTier::Yellow => 15.0,

@@ -399,7 +399,7 @@ impl HactorioApp {
                     None => tier.token().to_string().into(),
                 };
                 ui.selectable_value(&mut self.settings.item_rate_belt, Some(tier), label)
-                    .on_hover_text(format!("{} belts", tier.name()));
+                    .on_hover_text(format!("{} item/s", tier.items_per_second()));
             }
             ui.add_enabled_ui(self.settings.item_rate_belt.is_some(), |ui| {
                 let stack_label = RichText::new(icons::STACK_SIZE.to_string()).size(ICON_SIZE);
