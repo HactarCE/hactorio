@@ -159,6 +159,35 @@ fn the_more_referenced_symbol_wins_a_close_match() {
 }
 
 #[test]
+fn word_start_matches_beat_longer_prefixes() {
+    // `casting-copper` matches `castir` as `CASTI…r`, one consecutive run
+    // longer than `casting-iron`'s `CAST`+`IR`, but the latter starts a word.
+    const CASTING: &str = r#"{
+        "item": {
+            "casting-iron": {"type": "item", "name": "casting-iron", "stack_size": 50},
+            "casting-copper": {"type": "item", "name": "casting-copper", "stack_size": 50}
+        }
+    }"#;
+    let registry = hactorio_data::postprocess(CASTING, &hactorio_data::Locale::empty()).unwrap();
+    let iron = registry.entry("casting-iron").unwrap();
+
+    let cursor = "castir".chars().count();
+    let (start, word) = completion_word("castir", cursor);
+    let item = completion_items(&registry, "castir", start, &word)
+        .into_iter()
+        .find(|item| item.label == "casting-iron")
+        .expect("casting-iron");
+    assert_eq!(item.matched, [0, 1, 2, 3, 8, 9], "CAST-IRon");
+
+    let inserts = suggested_ids(&registry, "castir");
+    assert_eq!(
+        inserts.first(),
+        Some(&iron.glyph.to_string()),
+        "{inserts:?}"
+    );
+}
+
+#[test]
 fn completion_after_at_only_offers_machines() {
     let registry = fixture_registry();
     let machine = registry

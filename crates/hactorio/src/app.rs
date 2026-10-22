@@ -1404,6 +1404,20 @@ fn completion_rank(score: isize, references: u32) -> f64 {
     score as f64 + f64::from(references).ln_1p() * COMPLETION_POPULARITY_WEIGHT
 }
 
+/// Fuzzy scoring weights tuned for prototype names.
+///
+/// The defaults let a contiguous prefix outrank a match that starts words:
+/// for `castir`, `casting-copper` (`CASTI…r`) beat `casting-iron` (`CAST`+`IR`)
+/// because the longer consecutive run outweighed the word-start bonus. Lowering
+/// the consecutive bonus and raising the distance penalty makes the jump to
+/// `iron` win without turning every multi-word name into a match.
+const COMPLETION_SCORING: sublime_fuzzy::Scoring = sublime_fuzzy::Scoring {
+    bonus_consecutive: 4,
+    bonus_word_start: 72,
+    bonus_match_case: 8,
+    penalty_distance: 6,
+};
+
 /// The name of `entry` that best matches `needle`, with the matched char indices
 /// and whether the localized display name was the best match.
 fn best_name_match<'a>(
@@ -1415,7 +1429,10 @@ fn best_name_match<'a>(
         .chain(display_name)
         .chain(aliases_for(&entry.id).iter().copied())
         .filter_map(|name| {
-            let found = sublime_fuzzy::best_match(needle, name)?;
+            let found = sublime_fuzzy::FuzzySearch::new(needle, name)
+                .case_insensitive()
+                .score_with(&COMPLETION_SCORING)
+                .best_match()?;
             let mut matched: Vec<usize> = found.matched_indices().copied().collect();
             matched.sort_unstable();
             Some((found.score(), name, matched, Some(name) == display_name))
