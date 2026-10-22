@@ -308,30 +308,53 @@ fn completion_shows_the_prototype_name_after_the_matched_alias() {
 }
 
 #[test]
-fn completion_names_start_at_the_same_column() {
-    let short = CompletionItem {
-        insert: String::new(),
-        glyph: 'a',
-        label: "red-chip".to_string(),
-        matched: Vec::new(),
-        name: Some("Advanced circuit".to_string()),
-        name_matched: Vec::new(),
-    };
-    let long = CompletionItem {
-        label: "green-circuit".to_string(),
-        ..short.clone()
-    };
-    let label_width = 13;
-    let short_row = completion_row_text(&short, label_width);
-    let long_row = completion_row_text(&long, label_width);
+fn variables_are_suggested_after_their_definition() {
+    let registry = fixture_registry();
+    let inserts = suggested_ids(&registry, "rate = 3 :iron-plate: / second\nra");
+    assert!(inserts.contains(&"rate".to_string()), "{inserts:?}");
+
+    let inserts = suggested_ids(&registry, "ra\nrate = 3 :iron-plate: / second");
+    assert!(!inserts.contains(&"rate".to_string()), "{inserts:?}");
+}
+
+#[test]
+fn variables_outrank_similar_prototype_matches() {
+    let registry = fixture_registry();
+    let inserts = suggested_ids(&registry, "cir = 3\nci");
+    assert_eq!(inserts.first().map(String::as_str), Some("cir"));
+}
+
+#[test]
+fn variables_are_not_suggested_in_machine_or_recipe_contexts() {
+    let registry = fixture_registry();
+    let machine = suggested_ids(&registry, "rate = 3\n@ra");
+    assert!(!machine.contains(&"rate".to_string()), "{machine:?}");
+
+    let recipe = suggested_ids(&registry, "rate = 3\n@:assembling-machine-3: making ra");
+    assert!(!recipe.contains(&"rate".to_string()), "{recipe:?}");
+}
+
+#[test]
+fn variable_rows_use_the_variable_signal() {
+    let registry = fixture_registry();
+    let text = "rate = 3 :iron-plate: / second\nra";
+    let cursor = text.chars().count();
+    let (start, word) = completion_word(text, cursor);
+    let items = completion_items(&registry, text, start, &word);
+    let item = items
+        .iter()
+        .find(|item| item.insert == "rate")
+        .expect("variable row");
+
+    assert_eq!(item.glyph, crate::icons::VARIABLE);
+    let font_id = egui::FontId::monospace(13.0);
+    let job = completion_layout_job(item, 13, false, &font_id, &egui::Visuals::dark());
+    let icon = &job.sections[0];
     assert_eq!(
-        short_row.find("Advanced circuit"),
-        long_row.find("Advanced circuit")
+        &job.text[icon.byte_range.start.0..icon.byte_range.end.0],
+        format!("{} ", crate::icons::VARIABLE)
     );
-    assert_eq!(
-        short_row.find("Advanced circuit"),
-        Some(label_width + COMPLETION_NAME_GAP + 2)
-    );
+    assert_eq!(icon.format.extra_letter_spacing, 0.0);
 }
 
 #[test]

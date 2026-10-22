@@ -9,8 +9,18 @@ use egui::epaint::text::{
 };
 use hactorio_data::{IconImage, IconSource, Registry, STACK_SIZE_GLYPH, STACK_SIZE_ICON};
 
+/// Glyph for a variable in the completion popup.
+///
+/// Uses the game's `V` virtual signal; it is not a namespace entry.
+pub const VARIABLE: char = '\u{F8FE}';
+/// Icon path of the variable's virtual signal.
+const VARIABLE_ICON: &str = "__base__/graphics/icons/signal/signal_V.png";
+
 /// Icons that are not namespace entries, as `(glyph, data path)`.
-const EXTRAS: &[(char, &str)] = &[(STACK_SIZE_GLYPH, STACK_SIZE_ICON)];
+const EXTRAS: &[(char, &str)] = &[
+    (STACK_SIZE_GLYPH, STACK_SIZE_ICON),
+    (VARIABLE, VARIABLE_ICON),
+];
 
 /// Installs a highest-priority rasterizer that draws namespace glyphs as icons.
 ///

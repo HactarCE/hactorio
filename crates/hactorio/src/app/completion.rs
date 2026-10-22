@@ -1,6 +1,6 @@
 //! Autocomplete: word extraction, aliases, fuzzy ranking, and the popup.
 
-use egui::{Color32, Key, Modifiers, TextStyle, Ui};
+use egui::{Key, Modifiers, TextStyle, Ui};
 use hactorio_data::{EntryId, Registry};
 
 /// Maximum height of the autocomplete popup, before it scrolls.
@@ -31,6 +31,7 @@ pub(super) struct CompletionState {
 #[derive(Clone)]
 pub(super) struct CompletionItem {
     pub(super) insert: String,
+    /// Icon glyph; variables use [`crate::icons::VARIABLE`].
     pub(super) glyph: char,
     /// The name or alias that matched best, as shown in the popup.
     pub(super) label: String,
@@ -181,6 +182,13 @@ fn aliases_for(id: &str) -> &'static [&'static str] {
 /// a near-equal match without letting popularity beat a clearly better match.
 const COMPLETION_POPULARITY_WEIGHT: f64 = 2.0;
 
+/// Ranking bonus for a variable bound in the current tab.
+///
+/// Variables are few and user-authored, so a comparable match should outrank a
+/// prototype ID. The bonus beats the popularity bonus of common prototypes
+/// without overriding a clearly better match (word starts score 72 more).
+const COMPLETION_VARIABLE_BONUS: f64 = 20.0;
+
 /// The ranking key of a completion: its fuzzy score plus a popularity bonus.
 fn completion_rank(score: isize, references: u32) -> f64 {
     score as f64 + f64::from(references).ln_1p() * COMPLETION_POPULARITY_WEIGHT
@@ -200,6 +208,17 @@ const COMPLETION_SCORING: sublime_fuzzy::Scoring = sublime_fuzzy::Scoring {
     penalty_distance: 6,
 };
 
+/// Fuzzy score of `needle` against `name`, with the matched char indices.
+fn fuzzy_match(name: &str, needle: &str) -> Option<(isize, Vec<usize>)> {
+    let found = sublime_fuzzy::FuzzySearch::new(needle, name)
+        .case_insensitive()
+        .score_with(&COMPLETION_SCORING)
+        .best_match()?;
+    let mut matched: Vec<usize> = found.matched_indices().copied().collect();
+    matched.sort_unstable();
+    Some((found.score(), matched))
+}
+
 /// The name of `entry` that best matches `needle`, with the matched char indices
 /// and whether the localized display name was the best match.
 pub(super) fn best_name_match<'a>(
@@ -211,13 +230,8 @@ pub(super) fn best_name_match<'a>(
         .chain(display_name)
         .chain(aliases_for(&entry.id).iter().copied())
         .filter_map(|name| {
-            let found = sublime_fuzzy::FuzzySearch::new(needle, name)
-                .case_insensitive()
-                .score_with(&COMPLETION_SCORING)
-                .best_match()?;
-            let mut matched: Vec<usize> = found.matched_indices().copied().collect();
-            matched.sort_unstable();
-            Some((found.score(), name, matched, Some(name) == display_name))
+            let (score, matched) = fuzzy_match(name, needle)?;
+            Some((score, name, matched, Some(name) == display_name))
         })
         .reduce(|best, candidate| {
             if candidate.0 > best.0 {
@@ -226,6 +240,43 @@ pub(super) fn best_name_match<'a>(
                 best
             }
         })
+}
+
+/// The variable name defined by `line`, if it is a definition.
+fn definition_name(line: &str) -> Option<&str> {
+    let line = line.trim_start();
+    let first = line.chars().next()?;
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return None;
+    }
+    let mut end = 0;
+    for (index, ch) in line.char_indices() {
+        if ch == '_' || ch.is_ascii_alphanumeric() {
+            end = index + 1;
+        } else {
+            break;
+        }
+    }
+    let rest = line[end..].trim_start();
+    let after_equals = rest.strip_prefix('=')?;
+    if after_equals.starts_with('=') {
+        return None;
+    }
+    Some(&line[..end])
+}
+
+/// Variables defined on lines before the line `before` ends on.
+fn defined_variables(before: &[char]) -> Vec<String> {
+    let text: String = before.iter().collect();
+    let mut lines: Vec<&str> = text.split('\n').collect();
+    lines.pop();
+    let mut names: Vec<String> = Vec::new();
+    for name in lines.iter().filter_map(|line| definition_name(line)) {
+        if !names.iter().any(|known| known == name) {
+            names.push(name.to_string());
+        }
+    }
+    names
 }
 
 pub(super) fn completion_items(
@@ -282,6 +333,28 @@ pub(super) fn completion_items(
         })
         .collect();
 
+    if context == CompletionContext::Normal && !word.starts_with(':') {
+        for name in defined_variables(&before) {
+            if registry.entry(&name).is_some() {
+                continue;
+            }
+            let Some((score, matched)) = fuzzy_match(&name, needle) else {
+                continue;
+            };
+            items.push((
+                score as f64 + COMPLETION_VARIABLE_BONUS,
+                CompletionItem {
+                    insert: name.clone(),
+                    glyph: crate::icons::VARIABLE,
+                    label: name,
+                    matched,
+                    name: None,
+                    name_matched: Vec::new(),
+                },
+            ));
+        }
+    }
+
     items.sort_by(|(a_rank, a), (b_rank, b)| {
         b_rank
             .total_cmp(a_rank)
@@ -304,19 +377,14 @@ fn completion_padding(item: &CompletionItem, label_width: usize) -> usize {
     }
 }
 
-/// The full row text used for measuring.
-pub(super) fn completion_row_text(item: &CompletionItem, label_width: usize) -> String {
-    let mut text = item.glyph.to_string();
-    text.push(' ');
-    text.push_str(&item.label);
-    text.extend(std::iter::repeat_n(
-        ' ',
-        completion_padding(item, label_width),
-    ));
-    if let Some(name) = &item.name {
-        text.push_str(name);
-    }
-    text
+/// Appends the icon column: the row's glyph and its separating space.
+fn append_icon_column(
+    job: &mut egui::text::LayoutJob,
+    item: &CompletionItem,
+    normal: &egui::TextFormat,
+) {
+    job.append(&item.glyph.to_string(), 0.0, normal.clone());
+    job.append(" ", 0.0, normal.clone());
 }
 
 fn append_matched_text(
@@ -363,7 +431,7 @@ fn append_matched_text(
 }
 
 /// Builds one completion row, highlighting the fuzzy-matched characters.
-fn completion_layout_job(
+pub(super) fn completion_layout_job(
     item: &CompletionItem,
     label_width: usize,
     selected: bool,
@@ -390,8 +458,7 @@ fn completion_layout_job(
     };
 
     let mut job = egui::text::LayoutJob::default();
-    job.append(&item.glyph.to_string(), 0.0, normal.clone());
-    job.append(" ", 0.0, normal.clone());
+    append_icon_column(&mut job, item, &normal);
     append_matched_text(&mut job, &item.label, &item.matched, &normal, &highlighted);
     if let Some(name) = &item.name {
         job.append(
@@ -527,16 +594,9 @@ pub(super) fn popup(ui: &mut Ui, request: PopupRequest<'_>) -> bool {
                 .items
                 .iter()
                 .map(|item| {
-                    ui.fonts_mut(|fonts| {
-                        fonts
-                            .layout_no_wrap(
-                                completion_row_text(item, label_width),
-                                font_id.clone(),
-                                Color32::WHITE,
-                            )
-                            .size()
-                            .x
-                    })
+                    let job =
+                        completion_layout_job(item, label_width, false, &font_id, ui.visuals());
+                    ui.fonts_mut(|fonts| fonts.layout_job(job).size().x)
                 })
                 .fold(0.0, f32::max);
             let chrome = egui::Frame::popup(style);
