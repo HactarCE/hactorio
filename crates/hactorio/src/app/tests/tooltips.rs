@@ -111,3 +111,65 @@ fn detail_popup_content_starts_at_the_anchor() {
     assert!((content.y - anchor.y).abs() < 0.01, "{content:?}");
     assert!(detail_popup_inset(&style).x > 0.0);
 }
+
+#[test]
+fn detail_popup_does_not_wrap_long_results() {
+    let unknown = "x".repeat(100);
+    let text = format!("# Main\n:{unknown}:\n");
+    let document = editor_document(&text, 1, 0);
+    let (mut harness, dir) = completion_harness("detail-wide", document);
+    harness.run();
+
+    let area = harness
+        .ctx
+        .memory(|memory| memory.area_rect(egui::Id::unique("line_detail")))
+        .expect("detail popup");
+    assert!(area.width() > 420.0, "popup stayed narrow: {area:?}");
+    assert!(area.height() < 60.0, "popup wrapped: {area:?}");
+
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn detail_columns_do_not_wrap_at_large_font() {
+    const FIXTURE: &str = r#"{
+  "item": {
+    "iron-plate": {"type": "item", "name": "iron-plate", "stack_size": 100},
+    "iron-gear-wheel": {"type": "item", "name": "iron-gear-wheel", "stack_size": 100},
+    "assembling-machine-3": {"type": "item", "name": "assembling-machine-3", "stack_size": 50},
+    "speed-module-3": {"type": "item", "name": "speed-module-3", "stack_size": 50}
+  },
+  "module": {
+    "speed-module-3": {"type": "module", "name": "speed-module-3", "category": "speed",
+      "tier": 3, "stack_size": 50, "effect": {"speed": 0.5}}
+  },
+  "recipe": {
+    "iron-gear-wheel": {"type": "recipe", "name": "iron-gear-wheel", "categories": ["crafting"],
+      "energy_required": 0.5,
+      "ingredients": [{"type": "item", "name": "iron-plate", "amount": 2}],
+      "results": [{"type": "item", "name": "iron-gear-wheel", "amount": 1}],
+      "allow_productivity": true}
+  },
+  "assembling-machine": {
+    "assembling-machine-3": {"type": "assembling-machine", "name": "assembling-machine-3",
+      "crafting_categories": ["crafting"], "crafting_speed": 1.25, "module_slots": 4,
+      "allowed_effects": ["speed", "productivity", "consumption", "pollution"],
+      "energy_usage": "375kW"}
+  }
+}"#;
+    let text =
+        "yb :iron-plate: in @:assembling-machine-3: 2:speed-module-3: making :iron-gear-wheel:";
+    let mut document = editor_document(&format!("# prod test\n{text}\n"), 1, 0);
+    document.font_size = 24.0;
+    document.settings.item_rate_belt = Some(hactorio_core::BeltTier::Yellow);
+    let (mut harness, dir) = completion_harness_with("detail-columns", document, FIXTURE);
+    harness.run();
+
+    let area = harness
+        .ctx
+        .memory(|memory| memory.area_rect(egui::Id::unique("line_detail")))
+        .expect("detail popup");
+    assert!(area.height() < 200.0, "detail columns wrapped: {area:?}");
+
+    std::fs::remove_dir_all(dir).unwrap();
+}

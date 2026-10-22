@@ -577,7 +577,7 @@ impl HactorioApp {
                             .range(0..=u32::MAX)
                             .speed(0.1),
                     );
-                    ui.label(label);
+                    ui.strong(label);
                     drag
                 });
                 if drag.inner.changed() {
@@ -684,18 +684,33 @@ impl HactorioApp {
         }
 
         let screen = ctx.viewport_rect();
-        let width = width.clamp(240.0, 420.0);
+        let min_width = width.clamp(240.0, 420.0);
         let style = ctx.style_of(ctx.theme());
-        let pos = detail_popup_pos(&style, anchor, screen, width);
+        let mut measure_style = (*style).clone();
+        measure_style.wrap_mode = Some(egui::TextWrapMode::Extend);
+        let mut measure = Ui::new(
+            ctx.clone(),
+            egui::Id::unique(("line_detail_measure", line)),
+            egui::UiBuilder::new()
+                .max_rect(egui::Rect::from_min_size(egui::Pos2::ZERO, screen.size()))
+                .layout(egui::Layout::top_down(egui::Align::Min))
+                .style(Arc::new(measure_style))
+                .invisible()
+                .sizing_pass(),
+        );
+        detail_ui(&mut measure, statement, &self.settings, registry);
+        let content_width = measure.min_rect().width().max(min_width);
+        let total_width = content_width + 2.0 * detail_popup_inset(&style).x;
+        let pos = detail_popup_pos(&style, anchor, screen, total_width);
         let hovered = egui::Area::new(egui::Id::unique("line_detail"))
             .order(egui::Order::Foreground)
             .fixed_pos(pos)
             .interactable(false)
             .show(ctx, |ui| {
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                 egui::Frame::popup(ui.style())
                     .show(ui, |ui| {
-                        ui.set_min_width((width - 20.0).max(240.0));
-                        ui.set_max_width(width);
+                        ui.set_width(content_width);
                         detail_ui(ui, statement, &self.settings, registry)
                     })
                     .inner
@@ -1815,22 +1830,23 @@ fn detail_ui(
                 }
             }
 
-            egui::Grid::new("detail_items")
-                .num_columns(2)
-                .min_col_width(90.0)
-                .spacing([18.0, 2.0])
-                .show(ui, |ui| {
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 18.0;
+                ui.vertical(|ui| {
+                    ui.set_min_width(90.0);
                     ui.label(RichText::new("produces").weak());
-                    ui.label(RichText::new("consumes").weak());
-                    ui.end_row();
-                    for row in 0..produces.len().max(consumes.len()) {
-                        let produce = produces.get(row).map(String::as_str).unwrap_or("");
-                        let consume = consumes.get(row).map(String::as_str).unwrap_or("");
+                    for produce in &produces {
                         hovered = hovered.or(icon_label(ui, produce, registry));
-                        hovered = hovered.or(icon_label(ui, consume, registry));
-                        ui.end_row();
                     }
                 });
+                ui.vertical(|ui| {
+                    ui.set_min_width(90.0);
+                    ui.label(RichText::new("consumes").weak());
+                    for consume in &consumes {
+                        hovered = hovered.or(icon_label(ui, consume, registry));
+                    }
+                });
+            });
 
             if let Some(craft) = recipe.net.get(&BaseUnit::Craft).copied() {
                 let value = if rate {
