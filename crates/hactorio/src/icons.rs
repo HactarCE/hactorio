@@ -17,6 +17,8 @@ pub const VARIABLE: char = '\u{F8FE}';
 const VARIABLE_ICON: &str = "__base__/graphics/icons/signal/signal-item-parameter.png";
 
 /// Icons that are not namespace entries, as `(glyph, data path)`.
+/// Paths come from the dump verbatim; file names mix `_` and `-`
+/// (`signal_V.png`, `signal-item-parameter.png`), and missing files are silently skipped.
 const EXTRAS: &[(char, &str)] = &[
     (STACK_SIZE_GLYPH, STACK_SIZE_ICON),
     (VARIABLE, VARIABLE_ICON),
