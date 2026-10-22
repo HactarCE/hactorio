@@ -1,4 +1,5 @@
 use super::*;
+use egui::{Key, Modifiers};
 
 fn suggested_ids(registry: &Registry, text: &str) -> Vec<String> {
     let cursor = text.chars().count();

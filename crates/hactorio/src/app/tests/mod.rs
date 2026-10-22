@@ -3,6 +3,8 @@
 //! Shared fixtures and harness builders live here; the tests are split by
 //! feature into submodules.
 
+use crate::app::completion::*;
+use crate::app::detail::*;
 use crate::app::*;
 use crate::document::{Cursor, Document};
 use egui_kittest::Harness;
