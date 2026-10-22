@@ -24,6 +24,16 @@ impl BeltTier {
         BeltTier::Green,
     ];
 
+    /// The item whose icon represents this belt tier.
+    pub fn item_id(self) -> &'static str {
+        match self {
+            BeltTier::Yellow => "transport-belt",
+            BeltTier::Red => "fast-transport-belt",
+            BeltTier::Blue => "express-transport-belt",
+            BeltTier::Green => "turbo-transport-belt",
+        }
+    }
+
     pub fn items_per_second(self) -> f64 {
         match self {
             BeltTier::Yellow => 15.0,

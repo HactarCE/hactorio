@@ -4,6 +4,15 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+/// Glyph for the game's stack-size signal, which is not a prototype entry.
+///
+/// It occupies the last BMP private-use codepoint, far above any prototype's
+/// glyph in practice.
+pub const STACK_SIZE_GLYPH: char = '\u{F8FF}';
+
+/// Icon path of the stack-size signal.
+pub const STACK_SIZE_ICON: &str = "__base__/graphics/icons/signal/signal-stack-size.png";
+
 /// Resolves `__base__/...`, `__core__/...`, and `__mod__/...` icon paths.
 #[derive(Debug, Clone)]
 pub struct IconSource {

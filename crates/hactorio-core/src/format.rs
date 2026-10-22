@@ -105,8 +105,17 @@ fn format_belt_rate(value: &Value, settings: &Settings, registry: &Registry) -> 
         settings.belt_stacking,
     );
     let belts = value.coef() / capacity;
+    // The tier's belt icon replaces `yb`/`rb`/…; a stacked rate puts the
+    // stack-size signal in front of it.
+    let belt = match registry.entry(tier.item_id()) {
+        Some(entry) if settings.stacked_belts => {
+            format!("{}{}", hactorio_data::STACK_SIZE_GLYPH, entry.glyph)
+        }
+        Some(entry) => entry.glyph.to_string(),
+        None => token.to_string(),
+    };
     Some(format!(
-        "{} {token} {}",
+        "{} {belt} {}",
         format_number(belts, settings, NumberStyle::Plain),
         registry.entry_by_index(item).glyph
     ))

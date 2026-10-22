@@ -13,7 +13,7 @@ mod registry;
 use thiserror::Error;
 
 pub use dump::{GameInstall, locate};
-pub use icons::{IconImage, IconSource};
+pub use icons::{IconImage, IconSource, STACK_SIZE_GLYPH, STACK_SIZE_ICON};
 pub use postprocess::{Locale, postprocess};
 pub use registry::{
     AllowedEffects, Entry, EntryId, Ingredient, Item, Machine, Module, ModuleEffect, PUA_COUNT,

@@ -7,19 +7,10 @@ use egui::ColorImage;
 use egui::epaint::text::{
     FontPriority, GlyphBitmap, GlyphRasterizer, GlyphRasterizerRequest, RasterizedGlyph,
 };
-use hactorio_data::{IconImage, IconSource, Registry};
-
-/// Glyph for the game's stack-size icon, which is not a prototype entry.
-///
-/// It occupies the last BMP private-use codepoint, far above any prototype's
-/// glyph in practice.
-pub const STACK_SIZE: char = '\u{F8FF}';
+use hactorio_data::{IconImage, IconSource, Registry, STACK_SIZE_GLYPH, STACK_SIZE_ICON};
 
 /// Icons that are not namespace entries, as `(glyph, data path)`.
-const EXTRAS: &[(char, &str)] = &[(
-    STACK_SIZE,
-    "__base__/graphics/icons/signal/signal-stack-size.png",
-)];
+const EXTRAS: &[(char, &str)] = &[(STACK_SIZE_GLYPH, STACK_SIZE_ICON)];
 
 /// Installs a highest-priority rasterizer that draws namespace glyphs as icons.
 ///

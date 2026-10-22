@@ -171,9 +171,10 @@ fn belt_mode_applies_to_rate_rows() {
     );
     let formatted = format_output(output(&outputs[0]), &settings, &registry);
     let plate = registry.entry("iron-plate").unwrap().glyph;
+    let belt = registry.entry("turbo-transport-belt").unwrap().glyph;
 
     assert!(
-        formatted.rows.contains(&format!("+1 gb {plate}")),
+        formatted.rows.contains(&format!("+1 {belt} {plate}")),
         "{:?}",
         formatted.rows
     );

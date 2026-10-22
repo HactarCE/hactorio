@@ -8,6 +8,26 @@ const DUMP: &str = r#"{
       "name": "iron-plate",
       "stack_size": 100,
       "icon": "__base__/graphics/icons/iron-plate.png"
+    },
+    "transport-belt": {
+      "type": "item",
+      "name": "transport-belt",
+      "stack_size": 50
+    },
+    "fast-transport-belt": {
+      "type": "item",
+      "name": "fast-transport-belt",
+      "stack_size": 50
+    },
+    "express-transport-belt": {
+      "type": "item",
+      "name": "express-transport-belt",
+      "stack_size": 50
+    },
+    "turbo-transport-belt": {
+      "type": "item",
+      "name": "turbo-transport-belt",
+      "stack_size": 50
     }
   },
   "fluid": {
@@ -184,14 +204,20 @@ fn belt_modes_show_item_rates_as_belt_counts() {
         ..Settings::default()
     };
 
+    let belt = registry
+        .entry("turbo-transport-belt")
+        .unwrap()
+        .glyph
+        .to_string();
+
     // One green belt carries 60 items per second.
     assert_eq!(
         format_value(&item_rate(&registry, 960.0), &belts, &registry),
-        format!("16 gb {glyph}")
+        format!("16 {belt} {glyph}")
     );
     assert_eq!(
         format_value(&item_rate(&registry, 100.0), &belts, &registry),
-        format!("1.667 gb {glyph}")
+        format!("1.667 {belt} {glyph}")
     );
 
     // Stacked green belts carry 60 * 4 = 240 items per second.
@@ -202,7 +228,7 @@ fn belt_modes_show_item_rates_as_belt_counts() {
     };
     assert_eq!(
         format_value(&item_rate(&registry, 960.0), &stacked, &registry),
-        format!("4 sgb {glyph}")
+        format!("4 {}{belt} {glyph}", hactorio_data::STACK_SIZE_GLYPH)
     );
 }
 

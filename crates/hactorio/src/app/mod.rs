@@ -92,13 +92,7 @@ fn research_effect_label(
 
 /// The game item whose icon represents a belt tier.
 fn belt_tier_glyph(registry: &Registry, tier: BeltTier) -> Option<char> {
-    let id = match tier {
-        BeltTier::Yellow => "transport-belt",
-        BeltTier::Red => "fast-transport-belt",
-        BeltTier::Blue => "express-transport-belt",
-        BeltTier::Green => "turbo-transport-belt",
-    };
-    registry.entry(id).map(|entry| entry.glyph)
+    registry.entry(tier.item_id()).map(|entry| entry.glyph)
 }
 
 pub struct HactorioApp {
@@ -402,7 +396,8 @@ impl HactorioApp {
                     .on_hover_text(format!("{} item/s", tier.items_per_second()));
             }
             ui.add_enabled_ui(self.settings.item_rate_belt.is_some(), |ui| {
-                let stack_label = RichText::new(icons::STACK_SIZE.to_string()).size(ICON_SIZE);
+                let stack_label =
+                    RichText::new(hactorio_data::STACK_SIZE_GLYPH.to_string()).size(ICON_SIZE);
                 ui.toggle_value(&mut self.settings.stacked_belts, stack_label)
                     .on_hover_text("Show item rates as stacks on stacked belts");
             });
