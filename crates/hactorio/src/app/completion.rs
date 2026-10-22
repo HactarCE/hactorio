@@ -243,7 +243,7 @@ pub(super) fn best_name_match<'a>(
 }
 
 /// The variable name defined by `line`, if it is a definition.
-fn definition_name(line: &str) -> Option<&str> {
+pub(super) fn definition_name(line: &str) -> Option<&str> {
     let line = line.trim_start();
     let first = line.chars().next()?;
     if !(first.is_ascii_alphabetic() || first == '_') {

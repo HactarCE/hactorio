@@ -5,7 +5,7 @@ use hactorio_core::{LineOutput, Settings, StatementOutput, line_hash};
 use hactorio_data::Registry;
 
 use super::completion::{self, CompletionState, completion_items, completion_word};
-use super::detail::{hovered_icon, output_text};
+use super::detail::{HoverTarget, hovered_icon, hovered_identifier, output_text};
 use crate::document::Tab;
 
 /// Whether a popup is covering `pointer`, so editors below it do not react.
@@ -65,8 +65,8 @@ pub(super) struct EditorResult {
     focused: Option<usize>,
     /// Where to place the full-results panel for the focused line, and its width.
     pub(super) detail: Option<(usize, egui::Pos2, f32)>,
-    /// The line whose icon is hovered, and the icon's rect.
-    pub(super) hover: Option<(usize, egui::Rect)>,
+    /// The icon or variable the pointer is over.
+    pub(super) hover: Option<HoverTarget>,
 }
 
 /// Renders the tab as one multiline editor, with line numbers and outputs
@@ -178,10 +178,16 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                 if let Some(pointer) = ui.ctx().pointer_hover_pos()
                     && text_edit.response.rect.contains(pointer)
                     && !pointer_over_popup(ui.ctx(), active, pointer)
-                    && let Some((line, rect)) =
-                        hovered_icon(registry, &text_edit.galley, text_edit.galley_pos, pointer)
                 {
-                    result.hover = Some((line, rect));
+                    if let Some((_, glyph, rect)) =
+                        hovered_icon(registry, &text_edit.galley, text_edit.galley_pos, pointer)
+                    {
+                        result.hover = Some(HoverTarget::Entry { glyph, rect });
+                    } else if let Some((line, name, rect)) =
+                        hovered_identifier(&text_edit.galley, text_edit.galley_pos, pointer)
+                    {
+                        result.hover = Some(HoverTarget::Variable { line, name, rect });
+                    }
                 }
 
                 if let Some((line, column)) = *pending_focus {
@@ -342,9 +348,10 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                     painter.galley(pos, galley.clone(), color);
                     if let Some(pointer) = ui.ctx().pointer_hover_pos()
                         && !pointer_over_popup(ui.ctx(), active, pointer)
-                        && let Some((_, rect)) = hovered_icon(registry, &galley, pos, pointer)
+                        && let Some((_, glyph, rect)) =
+                            hovered_icon(registry, &galley, pos, pointer)
                     {
-                        result.hover = Some((index, rect));
+                        result.hover = Some(HoverTarget::Entry { glyph, rect });
                     }
                 }
             });

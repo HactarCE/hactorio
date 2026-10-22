@@ -1,4 +1,8 @@
 use super::*;
+use crate::app::detail::{DetailContext, HoverTarget};
+use crate::document::Tab;
+use egui_kittest::kittest::Queryable;
+use hactorio_core::{LineCache, evaluate};
 
 fn tooltip_is_open(harness: &Harness<'_, Option<HactorioApp>>) -> bool {
     harness.ctx.memory(|memory| {
@@ -9,7 +13,7 @@ fn tooltip_is_open(harness: &Harness<'_, Option<HactorioApp>>) -> bool {
 }
 
 #[test]
-fn hovering_an_editor_icon_opens_the_breakdown() {
+fn hovering_an_editor_icon_opens_the_details() {
     let document = editor_document("# Main\n3 :iron-plate:\n", 1, 0);
     let (mut harness, dir) = completion_harness("hover", document);
     harness.run();
@@ -34,16 +38,16 @@ fn hovering_an_editor_icon_opens_the_breakdown() {
             }
         }
     }
-    assert!(shown, "no breakdown tooltip appeared");
+    assert!(shown, "no details tooltip appeared");
     if std::env::var_os("HACTORIO_UI_SNAPSHOT").is_some() {
-        harness.snapshot("breakdown");
+        harness.snapshot("details");
     }
 
     std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
-fn hovering_an_output_icon_opens_the_breakdown() {
+fn hovering_an_output_icon_opens_the_details() {
     let document = editor_document("# Main\n3 :iron-plate:\n", 0, 0);
     let (mut harness, dir) = completion_harness("output-hover", document);
     harness.run();
@@ -67,13 +71,13 @@ fn hovering_an_output_icon_opens_the_breakdown() {
             }
         }
     }
-    assert!(shown, "no breakdown tooltip appeared");
+    assert!(shown, "no details tooltip appeared");
 
     std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
-fn hovering_a_detail_popup_icon_opens_the_breakdown() {
+fn hovering_a_detail_popup_icon_opens_the_details() {
     let document = editor_document("# Main\n3 :iron-plate:\n", 1, 0);
     let (mut harness, dir) = completion_harness("detail-hover", document);
     harness.run();
@@ -95,7 +99,7 @@ fn hovering_a_detail_popup_icon_opens_the_breakdown() {
             }
         }
     }
-    assert!(shown, "no breakdown tooltip appeared");
+    assert!(shown, "no details tooltip appeared");
 
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -172,4 +176,78 @@ fn detail_columns_do_not_wrap_at_large_font() {
     assert!(area.height() < 200.0, "detail columns wrapped: {area:?}");
 
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn details_for_a_prototype_list_its_information() {
+    let registry = fixture_registry();
+    let settings = Settings::default();
+    let glyph = registry.entry("iron-plate").unwrap().glyph;
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(500.0, 400.0))
+        .with_accessibility_check(false)
+        .allow_missing_glyphs()
+        .build_ui(move |ui| {
+            let details = DetailContext {
+                tabs: &[],
+                active: 0,
+                outputs: &[],
+                settings: &settings,
+                registry: &registry,
+            };
+            details.details_ui(
+                ui,
+                &HoverTarget::Entry {
+                    glyph,
+                    rect: egui::Rect::NOTHING,
+                },
+            );
+        });
+    harness.run();
+
+    assert!(harness.query_by_label("stack size").is_some());
+    assert!(harness.query_by_label("craft time").is_some());
+    assert!(harness.query_by_label("item").is_some());
+    assert!(harness.query_by_label("recipe").is_some());
+    assert!(harness.query_by_label("id").is_some());
+    assert!(harness.query_by_label_contains("products").is_some());
+    assert!(
+        harness
+            .query_all_by_label_contains("iron-plate")
+            .next()
+            .is_some()
+    );
+}
+
+#[test]
+fn details_for_a_variable_show_its_value() {
+    let registry = fixture_registry();
+    let settings = Settings::default();
+    let text = "# Main\nrate = 3 :iron-plate: / second\n";
+    let tabs = vec![Tab::from_text(text)];
+    let outputs = evaluate(text, &settings, &registry, &mut LineCache::new());
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(500.0, 400.0))
+        .with_accessibility_check(false)
+        .allow_missing_glyphs()
+        .build_ui(move |ui| {
+            let details = DetailContext {
+                tabs: &tabs,
+                active: 0,
+                outputs: &outputs,
+                settings: &settings,
+                registry: &registry,
+            };
+            details.details_ui(
+                ui,
+                &HoverTarget::Variable {
+                    line: 2,
+                    name: "rate".to_string(),
+                    rect: egui::Rect::NOTHING,
+                },
+            );
+        });
+    harness.run();
+
+    assert!(harness.query_by_label_contains("rate = 3").is_some());
 }

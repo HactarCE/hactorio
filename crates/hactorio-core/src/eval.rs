@@ -86,7 +86,7 @@ pub struct StatementOutput {
     pub source_hash: u64,
     pub span: Span,
     pub output: LineOutput,
-    /// The evaluated value, kept so the focused line can show a breakdown.
+    /// The evaluated value, kept so the focused line can show details.
     pub eval: Option<Eval>,
 }
 

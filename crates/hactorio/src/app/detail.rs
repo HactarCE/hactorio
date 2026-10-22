@@ -1,14 +1,19 @@
-//! Hover details: icon hit-testing, the full results popup, and the breakdown.
+//! Hover details: icon and variable hit-testing, the full results popup, and
+//! the details tooltip.
+//!
+//! The tooltip describes the hovered thing itself: a prototype's entry, or a
+//! variable's value. It does not describe the whole line.
 
 use std::sync::Arc;
 
 use egui::{Color32, RichText, Sense, TextStyle, Ui};
 use hactorio_core::{
-    BaseUnit, LineOutput, Output, RecipeQuantity, Settings, StatementOutput, Value, breakdown,
+    BaseUnit, Eval, LineOutput, Output, RecipeQuantity, Settings, StatementOutput, Value,
     format_amount, format_energy, format_output, format_power, format_value, line_hash,
 };
-use hactorio_data::Registry;
+use hactorio_data::{Entry, PrototypeKind, Registry};
 
+use super::completion::definition_name;
 use crate::document::Tab;
 
 /// Frame chrome between the detail popup's outer corner and its content.
@@ -41,7 +46,7 @@ pub(super) fn hovered_icon(
     galley: &egui::Galley,
     origin: egui::Pos2,
     pointer: egui::Pos2,
-) -> Option<(usize, egui::Rect)> {
+) -> Option<(usize, char, egui::Rect)> {
     for (row_index, row) in galley.rows.iter().enumerate() {
         let top = origin.y + row.pos.y;
         if pointer.y < top || pointer.y > top + row.size.y {
@@ -56,14 +61,105 @@ pub(super) fn hovered_icon(
                 egui::vec2(glyph.advance_width, row.size.y),
             );
             if rect.contains(pointer) {
-                return Some((row_index, rect));
+                return Some((row_index, glyph.chr, rect));
             }
         }
     }
     None
 }
 
-/// The parts of the app the detail and breakdown popups read.
+fn is_identifier_char(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphanumeric()
+}
+
+/// The identifier under `pointer` in a laid-out text, with its row and rect.
+pub(super) fn hovered_identifier(
+    galley: &egui::Galley,
+    origin: egui::Pos2,
+    pointer: egui::Pos2,
+) -> Option<(usize, String, egui::Rect)> {
+    for (row_index, row) in galley.rows.iter().enumerate() {
+        let top = origin.y + row.pos.y;
+        if pointer.y < top || pointer.y > top + row.size.y {
+            continue;
+        }
+        for (index, glyph) in row.glyphs.iter().enumerate() {
+            let left = origin.x + row.pos.x + glyph.pos.x;
+            if pointer.x < left || pointer.x > left + glyph.advance_width {
+                continue;
+            }
+            if !is_identifier_char(glyph.chr) {
+                return None;
+            }
+            let mut first = index;
+            while first > 0 && is_identifier_char(row.glyphs[first - 1].chr) {
+                first -= 1;
+            }
+            let mut last = index;
+            while last + 1 < row.glyphs.len() && is_identifier_char(row.glyphs[last + 1].chr) {
+                last += 1;
+            }
+            let word: String = row.glyphs[first..=last]
+                .iter()
+                .map(|glyph| glyph.chr)
+                .collect();
+            if !word
+                .chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+            {
+                return None;
+            }
+            let start = row.glyphs[first].pos.x;
+            let end = row.glyphs[last].pos.x + row.glyphs[last].advance_width;
+            let rect = egui::Rect::from_min_max(
+                egui::pos2(origin.x + row.pos.x + start, top),
+                egui::pos2(origin.x + row.pos.x + end, top + row.size.y),
+            );
+            return Some((row_index, word, rect));
+        }
+    }
+    None
+}
+
+/// What the details tooltip describes.
+#[derive(Clone)]
+pub(super) enum HoverTarget {
+    Entry {
+        glyph: char,
+        rect: egui::Rect,
+    },
+    Variable {
+        line: usize,
+        name: String,
+        rect: egui::Rect,
+    },
+}
+
+impl HoverTarget {
+    pub(super) fn rect(&self) -> egui::Rect {
+        match self {
+            HoverTarget::Entry { rect, .. } | HoverTarget::Variable { rect, .. } => *rect,
+        }
+    }
+
+    fn tooltip_id(&self) -> egui::Id {
+        match self {
+            HoverTarget::Entry { glyph, rect } => egui::Id::unique((
+                "details",
+                "entry",
+                *glyph,
+                rect.left_top().x.to_bits(),
+                rect.left_top().y.to_bits(),
+            )),
+            HoverTarget::Variable { line, name, .. } => {
+                egui::Id::unique(("details", "variable", *line, name))
+            }
+        }
+    }
+}
+
+/// The parts of the app the detail and details popups read.
 pub(super) struct DetailContext<'a> {
     pub tabs: &'a [Tab],
     pub active: usize,
@@ -73,29 +169,219 @@ pub(super) struct DetailContext<'a> {
 }
 
 impl DetailContext<'_> {
-    fn breakdown_ui(&self, ui: &mut Ui, line: usize) {
-        let registry = self.registry;
+    pub(super) fn details_ui(&self, ui: &mut Ui, target: &HoverTarget) {
+        match target {
+            HoverTarget::Entry { glyph, .. } => {
+                if let Some(entry) = self.registry.entry_by_glyph(*glyph) {
+                    self.entry_details_ui(ui, entry);
+                }
+            }
+            HoverTarget::Variable { line, name, .. } => {
+                self.variable_details_ui(ui, *line, name);
+            }
+        }
+    }
+
+    fn entry_details_ui(&self, ui: &mut Ui, entry: &Entry) {
+        let name = entry.display_name.as_deref().unwrap_or(&entry.id);
+        ui.heading(format!("{} {name}", entry.glyph));
+
+        // The untitled section holds properties common to every kind.
+        self.rows_grid(ui, "common", vec![("id".to_string(), entry.id.to_string())]);
+
+        if let Some(item) = &entry.item {
+            self.section_grid(
+                ui,
+                "item",
+                vec![("stack size".to_string(), item.stack_size.to_string())],
+            );
+        }
+
+        if let Some(module) = &entry.module {
+            let mut rows = vec![
+                ("category".to_string(), module.category.to_string()),
+                ("tier".to_string(), module.tier.to_string()),
+                ("stack size".to_string(), module.stack_size.to_string()),
+            ];
+            let effects = [
+                ("speed", module.effect.speed),
+                ("productivity", module.effect.productivity),
+                ("consumption", module.effect.consumption),
+                ("pollution", module.effect.pollution),
+                ("quality", module.effect.quality),
+            ];
+            for (label, value) in effects {
+                if value != 0.0 {
+                    rows.push((
+                        label.to_string(),
+                        signed_percent(value, self.settings, self.registry),
+                    ));
+                }
+            }
+            self.section_grid(ui, "module", rows);
+        }
+
+        if let Some(recipe) = entry.recipe.map(|id| self.registry.recipe(id)) {
+            let mut rows = vec![
+                (
+                    "categories".to_string(),
+                    recipe
+                        .categories
+                        .iter()
+                        .map(AsRef::as_ref)
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ),
+                (
+                    "craft time".to_string(),
+                    format_value(
+                        &Value::seconds(recipe.craft_time),
+                        self.settings,
+                        self.registry,
+                    ),
+                ),
+                (
+                    "productivity allowed".to_string(),
+                    if recipe.allow_productivity {
+                        "yes"
+                    } else {
+                        "no"
+                    }
+                    .to_string(),
+                ),
+            ];
+            if !recipe.ingredients.is_empty() {
+                rows.push((
+                    "ingredients".to_string(),
+                    recipe
+                        .ingredients
+                        .iter()
+                        .map(|ingredient| {
+                            self.amount_text(ingredient.kind, &ingredient.name, ingredient.amount)
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ));
+            }
+            if !recipe.products.is_empty() {
+                rows.push((
+                    "products".to_string(),
+                    recipe
+                        .products
+                        .iter()
+                        .map(|product| {
+                            self.amount_text(product.kind, &product.name, product.amount)
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ));
+            }
+            self.section_grid(ui, "recipe", rows);
+        }
+
+        if let Some(machine) = entry.machine() {
+            let mut rows = vec![
+                (
+                    "speed".to_string(),
+                    format_value(&Value::scalar(machine.speed), self.settings, self.registry),
+                ),
+                ("module slots".to_string(), machine.module_slots.to_string()),
+            ];
+            if machine.base_productivity != 0.0 {
+                rows.push((
+                    "built-in productivity".to_string(),
+                    percent(machine.base_productivity, self.settings, self.registry),
+                ));
+            }
+            rows.push((
+                "energy usage".to_string(),
+                format_power(machine.energy_usage_w, self.settings),
+            ));
+            rows.push((
+                "pollution".to_string(),
+                format!(
+                    "{}/min",
+                    format_value(
+                        &Value::scalar(machine.pollution_per_minute),
+                        self.settings,
+                        self.registry
+                    )
+                ),
+            ));
+            rows.push((
+                "categories".to_string(),
+                machine
+                    .categories
+                    .iter()
+                    .map(AsRef::as_ref)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ));
+            let mut allowed = Vec::new();
+            if machine.allowed_effects.speed {
+                allowed.push("speed");
+            }
+            if machine.allowed_effects.productivity {
+                allowed.push("productivity");
+            }
+            if machine.allowed_effects.consumption {
+                allowed.push("consumption");
+            }
+            if machine.allowed_effects.pollution {
+                allowed.push("pollution");
+            }
+            if machine.allowed_effects.quality {
+                allowed.push("quality");
+            }
+            rows.push(("allowed effects".to_string(), allowed.join(", ")));
+            self.section_grid(ui, "machine", rows);
+        }
+    }
+
+    fn variable_details_ui(&self, ui: &mut Ui, line: usize, name: &str) {
+        let Some(definition_line) = self.definition_line(line, name) else {
+            return;
+        };
         let Some(tab) = self.tabs.get(self.active) else {
             return;
         };
-        let (Some(text), Some(output)) = (tab.text.split('\n').nth(line), self.outputs.get(line))
-        else {
+        let Some(text) = tab.text.split('\n').nth(definition_line) else {
             return;
         };
-        if output.source_hash != line_hash(text) {
+        let Some(statement) = self.outputs.get(definition_line) else {
+            return;
+        };
+        if statement.source_hash != line_hash(text) {
             return;
         }
-        let Some(value) = &output.eval else {
+        let LineOutput::Value(value) = &statement.output else {
             return;
         };
+        let formatted = format_output(value, self.settings, self.registry);
 
-        ui.heading("Breakdown");
-        let detail = breakdown(value, self.settings, registry);
-        for section in detail.sections {
+        ui.heading(name);
+        ui.label(RichText::new(format!("{name} = {}", formatted.headline)).strong());
+        if let Some(value) = &statement.eval {
+            self.value_details_ui(ui, value);
+        }
+    }
+
+    fn definition_line(&self, line: usize, name: &str) -> Option<usize> {
+        let tab = self.tabs.get(self.active)?;
+        tab.text
+            .split('\n')
+            .enumerate()
+            .take(line)
+            .find_map(|(index, text)| (definition_name(text) == Some(name)).then_some(index))
+    }
+
+    fn value_details_ui(&self, ui: &mut Ui, value: &Eval) {
+        let details = hactorio_core::details(value, self.settings, self.registry);
+        for section in details.sections {
             ui.add_space(6.0);
-            let title = section.title.clone();
+            let title = section.title;
             ui.label(RichText::new(&title).strong());
-            egui::Grid::new(("breakdown", &title))
+            egui::Grid::new(ui.make_persistent_id(("details", &title)))
                 .num_columns(2)
                 .striped(true)
                 .show(ui, |ui| {
@@ -108,30 +394,50 @@ impl DetailContext<'_> {
         }
     }
 
-    /// The breakdown for `line`, shown next to a hovered icon.
-    pub(super) fn breakdown_popup(&self, ctx: &egui::Context, line: usize, anchor: egui::Rect) {
-        let (Some(tab), Some(output)) = (self.tabs.get(self.active), self.outputs.get(line)) else {
-            return;
-        };
-        let Some(text) = tab.text.split('\n').nth(line) else {
-            return;
-        };
-        if output.source_hash != line_hash(text) || output.eval.is_none() {
-            return;
-        }
+    fn section_grid(&self, ui: &mut Ui, title: &str, rows: Vec<(String, String)>) {
+        ui.add_space(6.0);
+        ui.label(RichText::new(title).strong());
+        self.rows_grid(ui, title, rows);
+    }
 
+    fn rows_grid(&self, ui: &mut Ui, id: &str, rows: Vec<(String, String)>) {
+        egui::Grid::new(ui.make_persistent_id(("entry_details", id)))
+            .num_columns(2)
+            .striped(true)
+            .show(ui, |ui| {
+                for (label, value) in rows {
+                    ui.label(label);
+                    ui.label(value);
+                    ui.end_row();
+                }
+            });
+    }
+
+    fn amount_text(&self, kind: PrototypeKind, name: &str, amount: f64) -> String {
+        let Some(id) = self.registry.entry_id(name) else {
+            return format!("{amount} {name}");
+        };
+        let unit = match kind {
+            PrototypeKind::Item => BaseUnit::Item(id),
+            PrototypeKind::Fluid => BaseUnit::Fluid(id),
+        };
+        format_value(
+            &Value::new(amount, [(unit, 1)]),
+            self.settings,
+            self.registry,
+        )
+    }
+
+    /// The details for `target`, shown next to it.
+    pub(super) fn details_popup(&self, ctx: &egui::Context, target: HoverTarget) {
+        let anchor = target.rect();
         let pointer = ctx.pointer_hover_pos().unwrap_or(anchor.center());
         let layer = ctx.layer_id_at(pointer).unwrap_or_else(|| {
-            egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("breakdown"))
+            egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("details"))
         });
-        egui::Tooltip::always_open(
-            ctx.clone(),
-            layer,
-            egui::Id::unique(("breakdown", line)),
-            anchor,
-        )
-        .width(360.0)
-        .show(|ui| self.breakdown_ui(ui, line));
+        egui::Tooltip::always_open(ctx.clone(), layer, target.tooltip_id(), anchor)
+            .width(360.0)
+            .show(|ui| self.details_ui(ui, &target));
     }
 
     /// Full results for the line under the caret, floating beside it.
@@ -189,14 +495,30 @@ impl DetailContext<'_> {
                     .inner
             })
             .inner;
-        if let Some(anchor) = hovered {
-            self.breakdown_popup(ctx, line, anchor);
+        if let Some(target) = hovered {
+            self.details_popup(ctx, target);
         }
     }
 }
 
+fn percent(value: f64, settings: &Settings, registry: &Registry) -> String {
+    format!(
+        "{}%",
+        format_value(&Value::scalar(value * 100.0), settings, registry)
+    )
+}
+
+fn signed_percent(value: f64, settings: &Settings, registry: &Registry) -> String {
+    let text = percent(value, settings, registry);
+    if value > 0.0 {
+        format!("+{text}")
+    } else {
+        text
+    }
+}
+
 /// Draws a monospace value and returns the rect of any hovered icon glyph in it.
-fn icon_label(ui: &mut Ui, text: &str, registry: &Registry) -> Option<egui::Rect> {
+fn icon_label(ui: &mut Ui, text: &str, registry: &Registry) -> Option<HoverTarget> {
     let font_id = TextStyle::Monospace.resolve(ui.style());
     let color = ui.visuals().text_color();
     let galley = ui
@@ -206,7 +528,8 @@ fn icon_label(ui: &mut Ui, text: &str, registry: &Registry) -> Option<egui::Rect
     ui.painter().galley(rect.min, galley.clone(), color);
 
     let pointer = ui.ctx().pointer_hover_pos()?;
-    hovered_icon(registry, &galley, rect.min, pointer).map(|(_, rect)| rect)
+    hovered_icon(registry, &galley, rect.min, pointer)
+        .map(|(_, glyph, rect)| HoverTarget::Entry { glyph, rect })
 }
 
 fn detail_ui(
@@ -214,7 +537,7 @@ fn detail_ui(
     statement: &StatementOutput,
     settings: &Settings,
     registry: &Registry,
-) -> Option<egui::Rect> {
+) -> Option<HoverTarget> {
     let mut hovered = None;
     match &statement.output {
         LineOutput::Nothing => {}
@@ -255,14 +578,18 @@ fn detail_ui(
                     ui.set_min_width(90.0);
                     ui.label(RichText::new("produces").weak());
                     for produce in &produces {
-                        hovered = hovered.or(icon_label(ui, produce, registry));
+                        if hovered.is_none() {
+                            hovered = icon_label(ui, produce, registry);
+                        }
                     }
                 });
                 ui.vertical(|ui| {
                     ui.set_min_width(90.0);
                     ui.label(RichText::new("consumes").weak());
                     for consume in &consumes {
-                        hovered = hovered.or(icon_label(ui, consume, registry));
+                        if hovered.is_none() {
+                            hovered = icon_label(ui, consume, registry);
+                        }
                     }
                 });
             });
@@ -273,39 +600,43 @@ fn detail_ui(
                 } else {
                     Value::crafts(craft)
                 };
-                hovered = hovered.or(icon_label(
-                    ui,
-                    &format_value(&value, settings, registry),
-                    registry,
-                ));
+                if hovered.is_none() {
+                    hovered = icon_label(ui, &format_value(&value, settings, registry), registry);
+                }
             }
 
             let glyph = registry.entry_by_index(recipe.machine).glyph;
-            hovered = hovered.or(icon_label(
-                ui,
-                &format!(
-                    "{}/{glyph}",
-                    format_power(recipe.per_machine_power_w, settings)
-                ),
-                registry,
-            ));
-            let count = recipe.quantity.magnitude();
-            if rate && count != 1.0 {
-                hovered = hovered.or(icon_label(
+            if hovered.is_none() {
+                hovered = icon_label(
                     ui,
                     &format!(
-                        "{} total",
-                        format_power(recipe.per_machine_power_w * count, settings)
+                        "{}/{glyph}",
+                        format_power(recipe.per_machine_power_w, settings)
                     ),
                     registry,
-                ));
+                );
+            }
+            let count = recipe.quantity.magnitude();
+            if rate && count != 1.0 {
+                if hovered.is_none() {
+                    hovered = icon_label(
+                        ui,
+                        &format!(
+                            "{} total",
+                            format_power(recipe.per_machine_power_w * count, settings)
+                        ),
+                        registry,
+                    );
+                }
             }
             if !rate && let Some(energy) = recipe.total_energy_j {
-                hovered = hovered.or(icon_label(
-                    ui,
-                    &format!("{} total energy", format_energy(energy, settings)),
-                    registry,
-                ));
+                if hovered.is_none() {
+                    hovered = icon_label(
+                        ui,
+                        &format!("{} total energy", format_energy(energy, settings)),
+                        registry,
+                    );
+                }
             }
         }
     }

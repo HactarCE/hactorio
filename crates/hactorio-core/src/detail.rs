@@ -1,4 +1,4 @@
-//! Focused-line breakdown: everything that went into an output.
+//! Focused-line details: everything that went into an output.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -14,36 +14,36 @@ use crate::value::{BaseUnit, Value};
 
 /// The side-panel detail for the focused line.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Breakdown {
-    pub sections: Vec<BreakdownSection>,
+pub struct Details {
+    pub sections: Vec<DetailsSection>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct BreakdownSection {
+pub struct DetailsSection {
     pub title: String,
-    pub rows: Vec<BreakdownRow>,
+    pub rows: Vec<DetailsRow>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct BreakdownRow {
+pub struct DetailsRow {
     pub label: String,
     pub value: String,
 }
 
-/// Builds the breakdown for an evaluated line.
+/// Builds the details for an evaluated line.
 ///
-/// Scalars have no breakdown; their value is already the whole answer.
-pub fn breakdown(value: &Eval, settings: &Settings, registry: &Registry) -> Breakdown {
+/// Scalars have no details; their value is already the whole answer.
+pub fn details(value: &Eval, settings: &Settings, registry: &Registry) -> Details {
     match value {
-        Eval::Scalar(_) => Breakdown {
+        Eval::Scalar(_) => Details {
             sections: Vec::new(),
         },
-        Eval::Machine(machine) => machine_breakdown(machine, settings, registry),
-        Eval::Recipe(recipe) => recipe_breakdown(recipe, settings, registry),
+        Eval::Machine(machine) => machine_details(machine, settings, registry),
+        Eval::Recipe(recipe) => recipe_details(recipe, settings, registry),
     }
 }
 
-fn machine_breakdown(value: &MachineValue, settings: &Settings, registry: &Registry) -> Breakdown {
+fn machine_details(value: &MachineValue, settings: &Settings, registry: &Registry) -> Details {
     let mut rows = vec![
         row("machine", entry_label(registry, value.machine)),
         row("count", format_plain_number(value.count, settings)),
@@ -73,18 +73,18 @@ fn machine_breakdown(value: &MachineValue, settings: &Settings, registry: &Regis
         }
     }
 
-    Breakdown {
-        sections: vec![BreakdownSection {
+    Details {
+        sections: vec![DetailsSection {
             title: "machine".to_string(),
             rows,
         }],
     }
 }
 
-fn recipe_breakdown(value: &RecipeValue, settings: &Settings, registry: &Registry) -> Breakdown {
+fn recipe_details(value: &RecipeValue, settings: &Settings, registry: &Registry) -> Details {
     let recipe = registry.recipe(value.recipe);
     let Some(machine) = registry.entry_by_index(value.machine).machine() else {
-        return Breakdown {
+        return Details {
             sections: Vec::new(),
         };
     };
@@ -193,7 +193,7 @@ fn recipe_breakdown(value: &RecipeValue, settings: &Settings, registry: &Registr
             "net {}",
             format_amount(net, unit, rate, settings, registry)
         ));
-        item_rows.push(BreakdownRow {
+        item_rows.push(DetailsRow {
             label: unit_label(registry, unit),
             value: parts.join(", "),
         });
@@ -272,18 +272,18 @@ fn recipe_breakdown(value: &RecipeValue, settings: &Settings, registry: &Registr
         sections.push(section("notes", note_rows));
     }
 
-    Breakdown { sections }
+    Details { sections }
 }
 
-fn section(title: &str, rows: Vec<BreakdownRow>) -> BreakdownSection {
-    BreakdownSection {
+fn section(title: &str, rows: Vec<DetailsRow>) -> DetailsSection {
+    DetailsSection {
         title: title.to_string(),
         rows,
     }
 }
 
-fn row(label: &str, value: impl Into<String>) -> BreakdownRow {
-    BreakdownRow {
+fn row(label: &str, value: impl Into<String>) -> DetailsRow {
+    DetailsRow {
         label: label.to_string(),
         value: value.into(),
     }

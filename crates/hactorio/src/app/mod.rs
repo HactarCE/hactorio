@@ -1,4 +1,4 @@
-//! The document window: tabs, line editor with outputs, settings, breakdown.
+//! The document window: tabs, line editor with outputs, settings, details.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -669,8 +669,8 @@ impl HactorioApp {
             {
                 detail.detail_panel(&ctx, anchor, line, width);
             }
-            if let Some((line, anchor)) = result.hover {
-                detail.breakdown_popup(&ctx, line, anchor);
+            if let Some(target) = result.hover {
+                detail.details_popup(&ctx, target);
             }
         });
 

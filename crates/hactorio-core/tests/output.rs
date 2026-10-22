@@ -1,6 +1,6 @@
 use hactorio_core::{
-    BeltTier, Breakdown, LineCache, LineOutput, Output, RecipeQuantity, Settings, StatementOutput,
-    breakdown, evaluate, format_output,
+    BeltTier, Details, LineCache, LineOutput, Output, RecipeQuantity, Settings, StatementOutput,
+    details, evaluate, format_output,
 };
 use hactorio_data::{Locale, Registry, postprocess};
 
@@ -25,24 +25,24 @@ fn output(output: &StatementOutput) -> &Output {
     }
 }
 
-fn breakdown_of(output: &StatementOutput, settings: &Settings, registry: &Registry) -> Breakdown {
-    breakdown(
+fn details_of(output: &StatementOutput, settings: &Settings, registry: &Registry) -> Details {
+    details(
         output.eval.as_ref().expect("evaluated value"),
         settings,
         registry,
     )
 }
 
-fn section<'a>(breakdown: &'a Breakdown, title: &str) -> &'a hactorio_core::BreakdownSection {
-    breakdown
+fn section<'a>(details: &'a Details, title: &str) -> &'a hactorio_core::DetailsSection {
+    details
         .sections
         .iter()
         .find(|section| section.title == title)
-        .unwrap_or_else(|| panic!("no {title} section in {breakdown:?}"))
+        .unwrap_or_else(|| panic!("no {title} section in {details:?}"))
 }
 
-fn row_value<'a>(breakdown: &'a Breakdown, section_title: &str, label: &str) -> &'a str {
-    section(breakdown, section_title)
+fn row_value<'a>(details: &'a Details, section_title: &str, label: &str) -> &'a str {
+    section(details, section_title)
         .rows
         .iter()
         .find(|row| row.label == label)
@@ -197,27 +197,24 @@ fn infinity_renders_in_the_header() {
 }
 
 #[test]
-fn breakdown_covers_configuration_recipe_items_power_and_pollution() {
+fn details_covers_configuration_recipe_items_power_and_pollution() {
     let registry = registry();
     let settings = Settings::default();
     let outputs = run(
         &registry,
         "@:assembling-machine-3: 2 :productivity-module-3: making :electronic-circuit:",
     );
-    let breakdown = breakdown_of(&outputs[0], &settings, &registry);
+    let details = details_of(&outputs[0], &settings, &registry);
 
-    assert_eq!(row_value(&breakdown, "machine", "slots"), "2 / 4");
-    assert_eq!(row_value(&breakdown, "machine", "productivity"), "20%");
-    assert_eq!(row_value(&breakdown, "machine", "consumption"), "160%");
-    assert_eq!(row_value(&breakdown, "recipe", "craft time"), "0.5 s");
-    assert_eq!(
-        row_value(&breakdown, "recipe", "productivity allowed"),
-        "yes"
-    );
+    assert_eq!(row_value(&details, "machine", "slots"), "2 / 4");
+    assert_eq!(row_value(&details, "machine", "productivity"), "20%");
+    assert_eq!(row_value(&details, "machine", "consumption"), "160%");
+    assert_eq!(row_value(&details, "recipe", "craft time"), "0.5 s");
+    assert_eq!(row_value(&details, "recipe", "productivity allowed"), "yes");
 
     // 1.25 * 0.7 / 0.5 = 1.75 crafts per second, 20% productivity.
     let circuit = registry.entry("electronic-circuit").unwrap().glyph;
-    let items = section(&breakdown, "items");
+    let items = section(&details, "items");
     let row = items
         .rows
         .iter()
@@ -226,26 +223,23 @@ fn breakdown_covers_configuration_recipe_items_power_and_pollution() {
     assert!(row.value.contains("produced 2.1"), "{}", row.value);
 
     // Power: 375 kW * 2.6 per machine; pollution: 2 * 2.6 * 1.2 per minute.
-    assert_eq!(row_value(&breakdown, "power", "per machine"), "975 kW");
-    assert_eq!(
-        row_value(&breakdown, "pollution", "per machine"),
-        "6.24/min"
-    );
+    assert_eq!(row_value(&details, "power", "per machine"), "975 kW");
+    assert_eq!(row_value(&details, "pollution", "per machine"), "6.24/min");
 }
 
 #[test]
-fn breakdown_reports_built_in_productivity() {
+fn details_reports_built_in_productivity() {
     let registry = registry();
     let settings = Settings::default();
     let outputs = run(&registry, "@:foundry: making :casting-iron:");
-    let breakdown = breakdown_of(&outputs[0], &settings, &registry);
+    let details = details_of(&outputs[0], &settings, &registry);
 
-    assert_eq!(row_value(&breakdown, "machine", "productivity"), "50%");
-    assert_eq!(row_value(&breakdown, "machine", "base productivity"), "50%");
+    assert_eq!(row_value(&details, "machine", "productivity"), "50%");
+    assert_eq!(row_value(&details, "machine", "base productivity"), "50%");
 
     // 4 / 6.4 crafts per second, 50% productivity.
     let plate = registry.entry("iron-plate").unwrap().glyph;
-    let items = section(&breakdown, "items");
+    let items = section(&details, "items");
     let row = items
         .rows
         .iter()
@@ -255,23 +249,23 @@ fn breakdown_reports_built_in_productivity() {
 }
 
 #[test]
-fn machine_seconds_breakdown_has_machine_time_and_total_energy() {
+fn machine_seconds_details_has_machine_time_and_total_energy() {
     let registry = registry();
     let settings = Settings::default();
     let outputs = run(&registry, "100 :iron-plate: in @:electric-furnace:");
-    let breakdown = breakdown_of(&outputs[0], &settings, &registry);
+    let details = details_of(&outputs[0], &settings, &registry);
 
-    assert_eq!(row_value(&breakdown, "machine", "machine time"), "160 s");
-    assert_eq!(row_value(&breakdown, "power", "total energy"), "28.8 MJ");
-    assert_eq!(row_value(&breakdown, "pollution", "total"), "5.333/min");
+    assert_eq!(row_value(&details, "machine", "machine time"), "160 s");
+    assert_eq!(row_value(&details, "power", "total energy"), "28.8 MJ");
+    assert_eq!(row_value(&details, "pollution", "total"), "5.333/min");
 }
 
 #[test]
-fn scalars_have_no_breakdown() {
+fn scalars_have_no_details() {
     let registry = registry();
     let settings = Settings::default();
     let outputs = run(&registry, "3 + 4");
-    let breakdown = breakdown_of(&outputs[0], &settings, &registry);
+    let details = details_of(&outputs[0], &settings, &registry);
 
-    assert!(breakdown.sections.is_empty());
+    assert!(details.sections.is_empty());
 }

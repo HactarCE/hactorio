@@ -17,7 +17,7 @@ mod value;
 
 pub use ast::{BinaryOp, Expr, MachineSpec, ModuleUse, Span, Statement, StatementKind};
 pub use belt::{BeltTier, belt_capacity, belt_value, stack_size};
-pub use detail::{Breakdown, BreakdownRow, BreakdownSection, breakdown};
+pub use detail::{Details, DetailsRow, DetailsSection, details};
 pub use eval::{
     Eval, EvalError, LineOutput, MachineOutput, MachineValue, ModuleCount, Output, RecipeOutput,
     RecipeQuantity, RecipeValue, StatementOutput, evaluate, line_hash,
