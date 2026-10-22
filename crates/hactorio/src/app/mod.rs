@@ -15,6 +15,7 @@ use crate::document::{
     Window,
 };
 use crate::evaluator::Evaluator;
+use crate::fonts;
 use crate::icons;
 
 mod completion;
@@ -118,6 +119,8 @@ pub struct HactorioApp {
     zoom: f32,
     /// Monospace font size for the editor and outputs.
     font_size: f32,
+    /// Monospace font family for the editor and outputs; `None` is the default.
+    font: Option<String>,
     /// Cursor to restore on the first frame, as `(line, column)`.
     pending_focus: Option<(usize, usize)>,
     /// Generation whose results are currently displayed.
@@ -170,6 +173,11 @@ impl HactorioApp {
             icons::install(ctx, Arc::clone(registry), &install.icon_source());
         }
 
+        let font = document
+            .font
+            .filter(|name| fonts::system_fonts().contains(name));
+        fonts::system_fonts().apply(ctx, font.as_deref());
+
         let zoom = document.zoom.clamp(MIN_ZOOM, MAX_ZOOM);
         ctx.set_zoom_factor(zoom);
         let font_size = document.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
@@ -196,6 +204,7 @@ impl HactorioApp {
             results_width: document.results_width,
             zoom,
             font_size,
+            font,
             pending_focus: document
                 .cursors
                 .get(active)
@@ -367,10 +376,25 @@ impl HactorioApp {
             // ui.add_space(8.0);
             ui.separator();
 
-            ui.label("Font size");
+            ui.label("Font");
+            let mut font = self.font.clone();
+            egui::ComboBox::from_id_salt("editor_font")
+                .selected_text(font.as_deref().unwrap_or("Default"))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut font, None, "Default");
+                    for family in fonts::system_fonts().families() {
+                        ui.selectable_value(&mut font, Some(family.clone()), family);
+                    }
+                });
+            if font != self.font {
+                self.font = font;
+                fonts::system_fonts().apply(ui.ctx(), self.font.as_deref());
+                self.dirty = true;
+            }
             let font_size = ui.add(
-                egui::Slider::new(&mut self.font_size, MIN_FONT_SIZE..=MAX_FONT_SIZE)
-                    .step_by(1.0)
+                egui::DragValue::new(&mut self.font_size)
+                    .range(MIN_FONT_SIZE..=MAX_FONT_SIZE)
+                    .speed(0.1)
                     .fixed_decimals(0),
             );
             if font_size.changed() {
@@ -544,6 +568,7 @@ impl HactorioApp {
             results_width: self.results_width,
             zoom: self.zoom,
             font_size: self.font_size,
+            font: self.font.clone(),
         }
     }
 

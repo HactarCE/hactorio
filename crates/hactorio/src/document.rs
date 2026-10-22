@@ -66,6 +66,9 @@ pub struct Document {
     /// Monospace font size for the editor and outputs.
     #[serde(default = "default_font_size")]
     pub font_size: f32,
+    /// Monospace font family for the editor and outputs; `None` uses egui's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font: Option<String>,
 }
 
 pub fn default_results_width() -> f32 {
@@ -85,7 +88,7 @@ pub const MIN_ZOOM: f32 = 0.2;
 pub const MAX_ZOOM: f32 = 5.0;
 
 pub const MIN_FONT_SIZE: f32 = 8.0;
-pub const MAX_FONT_SIZE: f32 = 24.0;
+pub const MAX_FONT_SIZE: f32 = 48.0;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub struct Cursor {
@@ -113,6 +116,7 @@ impl Default for Document {
             results_width: default_results_width(),
             zoom: default_zoom(),
             font_size: default_font_size(),
+            font: None,
         }
     }
 }

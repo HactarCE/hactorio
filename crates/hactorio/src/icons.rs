@@ -14,7 +14,7 @@ use hactorio_data::{IconImage, IconSource, Registry, STACK_SIZE_GLYPH, STACK_SIZ
 /// Uses the game's `V` virtual signal; it is not a namespace entry.
 pub const VARIABLE: char = '\u{F8FE}';
 /// Icon path of the variable's virtual signal.
-const VARIABLE_ICON: &str = "__base__/graphics/icons/signal/signal_V.png";
+const VARIABLE_ICON: &str = "__base__/graphics/icons/signal/signal-item-parameter.png";
 
 /// Icons that are not namespace entries, as `(glyph, data path)`.
 const EXTRAS: &[(char, &str)] = &[

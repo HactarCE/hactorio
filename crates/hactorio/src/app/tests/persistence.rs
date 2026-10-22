@@ -92,3 +92,50 @@ fn zoom_is_restored_and_saved() {
 
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn font_family_is_restored_and_saved() {
+    let Some(family) = crate::fonts::system_fonts().families().first().cloned() else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("hactorio-font-family-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let ctx = egui::Context::default();
+    let mut app = HactorioApp::new(
+        &ctx,
+        Document {
+            font: Some(family.clone()),
+            ..Document::default()
+        },
+        dir.clone(),
+    );
+    assert_eq!(app.font, Some(family.clone()));
+
+    app.save();
+    let saved = Document::load(&dir.join("document.json")).unwrap();
+    assert_eq!(saved.font, Some(family));
+
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn unknown_font_family_falls_back_to_the_default() {
+    let dir = std::env::temp_dir().join(format!("hactorio-font-missing-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let ctx = egui::Context::default();
+    let app = HactorioApp::new(
+        &ctx,
+        Document {
+            font: Some("Definitely Not An Installed Font".to_string()),
+            ..Document::default()
+        },
+        dir.clone(),
+    );
+    assert_eq!(app.font, None);
+
+    std::fs::remove_dir_all(dir).unwrap();
+}

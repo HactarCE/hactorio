@@ -1,6 +1,7 @@
 mod app;
 mod document;
 mod evaluator;
+mod fonts;
 mod icons;
 
 use eframe::egui;

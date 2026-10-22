@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 eframe.workspace = true
+fontdb = "0.23"
 egui.workspace = true
 hactorio-core.workspace = true
 hactorio-data.workspace = true
