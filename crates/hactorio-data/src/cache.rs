@@ -89,6 +89,10 @@ mod tests {
                 .module_slots,
             4
         );
+        assert_eq!(
+            loaded.reference_count(loaded.entry_id("iron-ore").unwrap()),
+            3
+        );
     }
 
     #[test]

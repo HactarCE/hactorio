@@ -15,7 +15,7 @@ use hactorio_core::{
     Value, breakdown, format_amount, format_energy, format_output, format_power, format_value,
     from_plaintext, line_hash, to_plaintext,
 };
-use hactorio_data::{GameInstall, Registry, locate};
+use hactorio_data::{EntryId, GameInstall, Registry, locate};
 
 use crate::document::{
     Cursor, DOCUMENT_VERSION, Document, MAX_FONT_SIZE, MAX_ZOOM, MIN_FONT_SIZE, MIN_ZOOM, Tab,
@@ -1391,6 +1391,19 @@ fn aliases_for(id: &str) -> &'static [&'static str] {
         .unwrap_or(&[])
 }
 
+/// Weight of the reference-count popularity bonus added to fuzzy scores.
+///
+/// Fuzzy scores only compare match shape: `ipl` scores `ice-platform` a few
+/// points above `iron-plate`, even though iron plates are referenced by far
+/// more recipes. The logarithmic bonus lets a much more common symbol outrank
+/// a near-equal match without letting popularity beat a clearly better match.
+const COMPLETION_POPULARITY_WEIGHT: f64 = 2.0;
+
+/// The ranking key of a completion: its fuzzy score plus a popularity bonus.
+fn completion_rank(score: isize, references: u32) -> f64 {
+    score as f64 + f64::from(references).ln_1p() * COMPLETION_POPULARITY_WEIGHT
+}
+
 /// The name of `entry` that best matches `needle`, with the matched char indices
 /// and whether the localized display name was the best match.
 fn best_name_match<'a>(
@@ -1435,15 +1448,16 @@ fn completion_items(
         CompletionContext::Normal
     };
 
-    let mut items: Vec<(isize, CompletionItem)> = registry
+    let mut items: Vec<(f64, CompletionItem)> = registry
         .entries()
         .iter()
-        .filter(|entry| match context {
+        .enumerate()
+        .filter(|(_, entry)| match context {
             CompletionContext::Machine => entry.machine().is_some(),
             CompletionContext::Recipe => entry.recipe.is_some(),
             CompletionContext::Normal => true,
         })
-        .filter_map(|entry| {
+        .filter_map(|(index, entry)| {
             let (score, matched_name, matched, display_matched) = best_name_match(entry, needle)?;
             let display_name = entry.display_name.as_deref();
             let (label, matched, name, name_matched) = if display_matched {
@@ -1454,8 +1468,9 @@ fn completion_items(
             } else {
                 (matched_name, matched, None, Vec::new())
             };
+            let references = registry.reference_count(EntryId::from_index(index));
             Some((
-                score,
+                completion_rank(score, references),
                 CompletionItem {
                     insert: entry.glyph.to_string(),
                     glyph: entry.glyph,
@@ -1468,9 +1483,9 @@ fn completion_items(
         })
         .collect();
 
-    items.sort_by(|(a_score, a), (b_score, b)| {
-        b_score
-            .cmp(a_score)
+    items.sort_by(|(a_rank, a), (b_rank, b)| {
+        b_rank
+            .total_cmp(a_rank)
             .then_with(|| a.label.len().cmp(&b.label.len()))
             .then_with(|| a.label.cmp(&b.label))
     });

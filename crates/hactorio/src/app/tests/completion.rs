@@ -121,6 +121,44 @@ fn completion_matches_subsequences_case_insensitively() {
 }
 
 #[test]
+fn the_more_referenced_symbol_wins_a_close_match() {
+    // `ice-platform` matches `ipl` slightly better than `iron-plate`, but iron
+    // plates feed many more recipes, which should put them first.
+    let sinks: Vec<String> = (0..30)
+        .map(|index| {
+            format!(
+                r#""sink-{index}": {{"type": "recipe", "name": "sink-{index}", "ingredients": [{{"type": "item", "name": "iron-plate", "amount": 1}}], "results": [{{"type": "item", "name": "sink-{index}", "amount": 1}}]}}"#
+            )
+        })
+        .collect();
+    let fixture = format!(
+        r#"{{"item": {{
+            "iron-plate": {{"type": "item", "name": "iron-plate", "stack_size": 100}},
+            "ice-platform": {{"type": "item", "name": "ice-platform", "stack_size": 50}}
+        }}, "recipe": {{{}}}}}"#,
+        sinks.join(",")
+    );
+    let registry = hactorio_data::postprocess(&fixture, &hactorio_data::Locale::empty()).unwrap();
+    let iron = registry.entry("iron-plate").unwrap();
+    let ice = registry.entry("ice-platform").unwrap();
+    assert!(
+        best_name_match(ice, "ipl").unwrap().0 > best_name_match(iron, "ipl").unwrap().0,
+        "the fixture must reproduce the score reversal"
+    );
+    assert_eq!(
+        registry.reference_count(registry.entry_id("iron-plate").unwrap()),
+        30
+    );
+
+    let inserts = suggested_ids(&registry, "ipl");
+    assert_eq!(
+        inserts.first(),
+        Some(&iron.glyph.to_string()),
+        "{inserts:?}"
+    );
+}
+
+#[test]
 fn completion_after_at_only_offers_machines() {
     let registry = fixture_registry();
     let machine = registry

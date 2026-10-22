@@ -200,6 +200,9 @@ pub struct Registry {
     recipes: Vec<Recipe>,
     by_id: HashMap<Box<str>, EntryId>,
     recipe_by_id: HashMap<Box<str>, RecipeId>,
+    /// How many recipe ingredients and products name each entry, indexed by
+    /// entry. A rough popularity signal, used to rank autocomplete matches.
+    references: Vec<u32>,
 }
 
 impl Registry {
@@ -238,12 +241,12 @@ impl Registry {
             }
         }
 
-        let by_id = entries
+        let by_id: HashMap<Box<str>, EntryId> = entries
             .iter()
             .enumerate()
             .map(|(i, e)| (e.id.clone(), EntryId::from_index(i)))
             .collect();
-        let recipe_by_id = recipes
+        let recipe_by_id: HashMap<Box<str>, RecipeId> = recipes
             .iter()
             .enumerate()
             .map(|(i, r)| (r.id.clone(), RecipeId(i as u32)))
@@ -268,11 +271,26 @@ impl Registry {
             }
         }
 
+        let mut references = vec![0u32; entries.len()];
+        for recipe in &recipes {
+            let names = recipe
+                .ingredients
+                .iter()
+                .map(|ingredient| &ingredient.name)
+                .chain(recipe.products.iter().map(|product| &product.name));
+            for name in names {
+                if let Some(id) = by_id.get(&**name) {
+                    references[id.index()] += 1;
+                }
+            }
+        }
+
         Ok(Registry {
             entries,
             recipes,
             by_id,
             recipe_by_id,
+            references,
         })
     }
 
@@ -295,6 +313,14 @@ impl Registry {
 
     pub fn entry_by_index(&self, id: EntryId) -> &Entry {
         &self.entries[id.index()]
+    }
+
+    /// How many recipe ingredients and products name this entry.
+    ///
+    /// This is a rough popularity signal: items used across many recipes, such
+    /// as iron plates, score much higher than niche ones.
+    pub fn reference_count(&self, id: EntryId) -> u32 {
+        self.references[id.index()]
     }
 
     /// Resolves a private-use codepoint back to its entry.

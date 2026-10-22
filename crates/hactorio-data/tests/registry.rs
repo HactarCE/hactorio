@@ -271,6 +271,22 @@ fn locale_supplies_display_names() {
     fs::remove_dir_all(dir).unwrap();
 }
 
+#[test]
+fn reference_counts_track_recipe_usage() {
+    let registry = registry();
+    let count = |id: &str| registry.reference_count(registry.entry_id(id).unwrap());
+
+    // Two recipe ingredients/products plus the synthetic mining recipe.
+    assert_eq!(count("iron-ore"), 3);
+    assert_eq!(count("iron-plate"), 2);
+    assert_eq!(count("uranium-235"), 2);
+    assert_eq!(count("advanced-circuit"), 1);
+    assert_eq!(count("water"), 1);
+    // Only referenced as a recipe in this dump.
+    assert_eq!(count("uranium-processing"), 0);
+    assert_eq!(count("assembling-machine-3"), 0);
+}
+
 fn temp_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("hactorio-data-{}-{name}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
