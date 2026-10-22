@@ -403,6 +403,43 @@ fn research_productivity_applies_without_modules() {
 }
 
 #[test]
+fn built_in_productivity_applies_to_products() {
+    let registry = registry();
+    let outputs = run(&registry, "@:foundry: making :casting-iron:");
+    let output = recipe_output(&outputs[0]);
+
+    // S = 4, T = 6.4, P = 0.5 from the machine itself.
+    let rate = 4.0 / 6.4;
+    let plate = BaseUnit::Item(registry.entry_id("iron-plate").unwrap());
+    let ore = BaseUnit::Item(registry.entry_id("iron-ore").unwrap());
+    assert_close(output.net[&plate], rate * 1.5);
+    assert_close(output.net[&ore], -rate);
+    assert_close(output.net[&BaseUnit::Craft], rate);
+}
+
+#[test]
+fn built_in_productivity_stacks_with_modules_and_research() {
+    let registry = registry();
+    let mut research_levels: BTreeMap<Box<str>, u32> = BTreeMap::new();
+    research_levels.insert("casting-iron-productivity".into(), 1);
+    let settings = Settings {
+        research_levels,
+        ..Settings::default()
+    };
+    let outputs = run_with(
+        &registry,
+        &settings,
+        "@:foundry: 2 :productivity-module-3: making :casting-iron:",
+    );
+    let output = recipe_output(&outputs[0]);
+
+    // S = 4 * (1 + 2 * -0.15) = 2.8, T = 6.4, P = 0.5 + 0.2 + 0.1.
+    let rate = 2.8 / 6.4;
+    let plate = BaseUnit::Item(registry.entry_id("iron-plate").unwrap());
+    assert_close(output.net[&plate], rate * 1.8);
+}
+
+#[test]
 fn productivity_modules_need_a_recipe_that_allows_them() {
     let registry = registry();
     let outputs = run(

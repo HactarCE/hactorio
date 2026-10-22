@@ -25,6 +25,11 @@
       "name": "electric-mining-drill",
       "stack_size": 50
     },
+    "foundry": {
+      "type": "item",
+      "name": "foundry",
+      "stack_size": 50
+    },
     "parameter-0": {
       "type": "item",
       "name": "parameter-0",
@@ -145,6 +150,17 @@
       "allowed_effects": ["speed", "productivity"],
       "energy_usage": "375kW",
       "energy_source": { "type": "electric", "emissions_per_minute": { "pollution": 2 } }
+    },
+    "foundry": {
+      "type": "assembling-machine",
+      "name": "foundry",
+      "crafting_categories": ["casting"],
+      "crafting_speed": 4,
+      "module_slots": 4,
+      "allowed_effects": ["speed", "productivity"],
+      "energy_usage": "2.5MW",
+      "energy_source": { "type": "electric", "emissions_per_minute": { "pollution": 20 } },
+      "effect_receiver": { "base_effect": { "productivity": 0.5 } }
     }
   },
   "mining-drill": {

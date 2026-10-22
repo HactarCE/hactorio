@@ -65,6 +65,12 @@ fn machine_breakdown(value: &MachineValue, settings: &Settings, registry: &Regis
             format_plain_number(machine.speed, settings),
         ));
         rows.push(row("speed", format_plain_number(modifiers.speed, settings)));
+        if machine.base_productivity != 0.0 {
+            rows.push(row(
+                "base productivity",
+                format_percent(machine.base_productivity, settings),
+            ));
+        }
     }
 
     Breakdown {
@@ -119,6 +125,12 @@ fn recipe_breakdown(value: &RecipeValue, settings: &Settings, registry: &Registr
         "productivity",
         format_percent(modifiers.productivity, settings),
     ));
+    if machine.base_productivity != 0.0 {
+        machine_rows.push(row(
+            "base productivity",
+            format_percent(machine.base_productivity, settings),
+        ));
+    }
     machine_rows.push(row(
         "consumption",
         format_percent(modifiers.consumption_multiplier - 1.0, settings),

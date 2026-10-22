@@ -7,7 +7,8 @@
     "catalyst": {"type": "item", "name": "catalyst", "stack_size": 1, "icon": "d.png"},
     "assembling-machine-3": {"type": "item", "name": "assembling-machine-3", "stack_size": 50, "icon": "e.png"},
     "electric-furnace": {"type": "item", "name": "electric-furnace", "stack_size": 50, "icon": "f.png"},
-    "stone-furnace": {"type": "item", "name": "stone-furnace", "stack_size": 50, "icon": "g.png"}
+    "stone-furnace": {"type": "item", "name": "stone-furnace", "stack_size": 50, "icon": "g.png"},
+    "foundry": {"type": "item", "name": "foundry", "stack_size": 50, "icon": "i.png"}
   },
   "fluid": {
     "water": {"type": "fluid", "name": "water", "icon": "h.png"}
@@ -52,6 +53,13 @@
       "ingredients": [{"type": "item", "name": "catalyst", "amount": 1}],
       "results": [{"type": "item", "name": "catalyst", "amount": 1}],
       "allow_productivity": false
+    },
+    "casting-iron": {
+      "type": "recipe", "name": "casting-iron", "categories": ["casting"],
+      "energy_required": 6.4,
+      "ingredients": [{"type": "item", "name": "iron-ore", "amount": 1}],
+      "results": [{"type": "item", "name": "iron-plate", "amount": 1}],
+      "allow_productivity": true
     }
   },
   "assembling-machine": {
@@ -60,6 +68,13 @@
       "crafting_categories": ["crafting"], "crafting_speed": 1.25, "module_slots": 4,
       "allowed_effects": ["speed", "productivity", "consumption", "pollution"], "energy_usage": "375kW",
       "energy_source": {"type": "electric", "emissions_per_minute": {"pollution": 2}}
+    },
+    "foundry": {
+      "type": "assembling-machine", "name": "foundry",
+      "crafting_categories": ["casting"], "crafting_speed": 4, "module_slots": 4,
+      "allowed_effects": ["speed", "productivity", "consumption", "pollution"], "energy_usage": "2.5MW",
+      "energy_source": {"type": "electric", "emissions_per_minute": {"pollution": 20}},
+      "effect_receiver": {"base_effect": {"productivity": 0.5}}
     }
   },
   "furnace": {
@@ -80,6 +95,12 @@
       "type": "technology", "name": "iron-plate-productivity", "max_level": "infinite",
       "effects": [
         {"type": "change-recipe-productivity", "recipe": "iron-plate", "change": 0.1}
+      ]
+    },
+    "casting-iron-productivity": {
+      "type": "technology", "name": "casting-iron-productivity", "max_level": "infinite",
+      "effects": [
+        {"type": "change-recipe-productivity", "recipe": "casting-iron", "change": 0.1}
       ]
     }
   }

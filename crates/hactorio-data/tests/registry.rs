@@ -25,6 +25,7 @@ fn entries_are_sorted_and_glyphs_are_contiguous() {
             "coal-liquefaction",
             "electric-mining-drill",
             "firearm-magazine",
+            "foundry",
             "iron-ore",
             "iron-plate",
             "speed-module-3",
@@ -141,6 +142,20 @@ fn machine_joins_the_item_with_its_entity() {
         names(&machine.categories),
         ["crafting", "advanced-crafting"]
     );
+}
+
+#[test]
+fn machines_carry_built_in_productivity() {
+    let registry = registry();
+    let foundry = registry.entry("foundry").unwrap().machine().unwrap();
+    assert_eq!(foundry.base_productivity, 0.5);
+
+    let assembler = registry
+        .entry("assembling-machine-3")
+        .unwrap()
+        .machine()
+        .unwrap();
+    assert_eq!(assembler.base_productivity, 0.0);
 }
 
 #[test]

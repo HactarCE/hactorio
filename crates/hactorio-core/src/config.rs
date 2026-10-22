@@ -136,14 +136,15 @@ pub(crate) fn modifiers(
     }
 
     let productivity_allowed = recipe.is_none_or(|recipe| recipe.allow_productivity);
-    let productivity = if productivity_allowed {
+    let module_productivity = if productivity_allowed {
         productivity
     } else {
         0.0
     };
     Modifiers {
         speed: data.speed * (1.0 + speed_sum),
-        productivity: productivity
+        productivity: data.base_productivity
+            + module_productivity
             + recipe.map_or(0.0, |recipe| {
                 research_productivity(registry, recipe, settings)
             }),

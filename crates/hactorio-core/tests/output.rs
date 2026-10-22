@@ -233,6 +233,27 @@ fn breakdown_covers_configuration_recipe_items_power_and_pollution() {
 }
 
 #[test]
+fn breakdown_reports_built_in_productivity() {
+    let registry = registry();
+    let settings = Settings::default();
+    let outputs = run(&registry, "@:foundry: making :casting-iron:");
+    let breakdown = breakdown_of(&outputs[0], &settings, &registry);
+
+    assert_eq!(row_value(&breakdown, "machine", "productivity"), "50%");
+    assert_eq!(row_value(&breakdown, "machine", "base productivity"), "50%");
+
+    // 4 / 6.4 crafts per second, 50% productivity.
+    let plate = registry.entry("iron-plate").unwrap().glyph;
+    let items = section(&breakdown, "items");
+    let row = items
+        .rows
+        .iter()
+        .find(|row| row.label.contains(plate.to_string().as_str()))
+        .unwrap();
+    assert!(row.value.contains("produced 0.938"), "{}", row.value);
+}
+
+#[test]
 fn machine_seconds_breakdown_has_machine_time_and_total_energy() {
     let registry = registry();
     let settings = Settings::default();

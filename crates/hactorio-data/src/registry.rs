@@ -81,6 +81,12 @@ pub struct Machine {
     pub energy_usage_w: f64,
     pub pollution_per_minute: f64,
     pub categories: Vec<Box<str>>,
+    /// Productivity the machine grants itself, e.g. the foundry's 50%.
+    ///
+    /// Comes from `effect_receiver.base_effect.productivity`; it applies to
+    /// every recipe and is independent of modules and research.
+    #[serde(default)]
+    pub base_productivity: f64,
 }
 
 /// Which module effects a machine accepts.

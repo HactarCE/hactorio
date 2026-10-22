@@ -292,6 +292,12 @@ fn machine_from(proto: &Value) -> Option<Machine> {
             .and_then(Value::as_f64)
             .unwrap_or(0.0),
         categories,
+        base_productivity: proto
+            .get("effect_receiver")
+            .and_then(|receiver| receiver.get("base_effect"))
+            .and_then(|effect| effect.get("productivity"))
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0),
     })
 }
 
