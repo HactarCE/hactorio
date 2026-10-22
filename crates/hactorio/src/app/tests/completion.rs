@@ -780,3 +780,74 @@ fn completion_accepts_with_enter_and_inserts_a_glyph() {
         "Enter must accept, not insert a newline"
     );
 }
+
+#[test]
+fn module_abbreviations_rank_their_tier_first() {
+    let modules: Vec<String> = [
+        ("speed-module", "speed", 1),
+        ("speed-module-2", "speed", 2),
+        ("speed-module-3", "speed", 3),
+        ("productivity-module", "productivity", 1),
+        ("productivity-module-2", "productivity", 2),
+        ("productivity-module-3", "productivity", 3),
+        ("efficiency-module", "efficiency", 1),
+        ("efficiency-module-2", "efficiency", 2),
+        ("efficiency-module-3", "efficiency", 3),
+        ("quality-module", "quality", 1),
+        ("quality-module-2", "quality", 2),
+        ("quality-module-3", "quality", 3),
+    ]
+    .into_iter()
+    .map(|(id, category, tier)| {
+        format!(
+            r#""{id}": {{"type": "module", "name": "{id}", "category": "{category}", "tier": {tier}, "stack_size": 50, "effect": {{}}}}"#
+        )
+    })
+    .collect();
+    let fixture = format!(r#"{{"module": {{{}}}}}"#, modules.join(","));
+    let registry = hactorio_data::postprocess(&fixture, &hactorio_data::Locale::empty()).unwrap();
+
+    for (alias, id) in [
+        ("speed-mod-1", "speed-module"),
+        ("speed-mod-2", "speed-module-2"),
+        ("speed-mod-3", "speed-module-3"),
+        ("prod-mod-1", "productivity-module"),
+        ("prod-mod-2", "productivity-module-2"),
+        ("prod-mod-3", "productivity-module-3"),
+        ("eff-mod-1", "efficiency-module"),
+        ("eff-mod-2", "efficiency-module-2"),
+        ("eff-mod-3", "efficiency-module-3"),
+        ("qual-mod-1", "quality-module"),
+        ("qual-mod-2", "quality-module-2"),
+        ("qual-mod-3", "quality-module-3"),
+    ] {
+        let expected = registry.entry(id).unwrap().glyph.to_string();
+        for query in [alias.to_string(), format!(":{alias}")] {
+            let inserts = suggested_ids(&registry, &query);
+            assert_eq!(inserts.first(), Some(&expected), "{query}: {inserts:?}");
+        }
+    }
+}
+
+#[test]
+fn exact_names_outrank_near_miss_fuzzy_matches() {
+    fn entry(id: &str, display_name: Option<&str>) -> hactorio_data::Entry {
+        hactorio_data::Entry {
+            id: id.into(),
+            glyph: 'a',
+            display_name: display_name.map(Into::into),
+            icon: None,
+            item: None,
+            fluid: false,
+            module: None,
+            recipe: None,
+        }
+    }
+
+    let fuzzy = entry("power-armor-mk2", Some("Power armor MK2"));
+    let exact = entry("pm2", None);
+    let fuzzy_score = best_name_match(&fuzzy, "pm2").unwrap().0;
+    let exact_score = best_name_match(&exact, "pm2").unwrap().0;
+    assert_eq!(fuzzy_score, 152);
+    assert!(exact_score > fuzzy_score, "{exact_score} <= {fuzzy_score}");
+}

@@ -85,15 +85,28 @@ pub(super) fn completion_word(text: &str, cursor: usize) -> (usize, String) {
     }
 
     // `-` separates words in arithmetic, but aliases and prototype IDs contain
-    // it. When the word under the caret starts with a letter, rejoin the
-    // dash-separated segments so `green-chip` is matched (and replaced) whole.
-    if chars.get(start).is_some_and(|ch| ch.is_ascii_alphabetic()) {
-        while start >= 2 && chars[start - 1] == '-' && !is_completion_boundary(chars[start - 2]) {
-            start -= 1;
-            while start > 0 && !is_completion_boundary(chars[start - 1]) {
-                start -= 1;
-            }
+    // it. Rejoin the dash-separated segments so `green-chip` and
+    // `speed-mod-2` are matched (and replaced) whole, but only when the joined
+    // token starts with a letter so arithmetic such as `2-3` stays separate.
+    let mut token_start = start;
+    while token_start >= 2
+        && chars[token_start - 1] == '-'
+        && !is_completion_boundary(chars[token_start - 2])
+    {
+        token_start -= 1;
+        while token_start > 0 && !is_completion_boundary(chars[token_start - 1]) {
+            token_start -= 1;
         }
+    }
+    let starts_word = match chars.get(token_start) {
+        Some(ch) if ch.is_ascii_alphabetic() => true,
+        Some(':') => chars
+            .get(token_start + 1)
+            .is_some_and(|ch| ch.is_ascii_alphabetic()),
+        _ => false,
+    };
+    if starts_word {
+        start = token_start;
     }
 
     (start, chars[start..cursor].iter().collect())
@@ -134,6 +147,18 @@ const ALIASES: &[(&str, &[&str])] = &[
     ("fast-transport-belt", &["red-belt"]),
     ("express-transport-belt", &["blue-belt"]),
     ("turbo-transport-belt", &["green-belt"]),
+    ("speed-module", &["speed-mod-1"]),
+    ("speed-module-2", &["speed-mod-2"]),
+    ("speed-module-3", &["speed-mod-3"]),
+    ("productivity-module", &["prod-mod-1"]),
+    ("productivity-module-2", &["prod-mod-2"]),
+    ("productivity-module-3", &["prod-mod-3"]),
+    ("efficiency-module", &["eff-mod-1"]),
+    ("efficiency-module-2", &["eff-mod-2"]),
+    ("efficiency-module-3", &["eff-mod-3"]),
+    ("quality-module", &["qual-mod-1"]),
+    ("quality-module-2", &["qual-mod-2"]),
+    ("quality-module-3", &["qual-mod-3"]),
     ("electromagnetic-plant", &["em-plant"]),
     ("automation-science-pack", &["red-science-pack"]),
     ("logistic-science-pack", &["green-science-pack"]),
@@ -194,6 +219,12 @@ fn completion_rank(score: isize, references: u32) -> f64 {
     score as f64 + f64::from(references).ln_1p() * COMPLETION_POPULARITY_WEIGHT
 }
 
+/// Bonus for a name that equals the needle, case-insensitively.
+///
+/// Short exact names such as `pm2` can score below a multi-word name whose
+/// word starts earn more points. Exact matches should win those near-ties.
+const COMPLETION_EXACT_MATCH_BONUS: isize = 50;
+
 /// Fuzzy scoring weights tuned for prototype names.
 ///
 /// The defaults let a contiguous prefix outrank a match that starts words:
@@ -231,6 +262,12 @@ pub(super) fn best_name_match<'a>(
         .chain(aliases_for(&entry.id).iter().copied())
         .filter_map(|name| {
             let (score, matched) = fuzzy_match(name, needle)?;
+            let score = score
+                + if name.eq_ignore_ascii_case(needle) {
+                    COMPLETION_EXACT_MATCH_BONUS
+                } else {
+                    0
+                };
             Some((score, name, matched, Some(name) == display_name))
         })
         .reduce(|best, candidate| {
