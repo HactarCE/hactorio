@@ -586,8 +586,6 @@ impl HactorioApp {
 
         let rect = ctx.viewport_rect();
         self.window = Some(Window {
-            x: rect.min.x,
-            y: rect.min.y,
             width: rect.width(),
             height: rect.height(),
             maximized: ctx.input(|input| input.viewport().maximized.unwrap_or(false)),
