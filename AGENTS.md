@@ -14,3 +14,7 @@ After completing a unit of work, run `jj describe` and describe the whole set of
 ## egui
 
 Rows inside content-sized panels use `ui.horizontal`; `ui.horizontal_top` allocates the remaining height and causes a growth feedback loop.
+
+## Factorio data
+
+The foundry cannot run the `iron-gear-wheel` recipe (category `crafting`), but it has `casting-iron-gear-wheel` (category `metallurgy`), which also produces iron gear wheels. Recipe resolution in `in` must filter by the machine's categories; `:iron-gear-wheel: in :foundry:` is valid and resolves to the casting recipe.
