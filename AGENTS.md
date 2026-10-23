@@ -18,3 +18,5 @@ Rows inside content-sized panels use `ui.horizontal`; `ui.horizontal_top` alloca
 ## Factorio data
 
 The foundry cannot run the `iron-gear-wheel` recipe (category `crafting`), but it has `casting-iron-gear-wheel` (category `metallurgy`), which also produces iron gear wheels. Recipe resolution in `in` must filter by the machine's categories; `:iron-gear-wheel: in :foundry:` is valid and resolves to the casting recipe.
+
+Inserter `hand_size` is cosmetic; capacity comes from `bulk`, `stack_size_bonus`, and the inserter capacity research modifiers.
