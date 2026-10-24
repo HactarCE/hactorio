@@ -85,10 +85,9 @@ fn evaluates_machine_process_and_in() {
     let LineOutput::Value(invalue) = &outputs[3].output else {
         panic!("expected in");
     };
-    assert_eq!(
-        invalue.process.as_ref().unwrap().extent,
-        Some(hactorio_core::facets::Extent::Machines(0.5))
-    );
+    let extent = &invalue.process.as_ref().unwrap().extent;
+    assert_eq!(extent.kind, hactorio_core::facets::ExtentKind::Machines);
+    assert_eq!(extent.magnitude(), 0.5);
 }
 
 #[test]

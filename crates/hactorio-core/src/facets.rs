@@ -237,14 +237,14 @@ pub struct BeltFacet {
 }
 
 /// One module count in a config facet.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ModuleCount {
     pub module: EntryId,
     pub count: u32,
 }
 
 /// A beacon group: a beacon count and the modules installed in each beacon.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BeaconGroup {
     pub beacon: EntryId,
     pub count: u32,
@@ -252,7 +252,7 @@ pub struct BeaconGroup {
 }
 
 /// Per-machine modules and beacon groups.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ConfigFacet {
     pub modules: Vec<ModuleCount>,
     pub beacons: Vec<BeaconGroup>,
@@ -360,26 +360,145 @@ pub struct MachineFacet {
     pub count: Option<f64>,
 }
 
-/// A process extent: machine count or machine-seconds.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Extent {
-    Machines(f64),
-    MachineSeconds(f64),
+impl MachineFacet {
+    pub fn spec(&self) -> MachineSpec {
+        MachineSpec {
+            machine: self.machine,
+            config: self.config.clone(),
+        }
+    }
+}
+
+/// A machine type and its per-machine configuration.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MachineSpec {
+    pub machine: EntryId,
+    pub config: ConfigFacet,
+}
+
+/// Whether a process extent is unsolved, machine counts, or machine-seconds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtentKind {
+    Unsolved,
+    Machines,
+    MachineSeconds,
+}
+
+/// A process extent: a kind and a count or machine-seconds per machine spec.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Extent {
+    pub kind: ExtentKind,
+    pub machines: BTreeMap<MachineSpec, f64>,
 }
 
 impl Extent {
-    pub fn magnitude(self) -> f64 {
-        match self {
-            Extent::Machines(value) | Extent::MachineSeconds(value) => value,
+    pub fn unsolved(spec: MachineSpec) -> Self {
+        Extent {
+            kind: ExtentKind::Unsolved,
+            machines: BTreeMap::from([(spec, 1.0)]),
         }
+    }
+
+    pub fn machines(spec: MachineSpec, count: f64) -> Self {
+        Extent {
+            kind: ExtentKind::Machines,
+            machines: BTreeMap::from([(spec, count)]),
+        }
+    }
+
+    pub fn machine_seconds(spec: MachineSpec, seconds: f64) -> Self {
+        Extent {
+            kind: ExtentKind::MachineSeconds,
+            machines: BTreeMap::from([(spec, seconds)]),
+        }
+    }
+
+    pub fn is_unsolved(&self) -> bool {
+        self.kind == ExtentKind::Unsolved
+    }
+
+    pub fn is_machine_seconds(&self) -> bool {
+        self.kind == ExtentKind::MachineSeconds
+    }
+
+    /// The total count or machine-seconds across all machine specs.
+    pub fn magnitude(&self) -> f64 {
+        self.machines.values().sum()
+    }
+
+    fn map_counts(&self, factor: f64) -> BTreeMap<MachineSpec, f64> {
+        self.machines
+            .iter()
+            .filter_map(|(spec, count)| {
+                let count = count * factor;
+                is_nonzero(count).then_some((spec.clone(), count))
+            })
+            .collect()
+    }
+
+    fn scaled(&self, factor: f64) -> Self {
+        let kind = if self.is_unsolved() {
+            ExtentKind::Machines
+        } else {
+            self.kind
+        };
+        Extent {
+            kind,
+            machines: self.map_counts(factor),
+        }
+    }
+
+    fn negated(&self) -> Self {
+        let kind = if self.is_unsolved() {
+            ExtentKind::Machines
+        } else {
+            self.kind
+        };
+        Extent {
+            kind,
+            machines: self.map_counts(-1.0),
+        }
+    }
+
+    fn absolute(&self) -> Self {
+        Extent {
+            kind: self.kind,
+            machines: self
+                .machines
+                .iter()
+                .map(|(spec, count)| (spec.clone(), count.abs()))
+                .collect(),
+        }
+    }
+
+    fn combined(&self, other: &Extent, subtract: bool) -> Result<Self, FacetError> {
+        if self.kind == ExtentKind::Unsolved
+            || other.kind == ExtentKind::Unsolved
+            || self.kind != other.kind
+        {
+            return Err(FacetError::ProcessExtentMismatch);
+        }
+        let mut machines = self.machines.clone();
+        for (spec, count) in &other.machines {
+            let entry = machines.entry(spec.clone()).or_insert(0.0);
+            if subtract {
+                *entry -= count;
+            } else {
+                *entry += count;
+            }
+        }
+        machines.retain(|_, count| is_nonzero(*count));
+        Ok(Extent {
+            kind: self.kind,
+            machines,
+        })
     }
 }
 
 /// A production process. Effects are baked; modules/beacons are not retained.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProcessFacet {
-    /// `None` means an unsolved process template.
-    pub extent: Option<Extent>,
+    pub extent: Extent,
     pub net: BTreeMap<BaseUnit, f64>,
     pub power_w: Option<f64>,
     pub energy_j: Option<f64>,
@@ -460,10 +579,7 @@ impl FacetValue {
             count: machine.count.map(f64::abs),
         });
         out.process = self.process.as_ref().map(|process| ProcessFacet {
-            extent: process.extent.map(|extent| match extent {
-                Extent::Machines(value) => Extent::Machines(value.abs()),
-                Extent::MachineSeconds(value) => Extent::MachineSeconds(value.abs()),
-            }),
+            extent: process.extent.absolute(),
             net: process
                 .net
                 .iter()
@@ -572,21 +688,12 @@ impl FacetValue {
             config: machine.config.clone(),
             count: Some(-machine.count.unwrap_or(1.0)),
         });
-        out.process = self.process.as_ref().map(|process| {
-            let extent = match process.extent {
-                Some(extent) => Some(match extent {
-                    Extent::Machines(value) => Extent::Machines(-value),
-                    Extent::MachineSeconds(value) => Extent::MachineSeconds(-value),
-                }),
-                None => Some(Extent::Machines(-1.0)),
-            };
-            ProcessFacet {
-                extent,
-                net: negate_map(&process.net),
-                power_w: process.power_w.map(|value| -value),
-                energy_j: process.energy_j.map(|value| -value),
-                recipes: process.recipes.clone(),
-            }
+        out.process = self.process.as_ref().map(|process| ProcessFacet {
+            extent: process.extent.negated(),
+            net: negate_map(&process.net),
+            power_w: process.power_w.map(|value| -value),
+            energy_j: process.energy_j.map(|value| -value),
+            recipes: process.recipes.clone(),
         });
         out.belt = self.belt.map(|belt| BeltFacet {
             count: -belt.count,
@@ -819,23 +926,16 @@ impl FacetValue {
             config: machine.config.clone(),
             count: Some(machine.count.unwrap_or(1.0) * factor),
         });
-        out.process = self.process.as_ref().map(|process| {
-            let extent = match process.extent {
-                Some(Extent::Machines(value)) => Some(Extent::Machines(value * factor)),
-                Some(Extent::MachineSeconds(value)) => Some(Extent::MachineSeconds(value * factor)),
-                None => Some(Extent::Machines(factor)),
-            };
-            ProcessFacet {
-                extent,
-                net: process
-                    .net
-                    .iter()
-                    .map(|(unit, amount)| (*unit, *amount * factor))
-                    .collect(),
-                power_w: process.power_w.map(|value| value * factor),
-                energy_j: process.energy_j.map(|value| value * factor),
-                recipes: process.recipes.clone(),
-            }
+        out.process = self.process.as_ref().map(|process| ProcessFacet {
+            extent: process.extent.scaled(factor),
+            net: process
+                .net
+                .iter()
+                .map(|(unit, amount)| (*unit, *amount * factor))
+                .collect(),
+            power_w: process.power_w.map(|value| value * factor),
+            energy_j: process.energy_j.map(|value| value * factor),
+            recipes: process.recipes.clone(),
         });
         out.config = match (&self.config, is_nonnegative_integer(factor)) {
             (Some(config), true) => {
@@ -1128,29 +1228,22 @@ fn scale_capacity_to_rate(capacity: &CapacityFacet, factor: f64) -> FacetValue {
 }
 
 fn scale_process_time(process: &ProcessFacet, time: f64) -> Result<FacetValue, FacetError> {
-    let (extent, net) = match process.extent {
-        Some(Extent::Machines(count)) => (
-            Extent::MachineSeconds(count * time),
-            process
-                .net
-                .iter()
-                .map(|(unit, amount)| (*unit, *amount * time))
-                .collect(),
-        ),
-        None => (
-            Extent::MachineSeconds(time),
-            process
-                .net
-                .iter()
-                .map(|(unit, amount)| (*unit, *amount * time))
-                .collect(),
-        ),
-        Some(Extent::MachineSeconds(_)) => return Err(FacetError::ProcessTimeOperand),
+    if process.extent.is_machine_seconds() {
+        return Err(FacetError::ProcessTimeOperand);
+    }
+    let net = process
+        .net
+        .iter()
+        .map(|(unit, amount)| (*unit, *amount * time))
+        .collect();
+    let extent = Extent {
+        kind: ExtentKind::MachineSeconds,
+        machines: process.extent.map_counts(time),
     };
     let energy_j = process.power_w.map(|power| power * time);
     Ok(FacetValue {
         process: Some(ProcessFacet {
-            extent: Some(extent),
+            extent,
             net,
             power_w: None,
             energy_j,
@@ -1161,9 +1254,9 @@ fn scale_process_time(process: &ProcessFacet, time: f64) -> Result<FacetValue, F
 }
 
 fn divide_process_time(process: &ProcessFacet, time: f64) -> Result<FacetValue, FacetError> {
-    let Extent::MachineSeconds(tau) = process.extent.ok_or(FacetError::ProcessTimeOperand)? else {
+    if !process.extent.is_machine_seconds() {
         return Err(FacetError::ProcessTimeOperand);
-    };
+    }
     let net = process
         .net
         .iter()
@@ -1172,7 +1265,10 @@ fn divide_process_time(process: &ProcessFacet, time: f64) -> Result<FacetValue, 
     let power_w = process.energy_j.map(|energy| energy / time);
     Ok(FacetValue {
         process: Some(ProcessFacet {
-            extent: Some(Extent::Machines(tau / time)),
+            extent: Extent {
+                kind: ExtentKind::Machines,
+                machines: process.extent.map_counts(1.0 / time),
+            },
             net,
             power_w,
             energy_j: None,
@@ -1187,25 +1283,7 @@ fn combine_process(
     b: &ProcessFacet,
     subtract: bool,
 ) -> Result<ProcessFacet, FacetError> {
-    let (a_extent, b_extent) = match (a.extent, b.extent) {
-        (Some(a_extent), Some(b_extent)) => (a_extent, b_extent),
-        _ => return Err(FacetError::ProcessExtentMismatch),
-    };
-    let extent = match (a_extent, b_extent) {
-        (Extent::Machines(a_value), Extent::Machines(b_value)) => Extent::Machines(if subtract {
-            a_value - b_value
-        } else {
-            a_value + b_value
-        }),
-        (Extent::MachineSeconds(a_value), Extent::MachineSeconds(b_value)) => {
-            Extent::MachineSeconds(if subtract {
-                a_value - b_value
-            } else {
-                a_value + b_value
-            })
-        }
-        _ => return Err(FacetError::ProcessExtentMismatch),
-    };
+    let extent = a.extent.combined(&b.extent, subtract)?;
 
     let recipes = if subtract {
         if a.recipes.len() == 1 && a.recipes == b.recipes {
@@ -1218,7 +1296,7 @@ fn combine_process(
     };
 
     Ok(ProcessFacet {
-        extent: Some(extent),
+        extent,
         net: combine_amounts(&a.net, &b.net, subtract),
         power_w: combine_option(a.power_w, b.power_w, subtract)?,
         energy_j: combine_option(a.energy_j, b.energy_j, subtract)?,
@@ -1365,6 +1443,13 @@ fn combine_terms(
 mod tests {
     use super::*;
 
+    fn spec(index: usize) -> MachineSpec {
+        MachineSpec {
+            machine: EntryId::from_index(index),
+            config: ConfigFacet::default(),
+        }
+    }
+
     #[test]
     fn scalar_is_an_empty_item_facet() {
         let value = FacetValue::scalar(3.0);
@@ -1384,7 +1469,7 @@ mod tests {
     fn process_cannot_coexist_with_other_facets() {
         let mut value = FacetValue::empty();
         value.process = Some(ProcessFacet {
-            extent: None,
+            extent: Extent::unsolved(spec(0)),
             net: BTreeMap::new(),
             power_w: None,
             energy_j: None,
@@ -1477,7 +1562,7 @@ mod tests {
     fn process_addition_unions_recipes() {
         let mut a = FacetValue::empty();
         a.process = Some(ProcessFacet {
-            extent: Some(Extent::Machines(1.0)),
+            extent: Extent::machines(spec(0), 1.0),
             net: BTreeMap::from([(BaseUnit::Second, -1.0)]),
             power_w: Some(10.0),
             energy_j: None,
@@ -1485,30 +1570,45 @@ mod tests {
         });
         let mut b = FacetValue::empty();
         b.process = Some(ProcessFacet {
-            extent: Some(Extent::Machines(2.0)),
+            extent: Extent::machines(spec(0), 2.0),
             net: BTreeMap::from([(BaseUnit::Second, -2.0)]),
             power_w: Some(20.0),
             energy_j: None,
             recipes: BTreeSet::from([RecipeId::from_index(1)]),
         });
         let result = a.add(&b).unwrap().process.unwrap();
-        assert_eq!(result.extent, Some(Extent::Machines(3.0)));
+        assert_eq!(result.extent.kind, ExtentKind::Machines);
+        assert_eq!(result.extent.magnitude(), 3.0);
         assert_eq!(result.recipes.len(), 2);
         assert_eq!(result.power_w, Some(30.0));
+    }
+
+    #[test]
+    fn extents_merge_machine_specs() {
+        let a = Extent::machines(spec(0), 1.0);
+        let b = Extent::machines(spec(1), 2.0);
+        let combined = a.combined(&b, false).unwrap();
+        assert_eq!(combined.kind, ExtentKind::Machines);
+        assert_eq!(combined.magnitude(), 3.0);
+        assert_eq!(combined.machines.len(), 2);
+        let difference = combined.combined(&b, true).unwrap();
+        assert_eq!(difference.machines.len(), 1);
+        assert_eq!(difference.magnitude(), 1.0);
     }
 
     #[test]
     fn negation_solves_an_unsolved_process() {
         let mut value = FacetValue::empty();
         value.process = Some(ProcessFacet {
-            extent: None,
+            extent: Extent::unsolved(spec(0)),
             net: BTreeMap::from([(BaseUnit::Second, 1.0)]),
             power_w: Some(5.0),
             energy_j: None,
             recipes: BTreeSet::new(),
         });
         let process = value.neg().unwrap().process.unwrap();
-        assert_eq!(process.extent, Some(Extent::Machines(-1.0)));
+        assert_eq!(process.extent.kind, ExtentKind::Machines);
+        assert_eq!(process.extent.magnitude(), -1.0);
         assert_eq!(process.net[&BaseUnit::Second], -1.0);
         assert_eq!(process.power_w, Some(-5.0));
     }
@@ -1573,7 +1673,7 @@ mod tests {
     fn process_times_time_becomes_machine_seconds() {
         let mut value = FacetValue::empty();
         value.process = Some(ProcessFacet {
-            extent: Some(Extent::Machines(2.0)),
+            extent: Extent::machines(spec(0), 2.0),
             net: BTreeMap::from([(BaseUnit::Joule, 4.0)]),
             power_w: Some(10.0),
             energy_j: None,
@@ -1581,7 +1681,8 @@ mod tests {
         });
         let time = FacetValue::item(Monomial::new(3.0, [(BaseUnit::Second, 1)]));
         let process = value.mul(&time).unwrap().process.unwrap();
-        assert_eq!(process.extent, Some(Extent::MachineSeconds(6.0)));
+        assert_eq!(process.extent.kind, ExtentKind::MachineSeconds);
+        assert_eq!(process.extent.magnitude(), 6.0);
         assert_eq!(process.net[&BaseUnit::Joule], 12.0);
         assert_eq!(process.energy_j, Some(30.0));
         assert_eq!(process.power_w, None);
@@ -1591,7 +1692,7 @@ mod tests {
     fn machine_seconds_over_time_becomes_machines() {
         let mut value = FacetValue::empty();
         value.process = Some(ProcessFacet {
-            extent: Some(Extent::MachineSeconds(6.0)),
+            extent: Extent::machine_seconds(spec(0), 6.0),
             net: BTreeMap::from([(BaseUnit::Joule, 12.0)]),
             power_w: None,
             energy_j: Some(30.0),
@@ -1599,7 +1700,8 @@ mod tests {
         });
         let time = FacetValue::item(Monomial::new(3.0, [(BaseUnit::Second, 1)]));
         let process = value.div(&time).unwrap().process.unwrap();
-        assert_eq!(process.extent, Some(Extent::Machines(2.0)));
+        assert_eq!(process.extent.kind, ExtentKind::Machines);
+        assert_eq!(process.extent.magnitude(), 2.0);
         assert_eq!(process.power_w, Some(10.0));
     }
 

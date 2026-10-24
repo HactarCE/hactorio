@@ -250,3 +250,17 @@ fn details_for_a_variable_show_its_value() {
 
     assert!(harness.query_by_label_contains("rate = 3").is_some());
 }
+
+#[test]
+fn error_details_show_error_heading_and_message() {
+    let document = editor_document("# Main\n3 :iron-plate: + 3 :copper-cable:\n", 1, 0);
+    let (mut harness, dir) = completion_harness("error-details", document);
+    harness.run();
+    assert!(harness.query_by_label("error").is_some());
+    assert!(
+        harness
+            .query_by_label_contains("`+` dropped every facet")
+            .is_some()
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}

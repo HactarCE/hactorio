@@ -109,7 +109,8 @@ The table is symmetric in facet survival and in the merged values.
 - **Process:** both operands must be **solved** and of the same `Extent` kind.
   An unsolved operand or mixed `Machines`/`MachineSeconds` is an explicit error,
   not a drop. `+` unions the recipe set; `net`, `power_w`/`energy_j`, and the
-  extent magnitude add; zero and negative extents are legal.
+  per-machine-spec counts or machine-seconds add; zero and negative values are
+  legal.
 - **Config:** counts are nonnegative integers by construction. `+` adds module
   counts by id and beacon-group counts for the same beacon+module set; groups
   with different module sets stay separate; zero terms are elided and an

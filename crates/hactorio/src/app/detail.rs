@@ -9,12 +9,12 @@ use std::sync::Arc;
 use egui::{Color32, RichText, Sense, TextStyle, Ui};
 use hactorio_core::facet_eval::{LineOutput, StatementOutput, line_hash};
 use hactorio_core::facet_format::{
-    format_capacity, format_config, format_facet, format_machine, format_rate,
+    format_capacity, format_config, format_facet, format_machine, format_machine_stats,
+    format_process_craft, format_process_energy, format_process_inputs,
+    format_process_machine_lines, format_process_outputs, format_rate,
 };
-use hactorio_core::facets::{Extent, FacetValue};
-use hactorio_core::{
-    BaseUnit, Settings, Value, format_amount, format_energy, format_power, format_value,
-};
+use hactorio_core::facets::FacetValue;
+use hactorio_core::{BaseUnit, Settings, Value, format_power, format_value};
 use hactorio_data::{Entry, PrototypeKind, Registry};
 
 use super::completion::definition_name;
@@ -410,31 +410,15 @@ impl DetailContext<'_> {
                 "machine".to_string(),
                 format_machine(machine, self.settings, self.registry),
             ));
+            rows.extend(format_machine_stats(machine, self.settings, self.registry));
+        }
+        if !rows.is_empty() {
+            self.section_grid(ui, "value", rows);
         }
         if let Some(process) = &value.process {
-            if let Some(extent) = process.extent {
-                rows.push((
-                    "extent".to_string(),
-                    match extent {
-                        Extent::Machines(count) => format!("{count} machines"),
-                        Extent::MachineSeconds(seconds) => format!("{seconds} machine-seconds"),
-                    },
-                ));
-            }
-            for (unit, amount) in &process.net {
-                let rate = !matches!(process.extent, Some(Extent::MachineSeconds(_)));
-                rows.push((
-                    unit_label(self.registry, *unit),
-                    format_amount(*amount, *unit, rate, self.settings, self.registry),
-                ));
-            }
-            if let Some(power) = process.power_w {
-                rows.push(("power".to_string(), format_power(power, self.settings)));
-            }
-            if let Some(energy) = process.energy_j {
-                rows.push(("energy".to_string(), format_energy(energy, self.settings)));
-            }
+            self.process_details_ui(ui, process);
         }
+        let mut rows = Vec::new();
         if let Some(config) = &value.config {
             rows.push((
                 "config".to_string(),
@@ -447,7 +431,47 @@ impl DetailContext<'_> {
                 self.registry.recipe(recipe).id.to_string(),
             ));
         }
-        self.section_grid(ui, "value", rows);
+        if !rows.is_empty() {
+            ui.add_space(6.0);
+            self.rows_grid(ui, "value-tail", rows);
+        }
+    }
+
+    fn process_details_ui(&self, ui: &mut Ui, process: &hactorio_core::facets::ProcessFacet) {
+        let mut header = format_process_machine_lines(process, self.settings, self.registry);
+        header.push(format_process_craft(process, self.settings));
+        self.process_lines(ui, header);
+        let mut inputs = format_process_inputs(process, self.settings, self.registry);
+        if let Some(energy) = format_process_energy(process, self.settings) {
+            inputs.push(energy);
+        }
+        self.process_section(ui, "inputs", inputs);
+        self.process_section(
+            ui,
+            "outputs",
+            format_process_outputs(process, self.settings, self.registry),
+        );
+    }
+
+    fn process_lines(&self, ui: &mut Ui, lines: Vec<String>) {
+        if lines.is_empty() {
+            return;
+        }
+        ui.add_space(6.0);
+        for line in lines {
+            ui.label(line);
+        }
+    }
+
+    fn process_section(&self, ui: &mut Ui, title: &str, lines: Vec<String>) {
+        if lines.is_empty() {
+            return;
+        }
+        ui.add_space(6.0);
+        ui.label(RichText::new(title).strong());
+        for line in lines {
+            ui.label(line);
+        }
     }
 
     fn section_grid(&self, ui: &mut Ui, title: &str, rows: Vec<(String, String)>) {
@@ -598,85 +622,58 @@ fn detail_ui(
     match &statement.output {
         LineOutput::Nothing => {}
         LineOutput::Error(error) => {
-            ui.label(RichText::new(&error.message).color(Color32::from_rgb(220, 90, 90)));
+            let color = Color32::from_rgb(220, 90, 90);
+            ui.label(RichText::new("error").monospace().color(color));
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+            ui.label(RichText::new(&error.message).color(color));
         }
         LineOutput::Value(value) => {
-            let formatted = format_facet(value, settings, registry);
-            hovered = icon_label(ui, &formatted, registry);
+            if value.process.is_none() {
+                let formatted = format_facet(value, settings, registry);
+                hovered = icon_label(ui, &formatted, registry);
+            }
+            if let Some(machine) = &value.machine {
+                for (label, value) in format_machine_stats(machine, settings, registry) {
+                    let line = format!("{label}: {value}");
+                    if hovered.is_none() {
+                        hovered = icon_label(ui, &line, registry);
+                    }
+                }
+            }
 
             if let Some(process) = &value.process {
-                let rate = !matches!(process.extent, Some(Extent::MachineSeconds(_)));
-                let mut produces = Vec::new();
-                let mut consumes = Vec::new();
-                for (unit, amount) in &process.net {
-                    if *unit == BaseUnit::Craft {
+                let mut header = format_process_machine_lines(process, settings, registry);
+                header.push(format_process_craft(process, settings));
+                for line in header {
+                    if hovered.is_none() {
+                        hovered = icon_label(ui, &line, registry);
+                    }
+                }
+                let mut inputs = format_process_inputs(process, settings, registry);
+                if let Some(energy) = format_process_energy(process, settings) {
+                    inputs.push(energy);
+                }
+                for (title, lines) in [
+                    ("inputs", inputs),
+                    (
+                        "outputs",
+                        format_process_outputs(process, settings, registry),
+                    ),
+                ] {
+                    if lines.is_empty() {
                         continue;
                     }
-                    let text = format_amount(amount.abs(), *unit, rate, settings, registry);
-                    if *amount > 0.0 {
-                        produces.push(text);
-                    } else {
-                        consumes.push(text);
-                    }
-                }
-                ui.horizontal_top(|ui| {
-                    ui.spacing_mut().item_spacing.x = 18.0;
-                    ui.vertical(|ui| {
-                        ui.set_min_width(90.0);
-                        ui.label(RichText::new("produces").weak());
-                        for produce in &produces {
-                            if hovered.is_none() {
-                                hovered = icon_label(ui, produce, registry);
-                            }
+                    ui.label(RichText::new(title).weak());
+                    for line in lines {
+                        if hovered.is_none() {
+                            hovered = icon_label(ui, &line, registry);
                         }
-                    });
-                    ui.vertical(|ui| {
-                        ui.set_min_width(90.0);
-                        ui.label(RichText::new("consumes").weak());
-                        for consume in &consumes {
-                            if hovered.is_none() {
-                                hovered = icon_label(ui, consume, registry);
-                            }
-                        }
-                    });
-                });
-                if let Some(craft) = process.net.get(&BaseUnit::Craft).copied() {
-                    let text = if rate {
-                        format!("{} craft/s", format_plain_count(craft, settings, registry))
-                    } else {
-                        format!("{} craft", format_plain_count(craft, settings, registry))
-                    };
-                    if hovered.is_none() {
-                        hovered = icon_label(ui, &text, registry);
-                    }
-                }
-                if let Some(power) = process.power_w {
-                    if hovered.is_none() {
-                        hovered = icon_label(ui, &format_power(power, settings), registry);
-                    }
-                }
-                if let Some(energy) = process.energy_j {
-                    if hovered.is_none() {
-                        hovered = icon_label(ui, &format_energy(energy, settings), registry);
                     }
                 }
             }
         }
     }
     hovered
-}
-
-fn format_plain_count(value: f64, settings: &Settings, registry: &Registry) -> String {
-    format_value(&Value::scalar(value), settings, registry)
-}
-
-fn unit_label(registry: &Registry, unit: BaseUnit) -> String {
-    match unit {
-        BaseUnit::Item(id) | BaseUnit::Fluid(id) => registry.entry_by_index(id).id.to_string(),
-        BaseUnit::Craft => "craft".to_string(),
-        BaseUnit::Second => "second".to_string(),
-        BaseUnit::Joule => "joule".to_string(),
-    }
 }
 
 pub(super) fn output_text(
@@ -686,7 +683,7 @@ pub(super) fn output_text(
 ) -> Option<String> {
     match &statement.output {
         LineOutput::Nothing => None,
-        LineOutput::Error(error) => Some(error.message.clone()),
+        LineOutput::Error(_) => Some("error".to_string()),
         LineOutput::Value(value) => Some(format_facet(value, settings, registry)),
     }
 }
