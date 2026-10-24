@@ -1,6 +1,6 @@
 # Facet operator table
 
-Source: `2026-10-22_design_doc_2.md` (§3, §3.1–§3.8, §4.1–§4.7, §10). Property
+Source: `2026-10-22_design_doc_2.md` (§3, §3.1–§3.8, §4.1–§4.8, §10). Property
 accessors (`.` and every named/signal selector) are intentionally excluded.
 
 ## Legend and reachability
@@ -33,11 +33,11 @@ Facet sets that §3.1.1/§4 do construct inside one value, with constructors:
 | `M` | `with` result; machine arithmetic on machine-only values |
 | `P` | `making`, `in` |
 | `I+C`, `I+C+R` | module/beacon token (with a same-id recipe) |
-| `I+B+T`, `I+B+T+R` | belt token; belt-mode `:stack-size:` |
+| `I+B+T`, `I+B+T+R` | belt token |
 | `B+T` | `+` of two different belt tiers |
 | `I+T`, `I+T+R` | inserter/pump token (with a same-id recipe) |
 | `I+K`, `I+K+R` | container token (chest, car, cargo wagon, tank, fluid wagon) |
-| `T`, `K` | `.rate`, `.capacity`, `K / time` |
+| `T`, `K` | `.rate`, `.capacity`, `K / time`, `:stacked-belt:` |
 | `C` | config addition/scaling |
 | `R` | recipe-only token, `.recipe` |
 
@@ -52,8 +52,7 @@ reachable pair `B+T`).
 
 The recipe-bearing variants `I+R`, `I+M+R`, `I+C+R`, `I+T+R`, `I+K+R`, and
 `I+B+T+R` otherwise behave like their base sets: every operator except
-`making` (which consumes the RHS recipe) and belt-mode `:stack-size:` (which
-retains it) drops `R` and leaves the base result.
+`making` (which consumes the RHS recipe) drops `R` and leaves the base result.
 
 ## `+`
 
@@ -102,8 +101,8 @@ The table is symmetric in facet survival and in the merged values.
   `2 :iron-plate: + 3 :copper-plate:` → `err`; `craft` never converts to items;
   time combines only with time; multi-unit monomials require identical
   exponents for every base unit.
-- **Recipe:** always dropped, including when both operands carry one. Belt-mode
-  `:stack-size:` is the only recipe-retaining operation besides `making`.
+- **Recipe:** always dropped, including when both operands carry one. Only
+  `making` consumes a recipe facet.
 - **Machine:** requires the same prototype **and** the same merged config;
   counts combine with `None` read as one and the result has a concrete count.
   A differing machine/config drops the machine facet (no error by itself).
@@ -246,8 +245,7 @@ is per-facet.
 - **Rate/capacity:** scalar scales every amount. `rate * time → capacity` only
   for isolated values; a non-isolated rate (belt token, `I+T`) drops the rate
   facet instead.
-- **Recipe:** always drops (any operation except `making`, and belt-mode
-  `:stack-size:`).
+- **Recipe:** always drops (any operation except `making`).
 - **Two rate, config, belt, or capacity facets:** `*` never merges them; those
   facets drop, and only item monomials multiply (`b1 * b2` is an item product of
   both belt items). With no item facet on either side the drop leaves `err`.
@@ -349,7 +347,8 @@ integer exponents when the base monomial carries units.
 - Exponent must be dimensionless; a unit-bearing exponent (`U`) drops the item
   facet and errors.
 - `^` is right-associative. Unary `-` binds looser: `-2 ^ 2` = `-(2^2)`.
-  `:stack-size:` binds tighter: `:stack-size: b1 ^ 2` = `(:stack-size: b1) ^ 2`.
+  `:stack-size:`/`:stacked-belt:` bind tighter: `:stacked-belt: b1 ^ 2` =
+  `(:stacked-belt: b1) ^ 2`.
 - A dimensionless scalar base and exponent use raw `f64::powf`; there are no
   `0^0`, negative-base, or negative-exponent special cases. A unit-bearing base
   requires an exact integer exponent. A unit-bearing exponent errors; other
@@ -421,9 +420,9 @@ beats the rule-5 error.
   multiplication itself is only rule 4 (one dimensionless scalar). Examples:
   `2 :iron-plate: 3 :iron-plate:`, `2 :iron-plate: 3 s`, and `2 s 3 s` all
   error; `2 :iron-plate: * 3 :iron-plate:` is explicit multiplication.
-- Precedence: juxtaposition binds tighter than `^` and `*`; `:stack-size:` binds
-  tighter than juxtaposition (`:stack-size: b1 :iron-plate:` =
-  `(:stack-size: b1) :iron-plate:`).
+- Precedence: juxtaposition binds tighter than `^` and `*`; `:stack-size:` and
+  `:stacked-belt:` bind tighter than juxtaposition (`:stacked-belt: b1
+  :iron-plate:` = `(:stacked-belt: b1) :iron-plate:`).
 - Plain item rates are item facets. They do not implicitly multiply with another
   unit-bearing value; `3 :iron-plate:/s * 2 s` needs `*`.
 
@@ -588,41 +587,54 @@ a quantity form.
 
 ## `:stack-size:` prefix (unary)
 
-Two modes; belt mode takes priority when the operand has a belt facet (§4.7).
+Requires a pure item quantity (§4.7). Extra facets are dropped; the result is
+item-only with the coefficient multiplied by the item's `stack_size`.
 
-| Operand facet set | Mode | Result |
-|---|---|---|
-| `I` pure item (one item unit at exponent 1) | item | `I` — coefficient × `stack_size` |
-| `I` fluid | item | `err!` — every fluid is an error |
-| `I` multi-unit, `second`, `joule`, `craft`, or empty | item | `err!` — not a pure item quantity |
-| `I+R` | item | `I` — recipe drops |
-| `I+M`, `I+M+R` | item | `I` — machine and recipe drop (needs the item's `stack_size`) |
-| `I+C` | item | `I` — config drops |
-| `I+T` (inserter) | item | `I` — rate drops |
-| `I+K` (container) | item | `I` — capacity drops |
-| `I+B+T`, `I+B+T+R` | belt | `I+B+T` / `I+B+T+R` — item × belt item's stack size; belt cap and all rate-term caps set to `Limit(level.clamp(1,4))`; recipe retained; any other facet dropped |
-| `B+T` (no item) | belt | `B+T` — no item facet is produced; belt and rate caps are set to the stacking level |
-| `R`, `M`, `P`, `C`, `T`, `K` alone | — | `err!` — no valid belt or item operand |
-| item token with no `stack_size` | item | `err!` |
+| Operand facet set | Result |
+|---|---|
+| `I` pure item (one item unit at exponent 1) | `I` — coefficient × `stack_size` |
+| `I+R` | `I` — recipe drops |
+| `I+M`, `I+M+R` | `I` — machine and recipe drop (needs the item's `stack_size`) |
+| `I+C` | `I` — config drops |
+| `I+T` (inserter), `I+K` (container), `I+B+T` (belt) | `I` — other facets drop; belt is not stacked |
+| `I` fluid | `err!` — every fluid is an error |
+| `I` multi-unit, `second`, `joule`, `craft`, or empty | `err!` — not a pure item quantity |
+| `R`, `M`, `P`, `C`, `T`, `K`, `B+T` alone | `err!` — no item facet |
+| item token with no `stack_size` | `err!` |
 
 ### Special conditions (`:stack-size:`)
 
-- Belt mode wins: `:stack-size: :transport-belt:` stacks the belt (item
-  coefficient 1→100) instead of applying item mode.
-- Belt mode sets **both** the belt cap and every rate-term cap; zero rate terms
-  do not remove the belt cap. A belt item with no stack size is an error.
-- Item mode returns an item-only value; the coefficient is multiplied by the
-  item's stack size. “Pure” describes the item units; extra facets are dropped.
-  Use `(:stack-size: 3 :iron-plate:)/s` for a rate.
+- The result is an item monomial; the belt facet, rate, and capacity never
+  survive. `:stack-size: :transport-belt:` is 100 transport-belts as an item.
 - The prefix takes exactly one `Primary` and stops at unary `-`, `^`, `making`,
   `with`, `in`, and arithmetic. It binds tighter than juxtaposition, `^`, and
   `*`: `:stack-size: 3 :iron-plate:/s` = `(:stack-size: 3 :iron-plate:)/s`,
-  `:stack-size: b1 :iron-plate:` = `(:stack-size: b1) :iron-plate:`,
   `:stack-size: b1 ^ 2` = `(:stack-size: b1) ^ 2`. `:stack-size: -b1` is an
   error; write `:stack-size: (-b1)`.
-- `:stack-size: (b1 :iron-plate:)` errors: the belt was applied before
-  stacking.
-- Stacking level is the research/setting value, never the display toggle.
+- `:stack-size: (b1 :iron-plate:)` errors: the belt application yields a rate,
+  not a pure item quantity.
+- Stacking level is irrelevant to this prefix; it is a pure item operation.
+
+## `:stacked-belt:` prefix (unary)
+
+Requires a belt facet and its rate (§4.8). Returns an isolated rate at
+`Limit(level.clamp(1,4))`; the amount is the belt's existing rate amount, which
+already includes its count. Item, belt, recipe, and every other facet drop.
+
+| Operand facet set | Result |
+|---|---|
+| `I+B+T`, `I+B+T+R` | `T` — cap set to the stacking level; item/belt/recipe drop |
+| `B+T` | `T` — cap set to the stacking level |
+| anything without a belt or rate | `err!` |
+
+### Special conditions (`:stacked-belt:`)
+
+- The result is isolated: `.rate` reads it, and applying it to a pure item via
+  juxtaposition yields an item rate.
+- A belt token's rate is unstacked by default (`Limit(1)`); the prefix produces
+  the stacked form without retaining the belt facet.
+- It takes one `Primary` and binds like `:stack-size:`; unary minus needs
+  parentheses.
 
 ## Unary `-`
 

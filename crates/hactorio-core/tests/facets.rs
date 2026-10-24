@@ -43,7 +43,7 @@ fn evaluates_new_syntax() {
     let registry = registry();
     let settings = Settings::default();
     let outputs = evaluate(
-        "3 :iron-plate:/s * (5 + 3) s\n:stack-size: :iron-plate:\n:stack-size: :transport-belt: :iron-plate:",
+        "3 :iron-plate:/s * (5 + 3) s\n:stack-size: :iron-plate:\n:stacked-belt: :transport-belt: :iron-plate:",
         &settings,
         &registry,
     );
@@ -57,9 +57,11 @@ fn evaluates_new_syntax() {
     };
     assert_eq!(stack.item.as_ref().unwrap().coef(), 100.0);
     let LineOutput::Value(belt) = &outputs[2].output else {
-        panic!("expected stacked belt");
+        panic!("expected stacked belt rate");
     };
-    assert_eq!(belt.item.as_ref().unwrap().coef(), 60.0);
+    let item = belt.item.as_ref().unwrap();
+    assert_eq!(item.coef(), 60.0);
+    assert_eq!(item.exponent(BaseUnit::Second), -1);
 }
 
 #[test]

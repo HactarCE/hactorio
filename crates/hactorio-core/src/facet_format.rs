@@ -3,7 +3,8 @@
 use hactorio_data::{EntryId, Registry, STACK_SIZE_GLYPH};
 
 use crate::facets::{
-    Cap, CapacityFacet, Config, Extent, FacetValue, MachineFacet, Monomial, Process, RateFacet,
+    Cap, CapacityFacet, ConfigFacet, Extent, FacetValue, MachineFacet, Monomial, ProcessFacet,
+    RateFacet,
 };
 use crate::format::{
     format_amount, format_energy, format_plain_number, format_power, format_value,
@@ -75,7 +76,7 @@ pub fn format_machine(machine: &MachineFacet, settings: &Settings, registry: &Re
     out
 }
 
-pub fn format_config(config: &Config, settings: &Settings, registry: &Registry) -> String {
+pub fn format_config(config: &ConfigFacet, settings: &Settings, registry: &Registry) -> String {
     let mut parts = Vec::new();
     for module in &config.modules {
         parts.push(format_counted(
@@ -190,7 +191,7 @@ fn format_cap(cap: Cap) -> String {
     }
 }
 
-pub fn format_process(process: &Process, settings: &Settings, registry: &Registry) -> String {
+pub fn format_process(process: &ProcessFacet, settings: &Settings, registry: &Registry) -> String {
     let mut parts = Vec::new();
     if let Some(extent) = process.extent {
         match extent {

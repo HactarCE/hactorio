@@ -71,12 +71,13 @@ mod tests {
     #[test]
     fn signal_tokens_round_trip_through_plaintext() {
         let registry = registry();
-        let plain = ".:clock: .:speed: .:lightning: .:stack-size:";
+        let plain = ".:clock: .:speed: .:lightning: .:stack-size: :stacked-belt: :iron-plate:";
         let glyphs = from_plaintext(plain, &registry);
         assert!(glyphs.contains(hactorio_data::signal_by_id("clock").unwrap().glyph));
         assert!(glyphs.contains(hactorio_data::signal_by_id("speed").unwrap().glyph));
         assert!(glyphs.contains(hactorio_data::signal_by_id("lightning").unwrap().glyph));
         assert!(glyphs.contains(hactorio_data::signal_by_id("stack-size").unwrap().glyph));
+        assert!(glyphs.contains(hactorio_data::signal_by_id("stacked-belt").unwrap().glyph));
         assert_eq!(to_plaintext(&glyphs, &registry), plain);
     }
 }

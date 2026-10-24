@@ -4,7 +4,7 @@ use hactorio_data::{EntryId, Registry};
 
 use crate::belt::belt_capacity;
 use crate::settings::{Settings, TimeUnit};
-use crate::value::{BaseUnit, Value};
+use crate::value::{BaseUnit, Value, is_zero};
 
 /// How the coefficient is scaled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -205,7 +205,7 @@ fn metric_scale(value: f64) -> (f64, &'static str) {
 }
 
 fn format_decimal(value: f64, max_decimals: usize) -> String {
-    if value == 0.0 {
+    if is_zero(value) {
         return "0".to_string();
     }
     let mut text = format!("{value:.max_decimals$}");

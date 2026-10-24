@@ -215,7 +215,7 @@ impl DetailContext<'_> {
                 ("quality", module.effect.quality),
             ];
             for (label, value) in effects {
-                if value != 0.0 {
+                if !hactorio_core::is_zero(value) {
                     rows.push((
                         label.to_string(),
                         signed_percent(value, self.settings, self.registry),
@@ -291,7 +291,7 @@ impl DetailContext<'_> {
                 ),
                 ("module slots".to_string(), machine.module_slots.to_string()),
             ];
-            if machine.base_productivity != 0.0 {
+            if !hactorio_core::is_zero(machine.base_productivity) {
                 rows.push((
                     "built-in productivity".to_string(),
                     percent(machine.base_productivity, self.settings, self.registry),

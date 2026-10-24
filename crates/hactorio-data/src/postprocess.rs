@@ -217,7 +217,7 @@ fn collect_productivity_researches(
                 continue;
             };
             let change = effect.get("change").and_then(Value::as_f64).unwrap_or(0.0);
-            if change == 0.0 {
+            if is_zero(change) {
                 continue;
             }
             effects.push(RecipeProductivity {
@@ -753,6 +753,10 @@ fn uint(proto: &Value, key: &str, default: u64) -> u64 {
 }
 
 /// Parses a Factorio energy or power string such as `375kW` or `2.5MW`.
+fn is_zero(value: f64) -> bool {
+    value.abs() < 1e-9
+}
+
 fn parse_watts(value: &str) -> Option<f64> {
     let split = value
         .find(|c: char| c.is_ascii_alphabetic())

@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use hactorio_data::{EntryId, RecipeId};
 use thiserror::Error;
 
-use crate::value::BaseUnit;
+use crate::value::{BaseUnit, is_integer, is_nonzero, is_zero};
 
 /// A stack cap: the item's own stack size, or an explicit limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -172,10 +172,11 @@ impl Monomial {
         if !is_exact_integer(power) {
             return Err(FacetError::FractionalExponent);
         }
-        let power_i64 = power as i64;
-        if !is_exact_integer(power) || (power_i64 as f64) != power {
+        let rounded = power.round();
+        if rounded < i64::MIN as f64 || rounded > i64::MAX as f64 {
             return Err(FacetError::ExponentOverflow);
         }
+        let power_i64 = rounded as i64;
         let mut units = BTreeMap::new();
         for (unit, unit_exponent) in &self.units {
             let result = unit_exponent
@@ -193,7 +194,7 @@ impl Monomial {
 }
 
 fn is_exact_integer(value: f64) -> bool {
-    value.is_finite() && value.fract() == 0.0
+    is_integer(value)
 }
 
 /// A stack-sized rate map. Item rates use stack caps; fluid rates use volume.
@@ -252,12 +253,12 @@ pub struct BeaconGroup {
 
 /// Per-machine modules and beacon groups.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Config {
+pub struct ConfigFacet {
     pub modules: Vec<ModuleCount>,
     pub beacons: Vec<BeaconGroup>,
 }
 
-impl Config {
+impl ConfigFacet {
     pub fn is_empty(&self) -> bool {
         self.modules.is_empty() && self.beacons.is_empty()
     }
@@ -278,7 +279,7 @@ impl Config {
         }
     }
 
-    pub fn merge_add(&mut self, other: &Config) -> Result<(), FacetError> {
+    pub fn merge_add(&mut self, other: &ConfigFacet) -> Result<(), FacetError> {
         let merged = merge_config(self, other)?;
         *self = merged;
         Ok(())
@@ -296,7 +297,7 @@ impl Config {
     }
 
     /// Partial config juxtaposition (§3.6).
-    pub fn juxtapose(&self, other: &Config) -> Result<ConfigJuxtaposition, FacetError> {
+    pub fn juxtapose(&self, other: &ConfigFacet) -> Result<ConfigJuxtaposition, FacetError> {
         if self.single_beacon_group().is_some() {
             if other.is_module_only() {
                 let mut out = self.clone();
@@ -345,16 +346,16 @@ fn module_key(modules: &[ModuleCount]) -> Vec<(EntryId, u32)> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigJuxtaposition {
     /// `Cb Cm`: attach RHS modules to the single beacon group; keep LHS item.
-    Attach(Config),
+    Attach(ConfigFacet),
     /// `Cm Cm`: combine module lists; both item facets are consumed.
-    Modules(Config),
+    Modules(ConfigFacet),
 }
 
 /// A machine plus its per-machine config and optional explicit count.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MachineFacet {
     pub machine: EntryId,
-    pub config: Config,
+    pub config: ConfigFacet,
     /// `None` means an uncounted machine specification.
     pub count: Option<f64>,
 }
@@ -376,7 +377,7 @@ impl Extent {
 
 /// A production process. Effects are baked; modules/beacons are not retained.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Process {
+pub struct ProcessFacet {
     /// `None` means an unsolved process template.
     pub extent: Option<Extent>,
     pub net: BTreeMap<BaseUnit, f64>,
@@ -391,8 +392,8 @@ pub struct FacetValue {
     pub item: Option<Monomial>,
     pub recipe: Option<RecipeId>,
     pub machine: Option<MachineFacet>,
-    pub process: Option<Process>,
-    pub config: Option<Config>,
+    pub process: Option<ProcessFacet>,
+    pub config: Option<ConfigFacet>,
     pub belt: Option<BeltFacet>,
     pub rate: Option<RateFacet>,
     pub capacity: Option<CapacityFacet>,
@@ -458,7 +459,7 @@ impl FacetValue {
             config: machine.config.clone(),
             count: machine.count.map(f64::abs),
         });
-        out.process = self.process.as_ref().map(|process| Process {
+        out.process = self.process.as_ref().map(|process| ProcessFacet {
             extent: process.extent.map(|extent| match extent {
                 Extent::Machines(value) => Extent::Machines(value.abs()),
                 Extent::MachineSeconds(value) => Extent::MachineSeconds(value.abs()),
@@ -579,7 +580,7 @@ impl FacetValue {
                 }),
                 None => Some(Extent::Machines(-1.0)),
             };
-            Process {
+            ProcessFacet {
                 extent,
                 net: negate_map(&process.net),
                 power_w: process.power_w.map(|value| -value),
@@ -824,7 +825,7 @@ impl FacetValue {
                 Some(Extent::MachineSeconds(value)) => Some(Extent::MachineSeconds(value * factor)),
                 None => Some(Extent::Machines(factor)),
             };
-            Process {
+            ProcessFacet {
                 extent,
                 net: process
                     .net
@@ -840,10 +841,10 @@ impl FacetValue {
             (Some(config), true) => {
                 let mut config = config.clone();
                 for module in &mut config.modules {
-                    module.count = (module.count as f64 * factor) as u32;
+                    module.count = (module.count as f64 * factor).round() as u32;
                 }
                 for group in &mut config.beacons {
-                    group.count = (group.count as f64 * factor) as u32;
+                    group.count = (group.count as f64 * factor).round() as u32;
                 }
                 config.canonicalize();
                 Some(config)
@@ -934,7 +935,7 @@ fn negate_capacity(capacity: &CapacityFacet) -> CapacityFacet {
 }
 
 fn is_nonnegative_integer(value: f64) -> bool {
-    value.is_finite() && value >= 0.0 && value.fract() == 0.0
+    value.is_finite() && (value > 0.0 || is_zero(value)) && is_integer(value)
 }
 
 fn rate_to_capacity(rate: &RateFacet, time: f64) -> FacetValue {
@@ -943,7 +944,7 @@ fn rate_to_capacity(rate: &RateFacet, time: f64) -> FacetValue {
             items
                 .iter()
                 .map(|(cap, amount)| (*cap, *amount * time))
-                .filter(|(_, amount)| *amount != 0.0)
+                .filter(|(_, amount)| is_nonzero(*amount))
                 .collect(),
         ),
         RateFacet::Fluid(value) => CapacityFacet::Fluid(value * time),
@@ -1089,7 +1090,7 @@ fn scale_rate(rate: &RateFacet, factor: f64) -> RateFacet {
             items
                 .iter()
                 .map(|(cap, amount)| (*cap, *amount * factor))
-                .filter(|(_, amount)| *amount != 0.0)
+                .filter(|(_, amount)| is_nonzero(*amount))
                 .collect(),
         ),
         RateFacet::Fluid(value) => RateFacet::Fluid(value * factor),
@@ -1102,7 +1103,7 @@ fn scale_capacity(capacity: &CapacityFacet, factor: f64) -> CapacityFacet {
             items
                 .iter()
                 .map(|(cap, amount)| (*cap, *amount * factor))
-                .filter(|(_, amount)| *amount != 0.0)
+                .filter(|(_, amount)| is_nonzero(*amount))
                 .collect(),
         ),
         CapacityFacet::Fluid(value) => CapacityFacet::Fluid(value * factor),
@@ -1115,7 +1116,7 @@ fn scale_capacity_to_rate(capacity: &CapacityFacet, factor: f64) -> FacetValue {
             items
                 .iter()
                 .map(|(cap, amount)| (*cap, *amount * factor))
-                .filter(|(_, amount)| *amount != 0.0)
+                .filter(|(_, amount)| is_nonzero(*amount))
                 .collect(),
         ),
         CapacityFacet::Fluid(value) => RateFacet::Fluid(value * factor),
@@ -1126,7 +1127,7 @@ fn scale_capacity_to_rate(capacity: &CapacityFacet, factor: f64) -> FacetValue {
     }
 }
 
-fn scale_process_time(process: &Process, time: f64) -> Result<FacetValue, FacetError> {
+fn scale_process_time(process: &ProcessFacet, time: f64) -> Result<FacetValue, FacetError> {
     let (extent, net) = match process.extent {
         Some(Extent::Machines(count)) => (
             Extent::MachineSeconds(count * time),
@@ -1148,7 +1149,7 @@ fn scale_process_time(process: &Process, time: f64) -> Result<FacetValue, FacetE
     };
     let energy_j = process.power_w.map(|power| power * time);
     Ok(FacetValue {
-        process: Some(Process {
+        process: Some(ProcessFacet {
             extent: Some(extent),
             net,
             power_w: None,
@@ -1159,7 +1160,7 @@ fn scale_process_time(process: &Process, time: f64) -> Result<FacetValue, FacetE
     })
 }
 
-fn divide_process_time(process: &Process, time: f64) -> Result<FacetValue, FacetError> {
+fn divide_process_time(process: &ProcessFacet, time: f64) -> Result<FacetValue, FacetError> {
     let Extent::MachineSeconds(tau) = process.extent.ok_or(FacetError::ProcessTimeOperand)? else {
         return Err(FacetError::ProcessTimeOperand);
     };
@@ -1170,7 +1171,7 @@ fn divide_process_time(process: &Process, time: f64) -> Result<FacetValue, Facet
         .collect();
     let power_w = process.energy_j.map(|energy| energy / time);
     Ok(FacetValue {
-        process: Some(Process {
+        process: Some(ProcessFacet {
             extent: Some(Extent::Machines(tau / time)),
             net,
             power_w,
@@ -1181,7 +1182,11 @@ fn divide_process_time(process: &Process, time: f64) -> Result<FacetValue, Facet
     })
 }
 
-fn combine_process(a: &Process, b: &Process, subtract: bool) -> Result<Process, FacetError> {
+fn combine_process(
+    a: &ProcessFacet,
+    b: &ProcessFacet,
+    subtract: bool,
+) -> Result<ProcessFacet, FacetError> {
     let (a_extent, b_extent) = match (a.extent, b.extent) {
         (Some(a_extent), Some(b_extent)) => (a_extent, b_extent),
         _ => return Err(FacetError::ProcessExtentMismatch),
@@ -1212,7 +1217,7 @@ fn combine_process(a: &Process, b: &Process, subtract: bool) -> Result<Process, 
         a.recipes.union(&b.recipes).copied().collect()
     };
 
-    Ok(Process {
+    Ok(ProcessFacet {
         extent: Some(extent),
         net: combine_amounts(&a.net, &b.net, subtract),
         power_w: combine_option(a.power_w, b.power_w, subtract)?,
@@ -1247,7 +1252,7 @@ fn combine_amounts(
             *entry += amount;
         }
     }
-    out.retain(|_, amount| *amount != 0.0);
+    out.retain(|_, amount| is_nonzero(*amount));
     out
 }
 
@@ -1270,7 +1275,7 @@ fn merge_modules(target: &mut Vec<ModuleCount>, source: &[ModuleCount]) -> Resul
     Ok(())
 }
 
-fn merge_config(a: &Config, b: &Config) -> Result<Config, FacetError> {
+fn merge_config(a: &ConfigFacet, b: &ConfigFacet) -> Result<ConfigFacet, FacetError> {
     let mut out = a.clone();
     out.canonicalize();
     let mut b = b.clone();
@@ -1352,7 +1357,7 @@ fn combine_terms(
             *entry += amount;
         }
     }
-    out.retain(|_, amount| *amount != 0.0);
+    out.retain(|_, amount| is_nonzero(*amount));
     out
 }
 
@@ -1378,7 +1383,7 @@ mod tests {
     #[test]
     fn process_cannot_coexist_with_other_facets() {
         let mut value = FacetValue::empty();
-        value.process = Some(Process {
+        value.process = Some(ProcessFacet {
             extent: None,
             net: BTreeMap::new(),
             power_w: None,
@@ -1431,7 +1436,7 @@ mod tests {
         let module = EntryId::from_index(2);
         let beacon = EntryId::from_index(3);
         let mut a = FacetValue::empty();
-        a.config = Some(Config {
+        a.config = Some(ConfigFacet {
             modules: vec![ModuleCount { module, count: 2 }],
             beacons: vec![BeaconGroup {
                 beacon,
@@ -1440,7 +1445,7 @@ mod tests {
             }],
         });
         let mut b = FacetValue::empty();
-        b.config = Some(Config {
+        b.config = Some(ConfigFacet {
             modules: vec![ModuleCount { module, count: 3 }],
             beacons: vec![BeaconGroup {
                 beacon,
@@ -1471,7 +1476,7 @@ mod tests {
     #[test]
     fn process_addition_unions_recipes() {
         let mut a = FacetValue::empty();
-        a.process = Some(Process {
+        a.process = Some(ProcessFacet {
             extent: Some(Extent::Machines(1.0)),
             net: BTreeMap::from([(BaseUnit::Second, -1.0)]),
             power_w: Some(10.0),
@@ -1479,7 +1484,7 @@ mod tests {
             recipes: BTreeSet::from([RecipeId::from_index(0)]),
         });
         let mut b = FacetValue::empty();
-        b.process = Some(Process {
+        b.process = Some(ProcessFacet {
             extent: Some(Extent::Machines(2.0)),
             net: BTreeMap::from([(BaseUnit::Second, -2.0)]),
             power_w: Some(20.0),
@@ -1495,7 +1500,7 @@ mod tests {
     #[test]
     fn negation_solves_an_unsolved_process() {
         let mut value = FacetValue::empty();
-        value.process = Some(Process {
+        value.process = Some(ProcessFacet {
             extent: None,
             net: BTreeMap::from([(BaseUnit::Second, 1.0)]),
             power_w: Some(5.0),
@@ -1513,7 +1518,7 @@ mod tests {
         let item = EntryId::from_index(0);
         let mut value = FacetValue::item(Monomial::new(2.0, [(BaseUnit::Item(item), 1)]));
         value.recipe = Some(RecipeId::from_index(0));
-        value.config = Some(Config::default());
+        value.config = Some(ConfigFacet::default());
         let result = value.neg().unwrap();
         assert_eq!(result.item.unwrap().coef(), -2.0);
         assert!(result.recipe.is_none());
@@ -1526,7 +1531,7 @@ mod tests {
         let mut machine = FacetValue::empty();
         machine.machine = Some(MachineFacet {
             machine: item,
-            config: Config::default(),
+            config: ConfigFacet::default(),
             count: None,
         });
         let result = FacetValue::scalar(2.0)
@@ -1544,7 +1549,7 @@ mod tests {
     fn item_multiplication_drops_non_item_facets() {
         let item = EntryId::from_index(0);
         let mut a = FacetValue::item(Monomial::new(2.0, [(BaseUnit::Item(item), 1)]));
-        a.config = Some(Config::default());
+        a.config = Some(ConfigFacet::default());
         let b = FacetValue::item(Monomial::new(3.0, [(BaseUnit::Item(item), 1)]));
         let result = a.mul(&b).unwrap();
         assert_eq!(result.item.unwrap().coef(), 6.0);
@@ -1555,7 +1560,7 @@ mod tests {
     fn fractional_scaling_drops_config() {
         let module = EntryId::from_index(0);
         let mut value = FacetValue::item(Monomial::scalar(1.0));
-        value.config = Some(Config {
+        value.config = Some(ConfigFacet {
             modules: vec![ModuleCount { module, count: 2 }],
             beacons: vec![],
         });
@@ -1567,7 +1572,7 @@ mod tests {
     #[test]
     fn process_times_time_becomes_machine_seconds() {
         let mut value = FacetValue::empty();
-        value.process = Some(Process {
+        value.process = Some(ProcessFacet {
             extent: Some(Extent::Machines(2.0)),
             net: BTreeMap::from([(BaseUnit::Joule, 4.0)]),
             power_w: Some(10.0),
@@ -1585,7 +1590,7 @@ mod tests {
     #[test]
     fn machine_seconds_over_time_becomes_machines() {
         let mut value = FacetValue::empty();
-        value.process = Some(Process {
+        value.process = Some(ProcessFacet {
             extent: Some(Extent::MachineSeconds(6.0)),
             net: BTreeMap::from([(BaseUnit::Joule, 12.0)]),
             power_w: None,
@@ -1614,7 +1619,7 @@ mod tests {
     fn config_drops_under_division() {
         let module = EntryId::from_index(0);
         let mut value = FacetValue::item(Monomial::new(4.0, [(BaseUnit::Item(module), 1)]));
-        value.config = Some(Config {
+        value.config = Some(ConfigFacet {
             modules: vec![ModuleCount { module, count: 2 }],
             beacons: vec![],
         });
@@ -1623,7 +1628,7 @@ mod tests {
         assert!(result.config.is_none());
 
         let mut config_only = FacetValue::empty();
-        config_only.config = Some(Config::default());
+        config_only.config = Some(ConfigFacet::default());
         assert_eq!(
             config_only.div(&FacetValue::scalar(2.0)),
             Err(FacetError::NoFacetSurvives)
@@ -1656,11 +1661,11 @@ mod tests {
     fn config_juxtaposition_is_partial() {
         let module = EntryId::from_index(2);
         let beacon = EntryId::from_index(3);
-        let cm = Config {
+        let cm = ConfigFacet {
             modules: vec![ModuleCount { module, count: 2 }],
             beacons: vec![],
         };
-        let cm2 = Config {
+        let cm2 = ConfigFacet {
             modules: vec![ModuleCount { module, count: 3 }],
             beacons: vec![],
         };
@@ -1669,7 +1674,7 @@ mod tests {
         };
         assert_eq!(merged.modules[0].count, 5);
 
-        let cb = Config {
+        let cb = ConfigFacet {
             modules: vec![],
             beacons: vec![BeaconGroup {
                 beacon,
@@ -1691,7 +1696,7 @@ mod tests {
         let module = EntryId::from_index(2);
         let beacon = EntryId::from_index(3);
         let mut a = FacetValue::empty();
-        a.config = Some(Config {
+        a.config = Some(ConfigFacet {
             modules: vec![],
             beacons: vec![BeaconGroup {
                 beacon,
@@ -1700,7 +1705,7 @@ mod tests {
             }],
         });
         let mut b = FacetValue::empty();
-        b.config = Some(Config {
+        b.config = Some(ConfigFacet {
             modules: vec![ModuleCount { module, count: 4 }],
             beacons: vec![],
         });
@@ -1730,6 +1735,17 @@ mod tests {
         let applied = result.item.unwrap();
         assert_eq!(applied.coef(), 80.0);
         assert_eq!(applied.exponent(BaseUnit::Second), 0);
+    }
+
+    #[test]
+    fn approximate_zero_and_integer_rounding() {
+        assert!(is_zero(1e-10));
+        assert!(!is_zero(1e-8));
+        assert!(is_integer(0.9999999999));
+        let item = EntryId::from_index(0);
+        let unitful = Monomial::new(2.0, [(BaseUnit::Item(item), 1)]);
+        let squared = unitful.pow(&Monomial::scalar(1.9999999999)).unwrap();
+        assert_eq!(squared.exponent(BaseUnit::Item(item)), 2);
     }
 
     #[test]
@@ -1798,12 +1814,12 @@ mod tests {
         let module = EntryId::from_index(2);
         let beacon = EntryId::from_index(3);
         let mut cm = FacetValue::empty();
-        cm.config = Some(Config {
+        cm.config = Some(ConfigFacet {
             modules: vec![ModuleCount { module, count: 2 }],
             beacons: vec![],
         });
         let mut cb = FacetValue::item(Monomial::scalar(1.0));
-        cb.config = Some(Config {
+        cb.config = Some(ConfigFacet {
             modules: vec![],
             beacons: vec![BeaconGroup {
                 beacon,
@@ -1830,7 +1846,7 @@ mod tests {
         let a = EntryId::from_index(0);
         let b = EntryId::from_index(1);
         let mut left = FacetValue::empty();
-        left.config = Some(Config {
+        left.config = Some(ConfigFacet {
             modules: vec![],
             beacons: vec![BeaconGroup {
                 beacon: a,
@@ -1839,7 +1855,7 @@ mod tests {
             }],
         });
         let mut right = FacetValue::empty();
-        right.config = Some(Config {
+        right.config = Some(ConfigFacet {
             modules: vec![],
             beacons: vec![BeaconGroup {
                 beacon: b,
@@ -1854,7 +1870,7 @@ mod tests {
     fn config_canonicalization_sorts_and_elides_zero() {
         let a = EntryId::from_index(1);
         let b = EntryId::from_index(0);
-        let mut config = Config {
+        let mut config = ConfigFacet {
             modules: vec![
                 ModuleCount {
                     module: a,

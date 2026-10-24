@@ -5,9 +5,9 @@ use std::collections::BTreeMap;
 
 use hactorio_data::{EntryId, Recipe, RecipeId, Registry};
 
-use crate::facets::{BeaconGroup, Config, ModuleCount};
+use crate::facets::{BeaconGroup, ConfigFacet, ModuleCount};
 use crate::settings::Settings;
-use crate::value::BaseUnit;
+use crate::value::{BaseUnit, is_nonzero};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Modifiers {
@@ -15,14 +15,26 @@ pub struct Modifiers {
     pub productivity: f64,
     pub power_w: f64,
     pub pollution_per_minute: f64,
+    /// `1 + Σ consumption effects`, before the game's 0.2 floor.
     pub consumption_multiplier: f64,
+    /// Σ speed effects from machine and beacon modules.
+    pub speed_effect: f64,
+    /// Σ productivity effects from machine and beacon modules.
+    pub productivity_effect: f64,
+}
+
+impl Modifiers {
+    /// The game clamps the consumption multiplier to at least 0.2.
+    pub fn clamped_consumption_multiplier(&self) -> f64 {
+        self.consumption_multiplier.max(0.2)
+    }
 }
 
 /// Validates module slots, allowed effects, and recipe compatibility.
 pub fn validate(
     registry: &Registry,
     machine: EntryId,
-    config: &Config,
+    config: &ConfigFacet,
     recipe: Option<&Recipe>,
 ) -> Result<(), String> {
     let entry = registry.entry_by_index(machine);
@@ -65,7 +77,7 @@ pub fn validate(
 ///
 /// Called when a beacon group is constructed (config juxtaposition) and again
 /// by `with`/`making`/`in`.
-pub fn validate_beacon_groups(registry: &Registry, config: &Config) -> Result<(), String> {
+pub fn validate_beacon_groups(registry: &Registry, config: &ConfigFacet) -> Result<(), String> {
     if config.has_multiple_beacon_types() {
         return Err("a config may contain only one type of beacon".into());
     }
@@ -109,7 +121,7 @@ fn validate_module(
     Ok(())
 }
 
-pub fn config_has_productivity(registry: &Registry, config: &Config) -> bool {
+pub fn config_has_productivity(registry: &Registry, config: &ConfigFacet) -> bool {
     config
         .modules
         .iter()
@@ -125,7 +137,7 @@ pub fn config_has_productivity(registry: &Registry, config: &Config) -> bool {
 pub fn modifiers(
     registry: &Registry,
     machine: EntryId,
-    config: &Config,
+    config: &ConfigFacet,
     recipe: Option<&Recipe>,
     settings: &Settings,
 ) -> Modifiers {
@@ -136,6 +148,8 @@ pub fn modifiers(
             power_w: 0.0,
             pollution_per_minute: 0.0,
             consumption_multiplier: 1.0,
+            speed_effect: 0.0,
+            productivity_effect: 0.0,
         };
     };
     let allowed = data.allowed_effects;
@@ -229,22 +243,28 @@ pub fn modifiers(
         0.0
     };
 
-    Modifiers {
+    let consumption_multiplier = 1.0 + consumption_sum;
+    let mut modifiers = Modifiers {
         speed: data.speed * (1.0 + speed_sum),
         productivity: data.base_productivity
             + module_productivity
             + recipe.map_or(0.0, |recipe| {
                 research_productivity(registry, recipe, settings)
             }),
-        power_w: data.energy_usage_w * (1.0 + consumption_sum),
-        pollution_per_minute: data.pollution_per_minute
-            * (1.0 + consumption_sum)
-            * (1.0 + pollution_sum),
-        consumption_multiplier: 1.0 + consumption_sum,
-    }
+        power_w: 0.0,
+        pollution_per_minute: 0.0,
+        consumption_multiplier,
+        speed_effect: speed_sum,
+        productivity_effect: module_productivity,
+    };
+    let clamped_consumption = modifiers.clamped_consumption_multiplier();
+    modifiers.power_w = data.energy_usage_w * clamped_consumption;
+    modifiers.pollution_per_minute =
+        data.pollution_per_minute * clamped_consumption * (1.0 + pollution_sum);
+    modifiers
 }
 
-fn beacon_data_profile_empty(registry: &Registry, config: &Config) -> bool {
+fn beacon_data_profile_empty(registry: &Registry, config: &ConfigFacet) -> bool {
     config.beacons.iter().all(|group| {
         registry
             .entry_by_index(group.beacon)
@@ -295,7 +315,7 @@ fn add_module_effects(
 pub fn coefficients(
     registry: &Registry,
     machine: EntryId,
-    config: &Config,
+    config: &ConfigFacet,
     recipe: &Recipe,
     settings: &Settings,
 ) -> Result<BTreeMap<BaseUnit, f64>, String> {
@@ -314,14 +334,14 @@ pub fn coefficients(
         *net.entry(unit).or_insert(0.0) -= crafts_per_second * ingredient.amount;
     }
     *net.entry(BaseUnit::Craft).or_insert(0.0) += crafts_per_second;
-    net.retain(|_, amount| *amount != 0.0);
+    net.retain(|_, amount| is_nonzero(*amount));
     Ok(net)
 }
 
 pub fn resolve_recipe(
     registry: &Registry,
     machine: EntryId,
-    config: &Config,
+    config: &ConfigFacet,
     unit: BaseUnit,
 ) -> Result<RecipeId, String> {
     let entry = registry.entry_by_index(machine);
@@ -342,6 +362,7 @@ pub fn resolve_recipe(
         .filter(|(_, recipe)| {
             recipe.products.iter().any(|product| {
                 product.amount > 0.0
+                    && is_nonzero(product.amount)
                     && unit_of(registry, product.kind, &product.name).ok() == Some(unit)
             })
         })
@@ -420,5 +441,41 @@ fn category_allowed(category: &str, allowed: hactorio_data::AllowedEffects) -> b
         "efficiency" => allowed.consumption,
         "quality" => allowed.quality,
         _ => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::facets::ConfigFacet;
+    use hactorio_data::{Locale, postprocess};
+
+    #[test]
+    fn consumption_is_clamped_at_twenty_percent() {
+        const DUMP: &str = r#"{
+          "item": {
+            "assembling-machine": {"type": "item", "name": "assembling-machine", "stack_size": 50},
+            "efficiency-module": {"type": "module", "name": "efficiency-module", "category": "efficiency", "tier": 1, "stack_size": 50, "effect": {"consumption": -1.0}}
+          },
+          "fluid": {},
+          "module": {
+            "efficiency-module": {"type": "module", "name": "efficiency-module", "category": "efficiency", "tier": 1, "stack_size": 50, "effect": {"consumption": -1.0}}
+          },
+          "assembling-machine": {
+            "assembling-machine": {"type": "assembling-machine", "name": "assembling-machine", "crafting_categories": ["crafting"], "crafting_speed": 1.0, "module_slots": 1, "allowed_effects": ["consumption"], "energy_usage": "100kW", "energy_source": {"emissions_per_minute": {"pollution": 10}}}
+          }
+        }"#;
+        let registry = postprocess(DUMP, &Locale::empty()).unwrap();
+        let machine = registry.entry_id("assembling-machine").unwrap();
+        let module = registry.entry_id("efficiency-module").unwrap();
+        let config = ConfigFacet {
+            modules: vec![ModuleCount { module, count: 1 }],
+            beacons: Vec::new(),
+        };
+        let modifiers = modifiers(&registry, machine, &config, None, &Settings::default());
+        assert_eq!(modifiers.consumption_multiplier, 0.0);
+        assert_eq!(modifiers.clamped_consumption_multiplier(), 0.2);
+        assert_eq!(modifiers.power_w, 20_000.0);
+        assert_eq!(modifiers.pollution_per_minute, 2.0);
     }
 }

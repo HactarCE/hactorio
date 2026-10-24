@@ -23,13 +23,18 @@ pub const VARIABLE_GLYPH: char = '\u{F8FE}';
 
 /// Fixed signal table. Signals are not namespace entries.
 ///
-/// `F8F0..F8FA` are reserved, and namespace entries stop at `F8EF`, so signal
+/// `F8F0..F8F9` are reserved, and namespace entries stop at `F8EF`, so signal
 /// lookup always precedes entry lookup.
-pub const SIGNALS: [SignalIcon; 4] = [
+pub const SIGNALS: [SignalIcon; 5] = [
     SignalIcon {
         id: "stack-size",
         glyph: STACK_SIZE_GLYPH,
         icon: STACK_SIZE_ICON,
+    },
+    SignalIcon {
+        id: "stacked-belt",
+        glyph: '\u{F8FA}',
+        icon: "__space-age__/graphics/technology/transport-belt-capacity.png",
     },
     SignalIcon {
         id: "clock",

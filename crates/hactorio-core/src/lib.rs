@@ -25,4 +25,4 @@ pub use format::{format_amount, format_energy, format_power, format_value};
 pub use settings::{Settings, TimeUnit};
 pub use syntax::{BinaryOp, Span};
 pub use text::{from_plaintext, to_plaintext};
-pub use value::{BaseUnit, Value};
+pub use value::{APPROX_ZERO, BaseUnit, Value, is_integer, is_nonzero, is_zero};

@@ -6,11 +6,11 @@ use hactorio_data::{EntryId, Registry};
 use thiserror::Error;
 
 use crate::facets::{
-    BeaconGroup, BeltFacet, Cap, CapacityFacet, Config, FacetValue, MachineFacet, ModuleCount,
+    BeaconGroup, BeltFacet, Cap, CapacityFacet, ConfigFacet, FacetValue, MachineFacet, ModuleCount,
     Monomial, RateFacet,
 };
 use crate::settings::Settings;
-use crate::value::BaseUnit;
+use crate::value::{BaseUnit, is_zero};
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum TokenError {
@@ -41,13 +41,13 @@ pub fn token_value(
         let _ = machine;
         value.machine = Some(MachineFacet {
             machine: entry_id,
-            config: Config::default(),
+            config: ConfigFacet::default(),
             count: None,
         });
     }
 
     if entry.module.is_some() {
-        value.config = Some(Config {
+        value.config = Some(ConfigFacet {
             modules: vec![ModuleCount {
                 module: entry_id,
                 count: 1,
@@ -57,7 +57,7 @@ pub fn token_value(
     }
 
     if entry.beacon.is_some() {
-        value.config = Some(Config {
+        value.config = Some(ConfigFacet {
             modules: Vec::new(),
             beacons: vec![BeaconGroup {
                 beacon: entry_id,
@@ -90,7 +90,8 @@ pub fn token_value(
         }
 
         if let Some(container) = item.container {
-            value.capacity = if container.fluid_capacity > 0.0 {
+            value.capacity = if container.fluid_capacity > 0.0 && !is_zero(container.fluid_capacity)
+            {
                 Some(CapacityFacet::Fluid(container.fluid_capacity))
             } else if container.slots > 0 {
                 Some(CapacityFacet::Items(BTreeMap::from([(
@@ -135,12 +136,12 @@ fn inserter_capacity(
     } else {
         1
     };
-    base + bonus as u32
+    base + bonus.round() as u32
 }
 
 fn inserter_cycles(inserter: hactorio_data::Inserter) -> Option<f64> {
     let rotation_speed = inserter.rotation_speed;
-    if !(rotation_speed > 0.0 && rotation_speed < 0.5) {
+    if !(rotation_speed > 0.0 && !is_zero(rotation_speed) && rotation_speed < 0.5) {
         return None;
     }
     let ticks_half = (0.5 / rotation_speed).ceil() - 1.0;

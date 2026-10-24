@@ -9,11 +9,11 @@ use crate::facet_machine;
 use crate::facet_parser::{Expr, ExprKind, Property, Selector, Signal, Statement, StatementKind};
 use crate::facet_token::token_value;
 use crate::facets::{
-    Cap, CapacityFacet, Extent, FacetError, FacetValue, Monomial, Process, RateFacet,
+    Cap, CapacityFacet, Extent, FacetError, FacetValue, Monomial, ProcessFacet, RateFacet,
 };
 use crate::settings::Settings;
 use crate::syntax::Span;
-use crate::value::BaseUnit;
+use crate::value::{BaseUnit, is_nonzero, is_zero};
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("{message}")]
@@ -122,6 +122,10 @@ pub fn eval_expr(
         ExprKind::StackSize(inner) => {
             let value = eval_expr(inner, variables, registry, settings)?;
             stack_size(value, span, registry, settings)
+        }
+        ExprKind::StackedBelt(inner) => {
+            let value = eval_expr(inner, variables, registry, settings)?;
+            stacked_belt(value, span, settings)
         }
         ExprKind::Property { value, selector } => {
             let value = eval_expr(value, variables, registry, settings)?;
@@ -400,7 +404,7 @@ fn making(
         ),
     };
     Ok(FacetValue {
-        process: Some(Process {
+        process: Some(ProcessFacet {
             extent,
             net,
             power_w,
@@ -519,7 +523,7 @@ fn in_expression(
     } else {
         net.get(&quantity.unit).copied().unwrap_or(0.0)
     };
-    if denominator == 0.0 {
+    if is_zero(denominator) {
         return Err(EvalError::new(
             span,
             "selected unit has zero net coefficient",
@@ -550,7 +554,7 @@ fn in_expression(
         )
     };
     Ok(FacetValue {
-        process: Some(Process {
+        process: Some(ProcessFacet {
             extent,
             net,
             power_w,
@@ -565,58 +569,16 @@ fn stack_size(
     value: FacetValue,
     span: Span,
     registry: &Registry,
-    settings: &Settings,
+    _settings: &Settings,
 ) -> Result<FacetValue, EvalError> {
-    let level = settings.belt_stacking.clamp(1, 4);
-    let cap = Cap::Limit(u32::from(level));
-    if let Some(belt) = value.belt {
-        let item = match &value.item {
-            Some(item) => {
-                let (unit, exponent) = item
-                    .units()
-                    .iter()
-                    .next()
-                    .ok_or_else(|| EvalError::new(span, "belt item has no unit"))?;
-                if *exponent != 1 || item.units().len() != 1 {
-                    return Err(EvalError::new(span, "belt item must be a pure item"));
-                }
-                let BaseUnit::Item(id) = unit else {
-                    return Err(EvalError::new(span, "belt item must be an item"));
-                };
-                let stack = registry
-                    .entry_by_index(*id)
-                    .item
-                    .as_ref()
-                    .map(|item| item.stack_size)
-                    .ok_or_else(|| EvalError::new(span, "belt item has no stack size"))?;
-                Some(Monomial::new(
-                    item.coef() * f64::from(stack),
-                    [(BaseUnit::Item(*id), 1)],
-                ))
-            }
-            None => None,
-        };
-        let rate = value.rate.map(|rate| cap_rate(rate, cap));
-        return Ok(FacetValue {
-            item,
-            recipe: value.recipe,
-            belt: Some(crate::facets::BeltFacet {
-                count: belt.count,
-                cap,
-            }),
-            rate,
-            ..FacetValue::empty()
-        });
-    }
-
     let item = value
         .item
-        .ok_or_else(|| EvalError::new(span, "`:stack-size:` needs an item or belt"))?;
+        .ok_or_else(|| EvalError::new(span, "`:stack-size:` needs an item"))?;
     let (unit, exponent) = item
         .units()
         .iter()
         .next()
-        .ok_or_else(|| EvalError::new(span, "`:stack-size:` needs an item unit"))?;
+        .ok_or_else(|| EvalError::new(span, "`:stack-size:` needs an item"))?;
     if *exponent != 1 || item.units().len() != 1 {
         return Err(EvalError::new(span, "`:stack-size:` needs a pure item"));
     }
@@ -635,12 +597,31 @@ fn stack_size(
     )))
 }
 
+fn stacked_belt(
+    value: FacetValue,
+    span: Span,
+    settings: &Settings,
+) -> Result<FacetValue, EvalError> {
+    if value.belt.is_none() {
+        return Err(EvalError::new(span, "`:stacked-belt:` needs a belt"));
+    }
+    let rate = value
+        .rate
+        .ok_or_else(|| EvalError::new(span, "`:stacked-belt:` needs a belt rate"))?;
+    let level = settings.belt_stacking.clamp(1, 4);
+    let cap = Cap::Limit(u32::from(level));
+    Ok(FacetValue {
+        rate: Some(cap_rate(rate, cap)),
+        ..FacetValue::empty()
+    })
+}
+
 fn cap_rate(rate: RateFacet, cap: Cap) -> RateFacet {
     match rate {
         RateFacet::Items(items) => RateFacet::Items(
             [(cap, items.values().copied().sum::<f64>())]
                 .into_iter()
-                .filter(|(_, amount)| *amount != 0.0)
+                .filter(|(_, amount)| is_nonzero(*amount))
                 .collect(),
         ),
         RateFacet::Fluid(value) => RateFacet::Fluid(value),
@@ -660,6 +641,12 @@ fn property(
         Selector::Signal(Signal::Speed) => Property::Speed,
         Selector::Signal(Signal::Lightning) => Property::Electric,
         Selector::Signal(Signal::StackSize) => Property::StackSize,
+        Selector::Signal(Signal::StackedBelt) => {
+            return Err(EvalError::new(
+                span,
+                "`:stacked-belt:` is a prefix, not a property",
+            ));
+        }
         Selector::Token(_) => {
             return unit_selector(value, selector, span, registry);
         }
@@ -1176,7 +1163,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluates_stack_size() {
+    fn evaluates_stack_size_and_stacked_belt() {
         assert_eq!(
             eval(":stack-size: :iron-plate:")
                 .unwrap()
@@ -1186,12 +1173,38 @@ mod tests {
             100.0
         );
         let value = eval(":stack-size: :transport-belt:").unwrap();
-        assert_eq!(value.item.unwrap().coef(), 100.0);
-        assert_eq!(value.belt.unwrap().cap, Cap::Limit(4));
-        let value = eval(":stack-size: :transport-belt: :iron-plate:").unwrap();
+        let item = value.item.unwrap();
+        assert_eq!(item.coef(), 100.0);
+        assert!(value.belt.is_none());
+        assert!(value.rate.is_none());
+        assert!(eval(":stack-size: :transport-belt: :iron-plate:").is_err());
+
+        let value = eval(":stacked-belt: :transport-belt:").unwrap();
+        assert!(value.item.is_none());
+        assert!(value.belt.is_none());
+        assert_eq!(
+            value.rate,
+            Some(RateFacet::Items(BTreeMap::from([(Cap::Limit(4), 15.0)])))
+        );
+
+        let value = eval(":stacked-belt: :transport-belt: :iron-plate:").unwrap();
         let item = value.item.unwrap();
         assert_eq!(item.coef(), 60.0);
         assert_eq!(item.exponent(BaseUnit::Second), -1);
+
+        let value = eval("2 :stacked-belt: :transport-belt:").unwrap();
+        assert_eq!(
+            value.rate,
+            Some(RateFacet::Items(BTreeMap::from([(Cap::Limit(4), 30.0)])))
+        );
+
+        let value = eval(":stacked-belt: (:transport-belt: + :transport-belt:)").unwrap();
+        assert_eq!(
+            value.rate,
+            Some(RateFacet::Items(BTreeMap::from([(Cap::Limit(4), 30.0)])))
+        );
+        assert!(eval(":stacked-belt: :iron-plate:").is_err());
+        assert!(eval(":stacked-belt: :transport-belt:.rate").is_err());
     }
 
     #[test]

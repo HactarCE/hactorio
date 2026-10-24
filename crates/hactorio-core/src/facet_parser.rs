@@ -14,6 +14,7 @@ use crate::syntax::{BinaryOp, Span};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Signal {
     StackSize,
+    StackedBelt,
     Clock,
     Speed,
     Lightning,
@@ -91,6 +92,7 @@ pub enum ExprKind {
         machine: Box<Expr>,
     },
     StackSize(Box<Expr>),
+    StackedBelt(Box<Expr>),
     Property {
         value: Box<Expr>,
         selector: Selector,
@@ -196,6 +198,7 @@ impl TokenKind {
             TokenKind::Number(_)
                 | TokenKind::Prototype(_)
                 | TokenKind::Signal(Signal::StackSize)
+                | TokenKind::Signal(Signal::StackedBelt)
                 | TokenKind::Ident(_)
                 | TokenKind::LParen
                 | TokenKind::Time(_)
@@ -450,6 +453,19 @@ impl Parser<'_> {
                 let inner = self.parse_primary(false)?;
                 Expr {
                     kind: ExprKind::StackSize(Box::new(inner)),
+                    span: Span::new(span.start, self.last_end()),
+                }
+            }
+            TokenKind::Signal(Signal::StackedBelt) => {
+                if matches!(self.peek_kind(), Some(TokenKind::Minus)) {
+                    return Err(ParseError::new(
+                        span,
+                        "`:stacked-belt:` cannot take a unary minus; use parentheses",
+                    ));
+                }
+                let inner = self.parse_primary(false)?;
+                Expr {
+                    kind: ExprKind::StackedBelt(Box::new(inner)),
                     span: Span::new(span.start, self.last_end()),
                 }
             }
@@ -741,6 +757,7 @@ fn lex(line: &str, registry: &Registry) -> Result<Vec<Token>, ParseError> {
                 if let Some(signal) = hactorio_data::signal_by_glyph(ch) {
                     let kind = match signal.id {
                         "stack-size" => Signal::StackSize,
+                        "stacked-belt" => Signal::StackedBelt,
                         "clock" => Signal::Clock,
                         "speed" => Signal::Speed,
                         "lightning" => Signal::Lightning,
@@ -820,6 +837,7 @@ fn lex_prototype_or_signal(
 fn signal(id: &str) -> Option<Signal> {
     Some(match id {
         "stack-size" => Signal::StackSize,
+        "stacked-belt" => Signal::StackedBelt,
         "clock" => Signal::Clock,
         "speed" => Signal::Speed,
         "lightning" => Signal::Lightning,
@@ -865,11 +883,38 @@ fn lex_number(line: &str, index: &mut usize) -> Result<f64, ParseError> {
             'k' => Some(1e3),
             'M' => Some(1e6),
             'G' => Some(1e9),
+            'T' => Some(1e12),
             _ => None,
         };
         if let Some(multiplier) = multiplier {
             value *= multiplier;
             *index += 1;
+        }
+    }
+    if *index < line.len() {
+        let ch = next_char(line, *index);
+        if ch.is_ascii_alphabetic() || ch == '_' {
+            let start = *index;
+            let mut end = *index;
+            while end < line.len() {
+                let ch = next_char(line, end);
+                if ch.is_ascii_alphanumeric() || ch == '_' {
+                    end += ch.len_utf8();
+                } else {
+                    break;
+                }
+            }
+            let word = &line[start..end];
+            let is_unit = matches!(
+                keyword(word),
+                Some(TokenKind::Time(_) | TokenKind::Joule | TokenKind::Watt | TokenKind::Craft)
+            );
+            if !is_unit {
+                return Err(ParseError::new(
+                    Span::new(start as u32, end as u32),
+                    "a variable cannot follow a number without whitespace",
+                ));
+            }
         }
     }
     Ok(value)
@@ -944,6 +989,34 @@ mod tests {
         assert!(matches!(expr("3 W").kind, ExprKind::Watt(3.0)));
         assert!(matches!(expr("3J").kind, ExprKind::Joule(3.0)));
         assert!(matches!(expr("3W").kind, ExprKind::Watt(3.0)));
+        assert!(matches!(expr("3kJ").kind, ExprKind::Joule(3_000.0)));
+        assert!(matches!(expr("3kW").kind, ExprKind::Watt(3_000.0)));
+        assert!(matches!(expr("3TW").kind, ExprKind::Watt(3e12)));
+        assert!(matches!(
+            expr("3T").kind,
+            ExprKind::Number(value) if value == 3e12
+        ));
+    }
+
+    #[test]
+    fn rejects_variables_immediately_after_numbers() {
+        assert!(parse_line("3x", &registry()).is_err());
+        assert!(parse_line("3kx", &registry()).is_err());
+        assert!(parse_line("3.5x", &registry()).is_err());
+        assert!(parse_line("3 x", &registry()).is_ok());
+        assert!(parse_line("3k x", &registry()).is_ok());
+    }
+
+    #[test]
+    fn parses_juxtaposed_prefix_operators() {
+        assert!(matches!(
+            expr("2 :stacked-belt: :iron-plate:").kind,
+            ExprKind::Juxtapose { .. }
+        ));
+        assert!(matches!(
+            expr("2 :stack-size: :iron-plate:").kind,
+            ExprKind::Juxtapose { .. }
+        ));
     }
 
     #[test]
@@ -981,6 +1054,15 @@ mod tests {
                 selector: Selector::Signal(Signal::StackSize),
                 ..
             }
+        ));
+        let stacked = hactorio_data::signal_by_id("stacked-belt").unwrap().glyph;
+        assert!(matches!(
+            expr(&format!("{stacked} :iron-plate:")).kind,
+            ExprKind::StackedBelt(_)
+        ));
+        assert!(matches!(
+            expr(":stacked-belt: :iron-plate:").kind,
+            ExprKind::StackedBelt(_)
         ));
     }
 
