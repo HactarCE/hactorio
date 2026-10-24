@@ -27,11 +27,14 @@ fn clicking_a_completion_item_accepts_it() {
         .expect("completions")
         .insert
         .clone();
-    let popup = harness
-        .ctx
-        .memory(|memory| memory.area_rect(egui::Id::unique(("completion", 0usize))))
-        .expect("popup");
-    let pos = popup.left_top() + egui::vec2(70.0, 17.0);
+    let pos = harness
+        .state()
+        .as_ref()
+        .expect("app")
+        .completion
+        .selected_rect
+        .expect("selected row")
+        .center();
     harness.hover_at(pos);
     for pressed in [true, false] {
         harness.input_mut().events.push(egui::Event::PointerButton {
@@ -308,6 +311,104 @@ fn completion_shows_the_prototype_name_after_the_matched_alias() {
 }
 
 #[test]
+fn keywords_are_suggested_in_normal_context() {
+    let registry = fixture_registry();
+    let inserts = suggested_ids(&registry, "ma");
+    assert!(inserts.contains(&"making".to_string()), "{inserts:?}");
+    let inserts = suggested_ids(&registry, " i");
+    assert!(inserts.contains(&"in".to_string()), "{inserts:?}");
+}
+
+#[test]
+fn dot_context_offers_properties_and_items() {
+    let registry = fixture_registry();
+    let text = "x.";
+    let cursor = text.chars().count();
+    let (start, word) = completion_word(text, cursor);
+    assert_eq!(start, cursor);
+    assert!(word.is_empty());
+    let items = completion_items(&registry, text, start, &word);
+    let labels: Vec<&str> = items.iter().map(|item| item.insert.as_str()).collect();
+    assert!(labels.contains(&"rate"), "{labels:?}");
+    assert!(labels.contains(&"capacity"), "{labels:?}");
+    let plate = registry.entry("iron-plate").unwrap().glyph.to_string();
+    assert!(labels.contains(&plate.as_str()), "{labels:?}");
+    assert!(!labels.contains(&"in"), "{labels:?}");
+
+    let text = "x.ra";
+    let cursor = text.chars().count();
+    let (start, word) = completion_word(text, cursor);
+    assert_eq!(word, "ra");
+    let items = completion_items(&registry, text, start, &word);
+    assert_eq!(items.first().map(|item| item.insert.as_str()), Some("rate"));
+}
+
+#[test]
+fn completion_starts_after_pua_or_digit() {
+    let registry = fixture_registry();
+    let glyph = registry.entry("iron-plate").unwrap().glyph;
+    let text = format!("{glyph}ra");
+    let (start, word) = completion_word(&text, text.chars().count());
+    assert_eq!(start, 1);
+    assert_eq!(word, "ra");
+
+    let (start, word) = completion_word("3ra", 3);
+    assert_eq!(start, 1);
+    assert_eq!(word, "ra");
+}
+
+#[test]
+fn stack_signals_rank_highest_for_sta() {
+    let registry = fixture_registry();
+    let text = "sta";
+    let cursor = text.chars().count();
+    let (start, word) = completion_word(text, cursor);
+    let items = completion_items(&registry, text, start, &word);
+    let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+    assert_eq!(labels.first().copied(), Some("stack-size"), "{labels:?}");
+    assert_eq!(labels.get(1).copied(), Some("stacked-belt"), "{labels:?}");
+}
+
+#[test]
+fn exact_matches_rank_first() {
+    let registry = fixture_registry();
+    let inserts = suggested_ids(&registry, "s");
+    assert_eq!(
+        inserts.first().map(String::as_str),
+        Some("s"),
+        "{inserts:?}"
+    );
+
+    let inserts = suggested_ids(&registry, "w = 3\nw");
+    assert_eq!(
+        inserts.first().map(String::as_str),
+        Some("w"),
+        "{inserts:?}"
+    );
+    assert_eq!(inserts.get(1).map(String::as_str), Some("W"), "{inserts:?}");
+}
+
+#[test]
+fn property_completions_use_dotted_names_and_icons() {
+    let registry = fixture_registry();
+    let text = "x.";
+    let cursor = text.chars().count();
+    let (start, word) = completion_word(text, cursor);
+    let items = completion_items(&registry, text, start, &word);
+    let rate = items.iter().find(|item| item.insert == "rate").unwrap();
+    assert_eq!(rate.label, ".rate");
+    assert_eq!(rate.glyph, hactorio_data::EMPTY_GLYPH);
+    let time = items
+        .iter()
+        .find(|item| item.insert != "time" && item.label == ".time");
+    assert!(time.is_some(), "expected a .time icon entry");
+    assert!(!items.iter().any(|item| item.insert == "time"));
+    assert!(!items.iter().any(|item| item.insert == "electric"));
+    assert!(!items.iter().any(|item| item.insert == "slots"));
+    assert!(items.iter().any(|item| item.label == ".module-slots"));
+}
+
+#[test]
 fn variables_are_suggested_after_their_definition() {
     let registry = fixture_registry();
     let inserts = suggested_ids(&registry, "rate = 3 :iron-plate: / second\nra");
@@ -355,6 +456,32 @@ fn variable_rows_use_the_variable_signal() {
         format!("{} ", crate::icons::VARIABLE)
     );
     assert_eq!(icon.format.extra_letter_spacing, 0.0);
+}
+
+#[test]
+fn typing_a_dot_opens_property_completions() {
+    let document = editor_document("# Main\n", 0, 6);
+    let (mut harness, dir) = completion_harness("dot-trigger", document);
+    harness.run();
+    type_into_editor(&mut harness, " x.");
+    let app = harness.state().as_ref().expect("app");
+    assert!(
+        !app.completion.items.is_empty(),
+        "completions should open after a dot"
+    );
+    assert!(
+        app.completion
+            .items
+            .iter()
+            .any(|item| item.insert == "rate"),
+        "{:?}",
+        app.completion
+            .items
+            .iter()
+            .map(|item| &item.insert)
+            .collect::<Vec<_>>()
+    );
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]

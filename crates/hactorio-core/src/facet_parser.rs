@@ -15,9 +15,10 @@ use crate::syntax::{BinaryOp, Span};
 pub enum Signal {
     StackSize,
     StackedBelt,
-    Clock,
+    Time,
     Speed,
-    Lightning,
+    Electric,
+    ModuleSlots,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -663,18 +664,13 @@ fn property(name: &str) -> Option<Property> {
     Some(match name {
         "rate" => Property::Rate,
         "capacity" => Property::Capacity,
-        "stack-size" => Property::StackSize,
         "power" => Property::Power,
         "energy" => Property::Energy,
-        "electric" => Property::Electric,
         "machines" => Property::Machines,
-        "time" => Property::Time,
         "crafts" => Property::Crafts,
-        "speed" => Property::Speed,
         "productivity" => Property::Productivity,
         "prod" => Property::Prod,
         "pollution" => Property::Pollution,
-        "slots" => Property::Slots,
         "recipe" => Property::Recipe,
         "abs" => Property::Abs,
         _ => return None,
@@ -758,9 +754,10 @@ fn lex(line: &str, registry: &Registry) -> Result<Vec<Token>, ParseError> {
                     let kind = match signal.id {
                         "stack-size" => Signal::StackSize,
                         "stacked-belt" => Signal::StackedBelt,
-                        "clock" => Signal::Clock,
+                        "time" => Signal::Time,
                         "speed" => Signal::Speed,
-                        "lightning" => Signal::Lightning,
+                        "electric" => Signal::Electric,
+                        "module-slots" => Signal::ModuleSlots,
                         _ => return Err(ParseError::new(span, "unknown signal glyph")),
                     };
                     tokens.push(Token {
@@ -838,9 +835,10 @@ fn signal(id: &str) -> Option<Signal> {
     Some(match id {
         "stack-size" => Signal::StackSize,
         "stacked-belt" => Signal::StackedBelt,
-        "clock" => Signal::Clock,
+        "time" => Signal::Time,
         "speed" => Signal::Speed,
-        "lightning" => Signal::Lightning,
+        "electric" => Signal::Electric,
+        "module-slots" => Signal::ModuleSlots,
         _ => return None,
     })
 }
@@ -1031,18 +1029,20 @@ mod tests {
     fn rejects_stack_size_as_an_identifier() {
         assert!(parse_line("stack-size = 7", &registry()).is_err());
         assert!(parse_line("stack-size", &registry()).is_err());
-        assert!(parse_line("x.stack-size", &registry()).is_ok());
+        assert!(parse_line("x.stack-size", &registry()).is_err());
+        assert!(parse_line("x.slots", &registry()).is_err());
+        assert!(parse_line("x.:stack-size:", &registry()).is_ok());
         assert!(parse_line(".:stack-size:", &registry()).is_err());
     }
 
     #[test]
     fn lexes_signal_glyphs() {
-        let clock = hactorio_data::signal_by_id("clock").unwrap().glyph;
-        let clock_expr = expr(&format!("x.{clock}"));
+        let time = hactorio_data::signal_by_id("time").unwrap().glyph;
+        let time_expr = expr(&format!("x.{time}"));
         assert!(matches!(
-            clock_expr.kind,
+            time_expr.kind,
             ExprKind::Property {
-                selector: Selector::Signal(Signal::Clock),
+                selector: Selector::Signal(Signal::Time),
                 ..
             }
         ));
@@ -1120,13 +1120,6 @@ mod tests {
             expr("b1.:stack-size:").kind,
             ExprKind::Property {
                 selector: Selector::Signal(Signal::StackSize),
-                ..
-            }
-        ));
-        assert!(matches!(
-            expr("b1.stack-size").kind,
-            ExprKind::Property {
-                selector: Selector::Property(Property::StackSize),
                 ..
             }
         ));

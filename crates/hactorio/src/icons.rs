@@ -7,7 +7,7 @@ use egui::ColorImage;
 use egui::epaint::text::{
     FontPriority, GlyphBitmap, GlyphRasterizer, GlyphRasterizerRequest, RasterizedGlyph,
 };
-use hactorio_data::{IconImage, IconSource, Registry, SIGNALS};
+use hactorio_data::{EMPTY_GLYPH, IconImage, IconSource, Registry, SIGNALS};
 
 /// Icon path of the variable's virtual signal.
 const VARIABLE_ICON: &str = "__base__/graphics/icons/signal/signal-item-parameter.png";
@@ -37,6 +37,7 @@ pub fn install(ctx: &egui::Context, registry: Arc<Registry>, source: &IconSource
     if let Some(image) = source.read_rgba(VARIABLE_ICON) {
         icons.insert(VARIABLE, image);
     }
+    icons.insert(EMPTY_GLYPH, empty_icon());
     let icons = Arc::new(icons);
     type ScaleCache = Arc<Mutex<HashMap<(char, u32), Arc<ColorImage>>>>;
     let scaled: ScaleCache = Arc::new(Mutex::new(HashMap::new()));
@@ -76,6 +77,14 @@ pub fn install(ctx: &egui::Context, registry: Arc<Registry>, source: &IconSource
     .with_priority(FontPriority::Highest);
 
     ctx.set_glyph_rasterizers(vec![rasterizer]);
+}
+
+fn empty_icon() -> IconImage {
+    IconImage {
+        width: 64,
+        height: 64,
+        rgba: vec![0; 64 * 64 * 4],
+    }
 }
 
 fn resize(source: &IconImage, size: u32) -> ColorImage {

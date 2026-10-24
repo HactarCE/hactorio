@@ -21,9 +21,13 @@ pub const STACK_SIZE_ICON: &str = "__base__/graphics/icons/signal/signal-stack-s
 /// Glyph reserved for the variable icon in the completion popup.
 pub const VARIABLE_GLYPH: char = '\u{F8FE}';
 
+/// Glyph for autocomplete rows that have no icon. It has a transparent image
+/// of the same size as the other icons.
+pub const EMPTY_GLYPH: char = '\u{F8F8}';
+
 /// Fixed signal table. Signals are not namespace entries.
 ///
-/// `F8F0..F8F9` are reserved, and namespace entries stop at `F8EF`, so signal
+/// `F8F0..F8F7` are reserved, and namespace entries stop at `F8EF`, so signal
 /// lookup always precedes entry lookup.
 pub const SIGNALS: [SignalIcon; 5] = [
     SignalIcon {
@@ -37,9 +41,9 @@ pub const SIGNALS: [SignalIcon; 5] = [
         icon: "__space-age__/graphics/technology/transport-belt-capacity.png",
     },
     SignalIcon {
-        id: "clock",
+        id: "time",
         glyph: '\u{F8FD}',
-        icon: "__base__/graphics/icons/signal/signal-clock.png",
+        icon: "__base__/graphics/icons/signal/signal-hourglass.png",
     },
     SignalIcon {
         id: "speed",
@@ -47,7 +51,7 @@ pub const SIGNALS: [SignalIcon; 5] = [
         icon: "__base__/graphics/icons/signal/signal-speed.png",
     },
     SignalIcon {
-        id: "lightning",
+        id: "electric",
         glyph: '\u{F8FB}',
         icon: "__base__/graphics/icons/signal/signal-lightning.png",
     },

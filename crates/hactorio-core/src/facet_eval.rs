@@ -645,9 +645,10 @@ fn property(
 ) -> Result<FacetValue, EvalError> {
     let property = match selector {
         Selector::Property(property) => *property,
-        Selector::Signal(Signal::Clock) => Property::Time,
+        Selector::Signal(Signal::Time) => Property::Time,
         Selector::Signal(Signal::Speed) => Property::Speed,
-        Selector::Signal(Signal::Lightning) => Property::Electric,
+        Selector::Signal(Signal::Electric) => Property::Electric,
+        Selector::Signal(Signal::ModuleSlots) => Property::Slots,
         Selector::Signal(Signal::StackSize) => Property::StackSize,
         Selector::Signal(Signal::StackedBelt) => {
             return Err(EvalError::new(
@@ -672,17 +673,17 @@ fn property(
             let item = value
                 .item
                 .as_ref()
-                .ok_or_else(|| EvalError::new(span, "`.stack-size` needs an item"))?;
+                .ok_or_else(|| EvalError::new(span, "`.:stack-size:` needs an item"))?;
             let (unit, exponent) = item
                 .units()
                 .iter()
                 .next()
-                .ok_or_else(|| EvalError::new(span, "`.stack-size` needs an item"))?;
+                .ok_or_else(|| EvalError::new(span, "`.:stack-size:` needs an item"))?;
             if *exponent != 1 || item.units().len() != 1 {
-                return Err(EvalError::new(span, "`.stack-size` needs a pure item"));
+                return Err(EvalError::new(span, "`.:stack-size:` needs a pure item"));
             }
             let BaseUnit::Item(id) = unit else {
-                return Err(EvalError::new(span, "`.stack-size` needs an item"));
+                return Err(EvalError::new(span, "`.:stack-size:` needs an item"));
             };
             let stack = registry
                 .entry_by_index(*id)
@@ -792,7 +793,7 @@ fn power_property(
         if electric && power.is_some() && stored.is_some() {
             return Err(EvalError::new(
                 span,
-                "`.electric` is ambiguous: the item has both power and stored energy",
+                "`.:electric:` is ambiguous: the item has both power and stored energy",
             ));
         }
         if let Some(power) = power {
@@ -884,9 +885,9 @@ fn time_property(value: &FacetValue, span: Span) -> Result<FacetValue, EvalError
     let process = value
         .process
         .as_ref()
-        .ok_or_else(|| EvalError::new(span, "`.time` needs a process"))?;
+        .ok_or_else(|| EvalError::new(span, "`.:time:` needs a process"))?;
     if !process.extent.is_machine_seconds() {
-        return Err(EvalError::new(span, "`.time` needs machine-seconds"));
+        return Err(EvalError::new(span, "`.:time:` needs machine-seconds"));
     }
     Ok(FacetValue::item(Monomial::new(
         process.extent.magnitude(),
@@ -1150,7 +1151,7 @@ mod tests {
         let item = value.item.unwrap();
         assert_eq!(item.exponent(BaseUnit::Joule), 1);
         assert_eq!(item.coef(), 5_000_000.0);
-        let value = eval(":accumulator:.electric").unwrap();
+        let value = eval(":accumulator:.:electric:").unwrap();
         assert_eq!(value.item.unwrap().coef(), 5_000_000.0);
         assert!(eval(":accumulator:.power").is_err());
     }
@@ -1275,13 +1276,14 @@ mod tests {
             CapacityFacet::Items(BTreeMap::from([(Cap::Limit(1), 8.0)]))
         );
         assert_eq!(
-            eval("(:assembling-machine-3:).slots")
+            eval("(:assembling-machine-3:).:module-slots:")
                 .unwrap()
                 .item
                 .unwrap()
                 .coef(),
             4.0
         );
+        assert!(parse_line("(:assembling-machine-3:).slots", &registry()).is_err());
         assert_eq!(
             eval("(2 :assembling-machine-3:).machines")
                 .unwrap()

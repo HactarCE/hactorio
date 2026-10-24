@@ -236,6 +236,7 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                     .map(|range| range.primary.index.0)
                     .unwrap_or(0);
                 let (word_start, word) = completion_word(&tab.text, cursor_char);
+                let after_dot = tab.text.chars().take(cursor_char).last() == Some('.');
                 let typed = text_edit.response.changed();
                 if !text_edit.response.has_focus() {
                     completion.items.clear();
@@ -248,7 +249,7 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                     completion.word = word.clone();
                     completion.selected = 0;
                     completion.needs_scroll = true;
-                    completion.items = if word.is_empty() {
+                    completion.items = if word.is_empty() && !after_dot {
                         Vec::new()
                     } else {
                         completion_items(registry, &tab.text, word_start, &word)

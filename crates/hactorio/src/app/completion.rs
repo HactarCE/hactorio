@@ -1,7 +1,7 @@
 //! Autocomplete: word extraction, aliases, fuzzy ranking, and the popup.
 
 use egui::{Key, Modifiers, TextStyle, Ui};
-use hactorio_data::{EntryId, Registry};
+use hactorio_data::{EMPTY_GLYPH, EntryId, Registry};
 
 /// Maximum height of the autocomplete popup, before it scrolls.
 pub(super) const COMPLETION_MAX_HEIGHT: f32 = 240.0;
@@ -12,6 +12,7 @@ enum CompletionContext {
     Machine,
     Recipe,
     Config,
+    Property,
 }
 
 #[derive(Clone, Default)]
@@ -69,7 +70,15 @@ fn consume_unmodified_key(input: &mut egui::InputState, key: Key) -> bool {
 /// Word boundaries for completion. `:` is deliberately not one: it is part of
 /// a plaintext prototype token.
 fn is_completion_boundary(ch: char) -> bool {
-    ch.is_whitespace() || matches!(ch, '+' | '-' | '*' | '/' | '^' | '=' | '(' | ')' | '#')
+    ch.is_whitespace()
+        || matches!(
+            ch,
+            '+' | '-' | '*' | '/' | '^' | '=' | '(' | ')' | '#' | '.'
+        )
+}
+
+fn is_pua(ch: char) -> bool {
+    (0xE000..=0xF8FF).contains(&(ch as u32))
 }
 
 /// The word ending at `cursor`, as a char index and text.
@@ -106,7 +115,18 @@ pub(super) fn completion_word(text: &str, cursor: usize) -> (usize, String) {
         start = token_start;
     }
 
-    (start, chars[start..cursor].iter().collect())
+    // A completion may start right after a digit or prototype glyph.
+    let mut word: String = chars[start..cursor].iter().collect();
+    let leading = word
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit() || is_pua(*ch))
+        .count();
+    if leading > 0 && leading < word.chars().count() {
+        start += leading;
+        word = word.chars().skip(leading).collect();
+    }
+
+    (start, word)
 }
 
 fn char_to_byte(text: &str, chars: usize) -> usize {
@@ -313,25 +333,101 @@ fn defined_variables(before: &[char]) -> Vec<String> {
     names
 }
 
+const COMPLETION_KEYWORD_BONUS: f64 = 50.0;
+const COMPLETION_PROPERTY_BONUS: f64 = 100.0;
+const COMPLETION_SIGNAL_BONUS: f64 = 10_000.0;
+
+const KEYWORDS: &[&str] = &[
+    "in", "with", "making", "s", "second", "m", "minute", "h", "hour", "joule", "J", "watt", "W",
+    "craft",
+];
+
+const PROPERTIES: &[&str] = &[
+    "rate",
+    "capacity",
+    "power",
+    "energy",
+    "machines",
+    "crafts",
+    "productivity",
+    "prod",
+    "pollution",
+    "recipe",
+    "abs",
+];
+
+fn exact_rank(label: &str, insert: &str, needle: &str) -> u8 {
+    let stripped = label.strip_prefix('.').unwrap_or(label);
+    if label == needle || insert == needle || stripped == needle {
+        2
+    } else if label.eq_ignore_ascii_case(needle)
+        || insert.eq_ignore_ascii_case(needle)
+        || stripped.eq_ignore_ascii_case(needle)
+    {
+        1
+    } else {
+        0
+    }
+}
+
+fn word_completion(
+    label: &str,
+    insert: String,
+    glyph: char,
+    needle: &str,
+    bonus: f64,
+) -> Option<(u8, f64, CompletionItem)> {
+    let (score, matched) = if needle.is_empty() {
+        (0, Vec::new())
+    } else {
+        fuzzy_match(label, needle)?
+    };
+    Some((
+        exact_rank(label, &insert, needle),
+        score as f64 + bonus,
+        CompletionItem {
+            insert,
+            glyph,
+            label: label.to_string(),
+            matched,
+            name: None,
+            name_matched: Vec::new(),
+        },
+    ))
+}
+
+fn signal_matches(id: &str, needle: &str) -> bool {
+    needle.is_empty()
+        || id
+            .to_ascii_lowercase()
+            .starts_with(&needle.to_ascii_lowercase())
+}
+
 pub(super) fn completion_items(
     registry: &Registry,
     text: &str,
     word_start: usize,
     word: &str,
 ) -> Vec<CompletionItem> {
-    let needle = word.strip_prefix(':').unwrap_or(word);
-    if needle.is_empty() || needle.chars().next().is_some_and(|ch| ch.is_ascii_digit()) {
+    let before: Vec<char> = text.chars().take(word_start).collect();
+    let context = if before.last() == Some(&'.') {
+        CompletionContext::Property
+    } else {
+        match previous_word(&before).as_str() {
+            "making" => CompletionContext::Recipe,
+            "with" => CompletionContext::Config,
+            "in" => CompletionContext::Machine,
+            _ => CompletionContext::Normal,
+        }
+    };
+    let needle = word.trim_start_matches(':').trim_end_matches(':');
+    if (needle.is_empty() && context != CompletionContext::Property)
+        || needle.chars().next().is_some_and(|ch| ch.is_ascii_digit())
+    {
         return Vec::new();
     }
-    let before: Vec<char> = text.chars().take(word_start).collect();
-    let context = match previous_word(&before).as_str() {
-        "making" => CompletionContext::Recipe,
-        "with" => CompletionContext::Config,
-        "in" => CompletionContext::Machine,
-        _ => CompletionContext::Normal,
-    };
 
-    let mut items: Vec<(f64, CompletionItem)> = registry
+    let mut items: Vec<(u8, f64, CompletionItem)> = registry
         .entries()
         .iter()
         .enumerate()
@@ -339,10 +435,15 @@ pub(super) fn completion_items(
             CompletionContext::Machine => entry.machine().is_some(),
             CompletionContext::Recipe => entry.recipe.is_some(),
             CompletionContext::Config => entry.module.is_some() || entry.beacon.is_some(),
+            CompletionContext::Property => entry.is_item_or_fluid(),
             CompletionContext::Normal => true,
         })
         .filter_map(|(index, entry)| {
-            let (score, matched_name, matched, display_matched) = best_name_match(entry, needle)?;
+            let (score, matched_name, matched, display_matched) = if needle.is_empty() {
+                (0, entry.id.as_ref(), Vec::new(), false)
+            } else {
+                best_name_match(entry, needle)?
+            };
             let display_name = entry.display_name.as_deref();
             let (label, matched, name, name_matched) = if display_matched {
                 // Show the canonical ID beside the prototype name that matched.
@@ -353,10 +454,17 @@ pub(super) fn completion_items(
                 (matched_name, matched, None, Vec::new())
             };
             let references = registry.reference_count(EntryId::from_index(index));
+            let insert = entry.glyph.to_string();
+            let rank = exact_rank(label, &insert, needle);
             Some((
-                completion_rank(score, references),
+                rank,
+                if needle.is_empty() {
+                    score as f64
+                } else {
+                    completion_rank(score, references)
+                },
                 CompletionItem {
-                    insert: entry.glyph.to_string(),
+                    insert,
                     glyph: entry.glyph,
                     label: label.to_string(),
                     matched,
@@ -376,6 +484,7 @@ pub(super) fn completion_items(
                 continue;
             };
             items.push((
+                exact_rank(&name, &name, needle),
                 score as f64 + COMPLETION_VARIABLE_BONUS,
                 CompletionItem {
                     insert: name.clone(),
@@ -387,16 +496,76 @@ pub(super) fn completion_items(
                 },
             ));
         }
+
+        for keyword in KEYWORDS {
+            if let Some(item) = word_completion(
+                keyword,
+                (*keyword).to_string(),
+                EMPTY_GLYPH,
+                needle,
+                COMPLETION_KEYWORD_BONUS,
+            ) {
+                items.push(item);
+            }
+        }
     }
 
-    items.sort_by(|(a_rank, a), (b_rank, b)| {
-        b_rank
-            .total_cmp(a_rank)
+    if context == CompletionContext::Property {
+        for property in PROPERTIES {
+            let label = format!(".{property}");
+            if let Some(item) = word_completion(
+                &label,
+                (*property).to_string(),
+                EMPTY_GLYPH,
+                needle,
+                COMPLETION_PROPERTY_BONUS,
+            ) {
+                items.push(item);
+            }
+        }
+        for signal in hactorio_data::SIGNALS.iter().filter(|signal| {
+            matches!(
+                signal.id,
+                "stack-size" | "speed" | "time" | "electric" | "module-slots"
+            ) && signal_matches(signal.id, needle)
+        }) {
+            let label = format!(".{}", signal.id);
+            if let Some(item) = word_completion(
+                &label,
+                signal.glyph.to_string(),
+                signal.glyph,
+                needle,
+                COMPLETION_SIGNAL_BONUS,
+            ) {
+                items.push(item);
+            }
+        }
+    } else if context == CompletionContext::Normal {
+        for signal in hactorio_data::SIGNALS.iter().filter(|signal| {
+            matches!(signal.id, "stack-size" | "stacked-belt") && signal_matches(signal.id, needle)
+        }) {
+            let label = signal.id.to_string();
+            if let Some(item) = word_completion(
+                &label,
+                signal.glyph.to_string(),
+                signal.glyph,
+                needle,
+                COMPLETION_SIGNAL_BONUS,
+            ) {
+                items.push(item);
+            }
+        }
+    }
+
+    items.sort_by(|(a_exact, a_rank, a), (b_exact, b_rank, b)| {
+        b_exact
+            .cmp(a_exact)
+            .then_with(|| b_rank.total_cmp(a_rank))
             .then_with(|| a.label.len().cmp(&b.label.len()))
             .then_with(|| a.label.cmp(&b.label))
     });
     items.truncate(40);
-    items.into_iter().map(|(_, item)| item).collect()
+    items.into_iter().map(|(_, _, item)| item).collect()
 }
 
 /// Spaces that separate the matched name from the prototype name.

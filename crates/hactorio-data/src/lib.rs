@@ -14,8 +14,8 @@ use thiserror::Error;
 
 pub use dump::{GameInstall, locate};
 pub use icons::{
-    IconImage, IconSource, SIGNALS, STACK_SIZE_GLYPH, STACK_SIZE_ICON, SignalIcon, VARIABLE_GLYPH,
-    signal_by_glyph, signal_by_id,
+    EMPTY_GLYPH, IconImage, IconSource, SIGNALS, STACK_SIZE_GLYPH, STACK_SIZE_ICON, SignalIcon,
+    VARIABLE_GLYPH, signal_by_glyph, signal_by_id,
 };
 pub use postprocess::{Locale, postprocess};
 pub use registry::{
