@@ -806,9 +806,15 @@ fn unit_selector(
     } else {
         BaseUnit::Item(*id)
     };
+    let rate = !matches!(process.extent, Some(Extent::MachineSeconds(_)));
+    let units = if rate {
+        vec![(unit, 1), (BaseUnit::Second, -1)]
+    } else {
+        vec![(unit, 1)]
+    };
     Ok(FacetValue::item(Monomial::new(
         process.net.get(&unit).copied().unwrap_or(0.0),
-        [(unit, 1)],
+        units,
     )))
 }
 

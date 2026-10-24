@@ -52,6 +52,8 @@ pub enum FacetError {
     ProcessFieldMismatch,
     #[error("config count overflow")]
     CountOverflow,
+    #[error("a config may contain only one type of beacon")]
+    MultipleBeaconTypes,
     #[error("these config shapes cannot be juxtaposed")]
     ConfigJuxtaposition,
     #[error("operation is not supported for these facets")]
@@ -280,6 +282,17 @@ impl Config {
         let merged = merge_config(self, other)?;
         *self = merged;
         Ok(())
+    }
+
+    pub fn beacon_type(&self) -> Option<EntryId> {
+        self.beacons.first().map(|group| group.beacon)
+    }
+
+    pub fn has_multiple_beacon_types(&self) -> bool {
+        let Some(first) = self.beacon_type() else {
+            return false;
+        };
+        self.beacons.iter().any(|group| group.beacon != first)
     }
 
     /// Partial config juxtaposition (§3.6).
@@ -1282,6 +1295,9 @@ fn merge_config(a: &Config, b: &Config) -> Result<Config, FacetError> {
         }
     }
     out.canonicalize();
+    if out.has_multiple_beacon_types() {
+        return Err(FacetError::MultipleBeaconTypes);
+    }
     Ok(out)
 }
 
@@ -1775,6 +1791,31 @@ mod tests {
             cm.juxtapose(&cb, None),
             Err(FacetError::ConfigJuxtaposition)
         );
+    }
+
+    #[test]
+    fn config_addition_rejects_multiple_beacon_types() {
+        let a = EntryId::from_index(0);
+        let b = EntryId::from_index(1);
+        let mut left = FacetValue::empty();
+        left.config = Some(Config {
+            modules: vec![],
+            beacons: vec![BeaconGroup {
+                beacon: a,
+                count: 1,
+                modules: vec![],
+            }],
+        });
+        let mut right = FacetValue::empty();
+        right.config = Some(Config {
+            modules: vec![],
+            beacons: vec![BeaconGroup {
+                beacon: b,
+                count: 1,
+                modules: vec![],
+            }],
+        });
+        assert_eq!(left.add(&right), Err(FacetError::MultipleBeaconTypes));
     }
 
     #[test]

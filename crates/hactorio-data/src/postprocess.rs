@@ -7,8 +7,9 @@ use std::path::Path;
 use serde_json::{Map, Value};
 
 use crate::registry::{
-    AllowedEffects, Entry, Ingredient, Item, Machine, Module, ModuleEffect, Product,
-    ProductivityResearch, PrototypeKind, Recipe, RecipeId, RecipeProductivity, Registry, glyph_for,
+    AllowedEffects, Entry, Ingredient, InserterBonus, InserterResearch, Item, Machine, Module,
+    ModuleEffect, Product, ProductivityResearch, PrototypeKind, Recipe, RecipeId,
+    RecipeProductivity, Registry, glyph_for,
 };
 use crate::{Error, Result};
 
@@ -171,7 +172,13 @@ pub fn postprocess(raw_dump_json: &str, locale: &Locale) -> Result<Registry> {
     }
 
     let researches = collect_productivity_researches(root, locale);
-    Registry::from_parts(entries, recipes.into_values().collect(), researches)
+    let inserter_research = collect_inserter_research(root);
+    Registry::from_parts(
+        entries,
+        recipes.into_values().collect(),
+        researches,
+        inserter_research,
+    )
 }
 
 /// Collects technologies whose effects change recipe productivity.
@@ -219,6 +226,50 @@ fn collect_productivity_researches(
         );
     }
     researches.into_values().collect()
+}
+
+fn collect_inserter_research(root: &Map<String, Value>) -> InserterResearch {
+    let mut per_level: BTreeMap<u32, InserterBonus> = BTreeMap::new();
+    for (id, proto) in table(root, "technology") {
+        let Some(level) = id
+            .strip_prefix("inserter-capacity-bonus-")
+            .and_then(|level| level.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let bonus = per_level.entry(level).or_default();
+        for effect in proto
+            .get("effects")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let kind = effect.get("type").and_then(Value::as_str).unwrap_or("");
+            let modifier = effect
+                .get("modifier")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            match kind {
+                "inserter-stack-size-bonus" => bonus.non_bulk += modifier,
+                "bulk-inserter-capacity-bonus" => bonus.bulk += modifier,
+                "stack-inserter-capacity-bonus" => bonus.stack += modifier,
+                _ => {}
+            }
+        }
+    }
+
+    let max_level = per_level.keys().next_back().copied().unwrap_or(0);
+    let mut levels = Vec::with_capacity(max_level as usize + 1);
+    let mut cumulative = InserterBonus::default();
+    for level in 0..=max_level {
+        if let Some(bonus) = per_level.get(&level) {
+            cumulative.non_bulk += bonus.non_bulk;
+            cumulative.bulk += bonus.bulk;
+            cumulative.stack += bonus.stack;
+        }
+        levels.push(cumulative);
+    }
+    InserterResearch { levels }
 }
 
 #[derive(Default)]

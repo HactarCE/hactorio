@@ -5,11 +5,11 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::registry::{Entry, ProductivityResearch, Recipe, Registry};
+use crate::registry::{Entry, InserterResearch, ProductivityResearch, Recipe, Registry};
 use crate::{Error, Result};
 
 /// Bumping this invalidates every existing cache.
-pub(crate) const CACHE_VERSION: u32 = 6;
+pub(crate) const CACHE_VERSION: u32 = 7;
 
 #[derive(Serialize)]
 struct CacheRef<'a> {
@@ -17,6 +17,7 @@ struct CacheRef<'a> {
     entries: &'a [Entry],
     recipes: &'a [Recipe],
     researches: &'a [ProductivityResearch],
+    inserter_research: &'a InserterResearch,
 }
 
 #[derive(Deserialize)]
@@ -26,6 +27,8 @@ struct CacheFile {
     recipes: Vec<Recipe>,
     #[serde(default)]
     researches: Vec<ProductivityResearch>,
+    #[serde(default)]
+    inserter_research: InserterResearch,
 }
 
 impl Registry {
@@ -36,6 +39,7 @@ impl Registry {
             entries: self.entries(),
             recipes: self.recipes(),
             researches: self.productivity_researches(),
+            inserter_research: self.inserter_research(),
         };
         Ok(serde_json::to_vec(&cache)?)
     }
@@ -45,7 +49,12 @@ impl Registry {
         if cache.version != CACHE_VERSION {
             return Err(Error::UnsupportedVersion(cache.version));
         }
-        Registry::from_parts(cache.entries, cache.recipes, cache.researches)
+        Registry::from_parts(
+            cache.entries,
+            cache.recipes,
+            cache.researches,
+            cache.inserter_research,
+        )
     }
 
     /// Loads a cache written by [`Registry::save`].

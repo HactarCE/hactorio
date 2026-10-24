@@ -240,6 +240,35 @@ pub struct Product {
     pub ignored_by_productivity: f64,
 }
 
+/// Cumulative inserter capacity bonuses at one research level.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct InserterBonus {
+    pub non_bulk: f64,
+    pub bulk: f64,
+    pub stack: f64,
+}
+
+/// Inserter capacity research, indexed by completed level.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct InserterResearch {
+    /// Level 0 is the zero bonus; each later entry is cumulative.
+    pub levels: Vec<InserterBonus>,
+}
+
+impl InserterResearch {
+    pub fn max_level(&self) -> u32 {
+        self.levels.len().saturating_sub(1) as u32
+    }
+
+    pub fn bonus(&self, level: u32) -> InserterBonus {
+        self.levels
+            .get(level as usize)
+            .copied()
+            .or_else(|| self.levels.last().copied())
+            .unwrap_or_default()
+    }
+}
+
 /// One recipe that a research increases productivity for.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecipeProductivity {
@@ -285,6 +314,7 @@ pub struct Registry {
     entries: Vec<Entry>,
     recipes: Vec<Recipe>,
     researches: Vec<ProductivityResearch>,
+    inserter_research: InserterResearch,
     by_id: HashMap<Box<str>, EntryId>,
     recipe_by_id: HashMap<Box<str>, RecipeId>,
     /// How many recipe ingredients and products name each entry, indexed by
@@ -297,6 +327,7 @@ impl Registry {
         entries: Vec<Entry>,
         recipes: Vec<Recipe>,
         mut researches: Vec<ProductivityResearch>,
+        inserter_research: InserterResearch,
     ) -> Result<Self> {
         researches.sort_by(|r1, r2| r1.display_name.cmp(&r2.display_name));
 
@@ -382,6 +413,7 @@ impl Registry {
             entries,
             recipes,
             researches,
+            inserter_research,
             by_id,
             recipe_by_id,
             references,
@@ -400,6 +432,10 @@ impl Registry {
     /// Every research whose effects change recipe productivity, sorted by id.
     pub fn productivity_researches(&self) -> &[ProductivityResearch] {
         &self.researches
+    }
+
+    pub fn inserter_research(&self) -> &InserterResearch {
+        &self.inserter_research
     }
 
     pub fn entry(&self, id: &str) -> Option<&Entry> {

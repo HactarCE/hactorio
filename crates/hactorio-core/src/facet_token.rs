@@ -78,7 +78,7 @@ pub fn token_value(
         }
 
         if let Some(inserter) = item.inserter {
-            let capacity = inserter_capacity(inserter, settings);
+            let capacity = inserter_capacity(inserter, settings, registry);
             let cycles = inserter_cycles(inserter)
                 .ok_or_else(|| TokenError::InvalidInserter(entry.id.clone()))?;
             value.rate = Some(RateFacet::Items(BTreeMap::from([(
@@ -112,15 +112,30 @@ pub fn token_value(
     Ok(value)
 }
 
-fn inserter_capacity(inserter: hactorio_data::Inserter, settings: &Settings) -> u32 {
-    let bonus = settings.inserter_capacity;
-    if inserter.stack_size_bonus > 0 {
-        2 + inserter.stack_size_bonus + bonus
+fn inserter_capacity(
+    inserter: hactorio_data::Inserter,
+    settings: &Settings,
+    registry: &Registry,
+) -> u32 {
+    let level = settings
+        .inserter_capacity
+        .min(registry.inserter_research().max_level());
+    let bonus = registry.inserter_research().bonus(level);
+    let bonus = if inserter.stack_size_bonus > 0 {
+        bonus.bulk + bonus.stack
     } else if inserter.bulk {
-        2 + bonus
+        bonus.bulk
     } else {
-        1 + bonus
-    }
+        bonus.non_bulk
+    };
+    let base = if inserter.stack_size_bonus > 0 {
+        2 + inserter.stack_size_bonus
+    } else if inserter.bulk {
+        2
+    } else {
+        1
+    };
+    base + bonus as u32
 }
 
 fn inserter_cycles(inserter: hactorio_data::Inserter) -> Option<f64> {
@@ -143,6 +158,8 @@ mod tests {
         "iron-plate": {"type": "item", "name": "iron-plate", "stack_size": 100},
         "transport-belt": {"type": "item", "name": "transport-belt", "stack_size": 100},
         "inserter": {"type": "item", "name": "inserter", "stack_size": 50},
+        "bulk-inserter": {"type": "item", "name": "bulk-inserter", "stack_size": 50},
+        "stack-inserter": {"type": "item", "name": "stack-inserter", "stack_size": 50},
         "steel-chest": {"type": "item", "name": "steel-chest", "stack_size": 50},
         "storage-tank": {"type": "item", "name": "storage-tank", "stack_size": 50},
         "speed-module-3": {"type": "module", "name": "speed-module-3", "category": "speed", "tier": 3, "stack_size": 50, "effect": {"speed": 0.5}},
@@ -159,7 +176,9 @@ mod tests {
         "transport-belt": {"type": "transport-belt", "name": "transport-belt", "speed": 0.03125}
       },
       "inserter": {
-        "inserter": {"type": "inserter", "name": "inserter", "rotation_speed": 0.014, "bulk": false}
+        "inserter": {"type": "inserter", "name": "inserter", "rotation_speed": 0.014, "bulk": false},
+        "bulk-inserter": {"type": "inserter", "name": "bulk-inserter", "rotation_speed": 0.014, "bulk": true},
+        "stack-inserter": {"type": "inserter", "name": "stack-inserter", "rotation_speed": 0.014, "bulk": true, "stack_size_bonus": 4}
       },
       "container": {
         "steel-chest": {"type": "container", "name": "steel-chest", "inventory_size": 48}
@@ -169,6 +188,15 @@ mod tests {
       },
       "beacon": {
         "beacon": {"type": "beacon", "name": "beacon", "module_slots": 2, "distribution_effectivity": 1.5, "profile": [1.0], "energy_usage": "480kW"}
+      },
+      "technology": {
+        "inserter-capacity-bonus-1": {"type": "technology", "effects": [{"type": "bulk-inserter-capacity-bonus", "modifier": 1}]},
+        "inserter-capacity-bonus-2": {"type": "technology", "effects": [{"type": "inserter-stack-size-bonus", "modifier": 1}, {"type": "bulk-inserter-capacity-bonus", "modifier": 1}]},
+        "inserter-capacity-bonus-3": {"type": "technology", "effects": [{"type": "bulk-inserter-capacity-bonus", "modifier": 1}]},
+        "inserter-capacity-bonus-4": {"type": "technology", "effects": [{"type": "bulk-inserter-capacity-bonus", "modifier": 1}]},
+        "inserter-capacity-bonus-5": {"type": "technology", "effects": [{"type": "bulk-inserter-capacity-bonus", "modifier": 2}]},
+        "inserter-capacity-bonus-6": {"type": "technology", "effects": [{"type": "bulk-inserter-capacity-bonus", "modifier": 2}]},
+        "inserter-capacity-bonus-7": {"type": "technology", "effects": [{"type": "inserter-stack-size-bonus", "modifier": 1}, {"type": "bulk-inserter-capacity-bonus", "modifier": 2}]}
       }
     }"#;
 
@@ -234,6 +262,26 @@ mod tests {
             value.capacity,
             Some(CapacityFacet::Items(BTreeMap::from([(Cap::Full, 48.0)])))
         );
+    }
+
+    #[test]
+    fn inserter_research_reaches_expected_maxima() {
+        let registry = registry();
+        let settings = Settings {
+            inserter_capacity: registry.inserter_research().max_level(),
+            ..Settings::default()
+        };
+        for (id, expected) in [
+            ("inserter", 3),
+            ("bulk-inserter", 12),
+            ("stack-inserter", 16),
+        ] {
+            let value = token_value(entry_id(&registry, id), &registry, &settings).unwrap();
+            let RateFacet::Items(items) = value.rate.unwrap() else {
+                panic!("expected item rate");
+            };
+            assert!(items.contains_key(&Cap::Limit(expected)), "{id}: {items:?}");
+        }
     }
 
     #[test]

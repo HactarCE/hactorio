@@ -41,6 +41,9 @@ pub fn validate(
         validate_module(registry, module, data.allowed_effects, entry.id.as_ref())?;
     }
 
+    if config.has_multiple_beacon_types() {
+        return Err("a machine config may contain only one type of beacon".into());
+    }
     for group in &config.beacons {
         let beacon_entry = registry.entry_by_index(group.beacon);
         let Some(beacon) = &beacon_entry.beacon else {
