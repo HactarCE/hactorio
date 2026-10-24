@@ -4,7 +4,8 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
-use hactorio_core::{LineCache, Settings, StatementOutput, evaluate};
+use hactorio_core::Settings;
+use hactorio_core::facet_eval::{StatementOutput, evaluate};
 use hactorio_data::Registry;
 
 /// Owns the line cache off the UI thread. Latest request wins.
@@ -32,22 +33,8 @@ impl Evaluator {
         let (responses, rx) = mpsc::channel::<Response>();
 
         thread::spawn(move || {
-            let mut cache = LineCache::new();
-            let mut registry: Option<Arc<Registry>> = None;
             while let Ok(request) = requests.recv() {
-                if registry
-                    .as_ref()
-                    .is_none_or(|previous| !Arc::ptr_eq(previous, &request.registry))
-                {
-                    cache.clear();
-                    registry = Some(Arc::clone(&request.registry));
-                }
-                let outputs = evaluate(
-                    &request.text,
-                    &request.settings,
-                    &request.registry,
-                    &mut cache,
-                );
+                let outputs = evaluate(&request.text, &request.settings, &request.registry);
                 if responses
                     .send(Response {
                         generation: request.generation,

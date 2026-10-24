@@ -114,8 +114,8 @@ The table is symmetric in facet survival and in the merged values.
 - **Config:** counts are nonnegative integers by construction. `+` adds module
   counts by id and beacon-group counts for the same beacon+module set; groups
   with different module sets stay separate; zero terms are elided and an
-  all-zero config stays present but empty. `+` of a beacon group with a module
-  config does **not** attach (only juxtaposition attaches).
+  all-zero config stays present but empty. `+` never modifies a beacon group and
+  never attaches modules to one; only `Cb Cm` juxtaposition attaches.
 - **Belt:** survives only with equal `Cap`; the cap is retained and counts
   add. Tiers need not match, so `(:transport-belt: +
   :fast-transport-belt:)` keeps `B+T` and loses `I`. If the caps differ the belt
@@ -283,13 +283,14 @@ rather than drops on media/cap mismatch.
 | `K` (isolated) | `T` | `I` (`s`) | same medium; single same cap for items |
 | `T` (isolated) | `K` | `I` (`s⁻¹`) | same medium; single same cap for items |
 | `T`,`K` (isolated, same kind) | same kind | `I` | dimensionless, same medium, single same cap |
-| `I+C` | `S` | `err!` | config division is unsupported |
+| `I+C` | `S` | `I` | config facet drops; item divides |
 | `I+T` / `I+K` / `I+B+T` / `I+C` | same set | `I` | non-isolated facets drop; monoterm item quotient (dimensionless when units cancel) |
 
 ### Special conditions (`/`)
 
-- **Config divisor or dividend:** any `/` with a config facet on either side is
-  an explicit error. Configs are scaled by `*` only; they are never divided.
+- **Config divisor or dividend:** a config facet is dropped by `/`, and the
+  other facets continue. A config-only division errors because no facet
+  survives. Configs are scaled by `*` only; they are never divided.
 - **Scalar divisor:** scales item, belt count, rate/capacity amounts, and
   machine count. Item/rate/capacity division by zero follows scalar semantics
   (`inf`/`NaN`).
@@ -300,8 +301,8 @@ rather than drops on media/cap mismatch.
   `Machines(1/s)`. `MachineSeconds / time → Machines` (net totals ÷ time,
   `power_w = energy_j / time`, `n = tau / time`). `Machines / time` and unsolved
   `/ time` are explicit errors; `MachineSeconds / 0 s` yields `inf`/`NaN`.
-- **Config:** division is not supported at all; any config facet in a `/`
-  operation errors.
+- **Config:** division drops the config facet; it errors only when no other
+  facet survives.
 - **Belt:** scalar divisor keeps `B+T`; a time or unit-bearing divisor drops
   both.
 - **Isolated rate/capacity division:** item values must have exactly one term
@@ -349,9 +350,10 @@ integer exponents when the base monomial carries units.
   facet and errors.
 - `^` is right-associative. Unary `-` binds looser: `-2 ^ 2` = `-(2^2)`.
   `:stack-size:` binds tighter: `:stack-size: b1 ^ 2` = `(:stack-size: b1) ^ 2`.
-- A dimensionless scalar base accepts any dimensionless exponent, including a
-  fractional exponent. A unit-bearing base requires an exact integer exponent.
-  A negative base requires an exact integer exponent. `0 ^ 0` is an error.
+- A dimensionless scalar base and exponent use raw `f64::powf`; there are no
+  `0^0`, negative-base, or negative-exponent special cases. A unit-bearing base
+  requires an exact integer exponent. A unit-bearing exponent errors; other
+  exponent facets are ignored.
 
 ## Juxtaposition
 
@@ -365,7 +367,7 @@ beats the rule-5 error.
 | **R** | `err` | `err` | `err` | `err` | `err` | `err` | `err` | `err` | `err` |
 | **M** | `M` (rule 4 count) | `err` | `err` | `err` | `err` | `err` | `err` | `err` | `err` |
 | **P** | `P` (rule 4) | `err` | `err` | `err` | `err` | `err` | `err` | `err` | `err` |
-| **C** | `C` (rule 4, nonnegative integer) / `err` | `err` | `err` | `err` | `err` | `C` (rule 3 attach/merge) | `err` | `err` | `err` |
+| **C** | `C` (rule 4, nonnegative integer) / `err` | `err` | `err` | `err` | `err` | `partial` (rule 3) | `err` | `err` | `err` |
 | **B** | `B+T` (rule 4) | `I` (rule 1 rate application) | `err` | `err` | `err` | `err` | `err` | `err` | `err` |
 | **T** | `T` (rule 4) | `I` (rule 1) | `err` | `err` | `err` | `err` | `err` | `err` | `err` |
 | **K** | `K` (rule 4) | `I` (rule 2) | `err` | `err` | `err` | `err` | `err` | `err` | `err` |
@@ -378,9 +380,11 @@ beats the rule-5 error.
 | `T` (isolated) | `I` (pure item/fluid) | 1 | `I` — applied amount |
 | `I+K` | `I` (pure item/fluid) | 2 | `I` — applied amount; capacity drops |
 | `K` (isolated) | `I` (pure item/fluid) | 2 | `I` — applied amount |
-| `C` (beacon group) | `C` (modules, no beacon group) | 3 | `C` with attached group; RHS item consumed, LHS item retained |
-| `C` (either shape) | `C` (either shape) | 3 | configs merged, no attachment; both item facets consumed → `C` |
-| `I+C` | `I+C` | 3 | plain merge consumes both item facets → `C` |
+| `Cb` (one beacon group) | `Cm` (modules only) | 3 | `Cb` with modules attached; RHS item consumed, LHS item retained |
+| `Cm` | `Cm` | 3 | module lists combine; both item facets consumed → `Cm` |
+| `Cb` | `Cb` / `Cm` | 3 | `err!` — partial merge; only `Cb Cm` is defined |
+| `C` with >1 beacon group | `Cm` | 3 | `err!` — only a single beacon group can be extended |
+| `I+Cm` | `I+Cm` | 3 | plain module merge consumes both item facets → `Cm` |
 | any `S` | any set | 4 | scales every scalable facet: item, belt count, rate/capacity amounts, machine count, integer config; recipe drops |
 | any set | any `S` | 4 | same, operand order irrelevant |
 | `I+M` / `I+M+R` | `I` | 5 | `err` — two item-bearing values need `*` |
@@ -400,11 +404,13 @@ beats the rule-5 error.
   fluid uses `rhs_coef · volume rate`). All RHS facets except the item/fluid are
   dropped; an item-vs-fluid medium mismatch is an error. Belt application uses
   the rate facet and always drops the belt facet.
-- **Rule 3:** attachment only when the LHS has a beacon group and the RHS has
-  module config with no beacon groups; the modules attach to the last beacon
-  group in canonical order, the RHS item is consumed, and the LHS item is
-  retained. Otherwise the configs merge without attachment and consume both
-  item facets, yielding `C` (`sm bc` does not attach).
+- **Rule 3:** partial. `Cb Cm`: the LHS has exactly one beacon group and the RHS
+  has only modules; the modules attach to that group, the RHS item is consumed,
+  and the LHS item is retained. `Cm Cm`: module lists combine and both item
+  facets are consumed, yielding `Cm`. `Cb Cb`, `Cm Cb`, and a LHS with more than
+  one beacon group are errors. Thus `bc sm` attaches but `sm bc` errors. The
+  operation is associative where defined; `Cm Cm` is commutative and `Cb Cm`
+  is not.
 - **Rule 4** is exactly quantity-literal scaling: machine count becomes
   `Some(n)` (even `n = 1`; `None` read as one), item/belt/rate/capacity
   coefficients scale, config counts scale only for a nonnegative integer, and
@@ -490,7 +496,7 @@ recipe all drop; the RHS recipe is consumed.
 | LHS set | RHS set | Result | Condition |
 |---|---|---|---|
 | `I+M` / `I+M+R` | `R` | `P` | item drops; LHS recipe ignored |
-| `I+M` / `I+M+R` | `I+R` | `P` | RHS item drops; RHS recipe consumed |
+| `I+M` / `I+M+R` | `I+R` | `P` | RHS item drops; RHS recipe consumed; other RHS facets ignored |
 | `M` with count `None` | `R` | `P` (unsolved) | displays one machine |
 | `M` with count `Some(n)` | `R` | `P` (`Machines(n)`) | `1` counts as an attached count |
 | `P` | `R` | `err!` | `making` is not allowed on a process |
@@ -499,6 +505,7 @@ recipe all drop; the RHS recipe is consumed.
 
 ### Special conditions (`making`)
 
+- The RHS may carry any non-recipe facets; they are ignored and dropped.
 - Validation for the pair: recipe category intersection (including
   `resource_categories` for drills) and productivity gating for the machine and
   its beacon modules; productivity modules are legal only when
@@ -546,7 +553,7 @@ a quantity form.
 | `I` `craft` amount/rate | `M` | `err!` | craft requires an explicit recipe; a machine cannot supply one — use `in (m making r)` |
 | `I` `craft` amount/rate | `P` unsolved, exactly one recipe | `P` | the process recipe is the explicit recipe; `magnitude = coef / k(craft)` |
 | `I+R` | `M` | `P` | LHS recipe is ignored; same-id recipe is only a tiebreaker |
-| `I+C` / `I+K` / `I+B+T` | `M` | `P` | extra LHS facets drop before resolution |
+| `I+C` / `I+T` / `I+K` / `I+B+T` | `M` | `P` | extra LHS facets drop before resolution |
 | `I` pure amount/rate | `P` unsolved, exactly one recipe | `P` | the process supplies the recipe |
 | `I` pure amount/rate | `P` solved | `err!` | solved process is not accepted |
 | `I` pure amount/rate | `M` with `Some(n)` (even `1`) | `err!` | a count is attached |
@@ -557,6 +564,9 @@ a quantity form.
 
 ### Special conditions (`in`)
 
+- **Purity is about units, not facets:** extra LHS facets are ignored and
+  dropped (`:speed-module-3: in ma` is valid). A standalone rate/capacity facet
+  with no item facet is not a quantity and errors.
 - **Validity depends on attachment, not on magnitude:** a count attached by
   scaling, including `1` (`1 :foundry:`, `0.5 * 2 * :foundry:`) or by `making`
   on a count, is rejected.
@@ -602,7 +612,8 @@ Two modes; belt mode takes priority when the operand has a belt facet (§4.7).
 - Belt mode sets **both** the belt cap and every rate-term cap; zero rate terms
   do not remove the belt cap. A belt item with no stack size is an error.
 - Item mode returns an item-only value; the coefficient is multiplied by the
-  item's stack size. Use `(:stack-size: 3 :iron-plate:)/s` for a rate.
+  item's stack size. “Pure” describes the item units; extra facets are dropped.
+  Use `(:stack-size: 3 :iron-plate:)/s` for a rate.
 - The prefix takes exactly one `Primary` and stops at unary `-`, `^`, `making`,
   `with`, `in`, and arithmetic. It binds tighter than juxtaposition, `^`, and
   `*`: `:stack-size: 3 :iron-plate:/s` = `(:stack-size: 3 :iron-plate:)/s`,

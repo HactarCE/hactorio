@@ -5,7 +5,6 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::belt::BeltTier;
-use crate::value::Value;
 
 /// The unit used to display time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,15 +52,6 @@ impl TimeUnit {
             _ => None,
         }
     }
-
-    /// The value of `count` of this unit, folded into seconds.
-    pub fn value(self, count: f64) -> Value {
-        match self {
-            TimeUnit::Second => Value::seconds(count),
-            TimeUnit::Minute => Value::minutes(count),
-            TimeUnit::Hour => Value::hours(count),
-        }
-    }
 }
 
 /// Global display and evaluation settings.
@@ -79,6 +69,8 @@ pub struct Settings {
     pub stacked_belts: bool,
     /// Effective belt stacking level, 1 through 4.
     pub belt_stacking: u8,
+    /// Inserter capacity research level.
+    pub inserter_capacity: u32,
     /// Completed levels of each productivity research, keyed by technology id.
     #[serde(default)]
     pub research_levels: BTreeMap<Box<str>, u32>,
@@ -93,6 +85,7 @@ impl Default for Settings {
             item_rate_belt: None,
             stacked_belts: false,
             belt_stacking: 4,
+            inserter_capacity: 0,
             research_levels: BTreeMap::new(),
         }
     }

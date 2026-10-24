@@ -1,5 +1,8 @@
 # Implementation plan: facet value language
 
+**Status:** implemented. The old parser/evaluator modules and their tests are
+removed; open edge-case data questions are tracked in `awaiting_decisions.md`.
+
 Source of truth: `2026-10-22_design_doc_2.md`. The operator matrix in
 `facet_operator_table.md` is the arithmetic checklist.
 
@@ -123,6 +126,6 @@ pipeline, and persistence stay in place.
 - Data import must supply fields for inserters/beacons that may not exist in the
   current dump.
 
-## Open decisions
+## Decisions
 
-See `awaiting_decisions.md`. Defaults there are implemented unless overridden.
+All initial design questions are resolved; see `awaiting_decisions.md`.

@@ -1,9 +1,6 @@
 //! Belt-rate literals. The belt rate is sugar for an item-per-second rate.
 
-use hactorio_data::EntryId;
 use serde::{Deserialize, Serialize};
-
-use crate::value::{BaseUnit, Value};
 
 /// The four belt tiers whose throughput is fixed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,23 +81,4 @@ pub fn belt_capacity(
         1.0
     };
     tier.items_per_second() * stacks
-}
-
-/// `count` belts of `tier`, carrying `item`.
-///
-/// This is the evaluation of a parsed belt literal, so stacking is applied here
-/// rather than during parsing.
-pub fn belt_value(
-    count: f64,
-    tier: BeltTier,
-    stacked: bool,
-    item: EntryId,
-    item_stack_size: u32,
-    stacking_level: u8,
-) -> Value {
-    let capacity = belt_capacity(tier, stacked, item_stack_size, stacking_level);
-    Value::new(
-        count * capacity,
-        [(BaseUnit::Item(item), 1), (BaseUnit::Second, -1)],
-    )
 }

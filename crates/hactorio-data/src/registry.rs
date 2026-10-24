@@ -63,6 +63,65 @@ pub struct Item {
     /// Present when the item is also a machine prototype.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<Machine>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub belt: Option<Belt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inserter: Option<Inserter>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<Container>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pump: Option<Pump>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power_w: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stored_energy_j: Option<f64>,
+}
+
+/// A transport belt entity.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Belt {
+    /// Tiles per tick.
+    pub speed: f64,
+}
+
+/// An inserter entity.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Inserter {
+    pub rotation_speed: f64,
+    pub bulk: bool,
+    /// The prototype `stack_size_bonus`; the stack inserter has a nonzero value.
+    pub stack_size_bonus: u32,
+}
+
+/// A container or fluid-capable container entity.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Container {
+    pub slots: u32,
+    pub fluid_capacity: f64,
+}
+
+/// A pump entity.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Pump {
+    /// Fluid units per tick.
+    pub pumping_speed: f64,
+}
+
+/// A beacon entity.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Beacon {
+    pub module_slots: u32,
+    pub allowed_effects: AllowedEffects,
+    pub distribution_effectivity: f64,
+    pub profile: Vec<f64>,
+    pub energy_usage_w: f64,
+}
+
+/// Equipment metadata used by power/energy properties.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Equipment {
+    pub power_w: Option<f64>,
+    pub stored_energy_j: Option<f64>,
 }
 
 /// A machine prototype: a crafting machine or a mining drill.
@@ -143,6 +202,10 @@ pub struct Entry {
     pub module: Option<Module>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recipe: Option<RecipeId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub beacon: Option<Beacon>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equipment: Option<Equipment>,
 }
 
 impl Entry {

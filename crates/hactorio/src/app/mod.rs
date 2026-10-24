@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use egui::{Align, Context, Layout, RichText, TextStyle, Ui};
-use hactorio_core::{BeltTier, Settings, StatementOutput, TimeUnit, from_plaintext, to_plaintext};
+use hactorio_core::facet_eval::StatementOutput;
+use hactorio_core::{BeltTier, Settings, TimeUnit, from_plaintext, to_plaintext};
 use hactorio_data::{GameInstall, Registry, locate};
 
 use crate::document::{
@@ -111,11 +112,15 @@ const DISPLAY_SETTINGS: [DisplaySetting; 5] = [
 #[derive(Clone, Copy)]
 enum ResearchSetting {
     BeltStacking,
+    InserterCapacity,
     Productivity,
 }
 
-const RESEARCH_SETTINGS: [ResearchSetting; 2] =
-    [ResearchSetting::BeltStacking, ResearchSetting::Productivity];
+const RESEARCH_SETTINGS: [ResearchSetting; 3] = [
+    ResearchSetting::BeltStacking,
+    ResearchSetting::InserterCapacity,
+    ResearchSetting::Productivity,
+];
 
 /// Width of the widest settings-bar label, shared so both bars line up.
 fn settings_label_width(ui: &Ui) -> f32 {
@@ -212,7 +217,7 @@ fn settings_bar<T: Copy>(
                     if row_index > 0 {
                         ui.add(egui::Separator::default().spacing(separator));
                     }
-                    let row_response = ui.horizontal(|ui| {
+                    let _row_response = ui.horizontal(|ui| {
                         ui.set_min_height(icon_button_height(ui));
                         egui::ScrollArea::horizontal()
                             .id_salt(("settings_row", label, row_index))
@@ -649,6 +654,12 @@ impl HactorioApp {
             ResearchSetting::BeltStacking => {
                 ui.label("Belt stacking");
                 ui.add(egui::Slider::new(&mut self.settings.belt_stacking, 1..=4));
+            }
+            ResearchSetting::InserterCapacity => {
+                ui.label("Inserter capacity");
+                ui.add(
+                    egui::DragValue::new(&mut self.settings.inserter_capacity).range(0..=u32::MAX),
+                );
             }
             ResearchSetting::Productivity => {
                 ui.add_enabled_ui(!researches.is_empty(), |ui| {

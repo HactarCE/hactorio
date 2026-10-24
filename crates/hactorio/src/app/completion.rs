@@ -11,6 +11,7 @@ enum CompletionContext {
     Normal,
     Machine,
     Recipe,
+    Config,
 }
 
 #[derive(Clone, Default)]
@@ -68,11 +69,7 @@ fn consume_unmodified_key(input: &mut egui::InputState, key: Key) -> bool {
 /// Word boundaries for completion. `:` is deliberately not one: it is part of
 /// a plaintext prototype token.
 fn is_completion_boundary(ch: char) -> bool {
-    ch.is_whitespace()
-        || matches!(
-            ch,
-            '+' | '-' | '*' | '/' | '^' | '@' | '=' | '(' | ')' | '#'
-        )
+    ch.is_whitespace() || matches!(ch, '+' | '-' | '*' | '/' | '^' | '=' | '(' | ')' | '#')
 }
 
 /// The word ending at `cursor`, as a char index and text.
@@ -327,12 +324,11 @@ pub(super) fn completion_items(
         return Vec::new();
     }
     let before: Vec<char> = text.chars().take(word_start).collect();
-    let context = if before.last() == Some(&'@') {
-        CompletionContext::Machine
-    } else if previous_word(&before) == "making" {
-        CompletionContext::Recipe
-    } else {
-        CompletionContext::Normal
+    let context = match previous_word(&before).as_str() {
+        "making" => CompletionContext::Recipe,
+        "with" => CompletionContext::Config,
+        "in" => CompletionContext::Machine,
+        _ => CompletionContext::Normal,
     };
 
     let mut items: Vec<(f64, CompletionItem)> = registry
@@ -342,6 +338,7 @@ pub(super) fn completion_items(
         .filter(|(_, entry)| match context {
             CompletionContext::Machine => entry.machine().is_some(),
             CompletionContext::Recipe => entry.recipe.is_some(),
+            CompletionContext::Config => entry.module.is_some() || entry.beacon.is_some(),
             CompletionContext::Normal => true,
         })
         .filter_map(|(index, entry)| {

@@ -1,32 +1,28 @@
-//! Units, parser, evaluator, and settings for hactorio.
+//! Facet values, parser, evaluator, and settings for hactorio.
 //!
 //! This crate has no dependency on egui and is testable headlessly.
 
-mod ast;
 mod belt;
-mod config;
-mod detail;
-mod eval;
+pub mod facet_eval;
+pub mod facet_format;
+pub mod facet_machine;
+pub mod facet_parser;
+pub mod facet_token;
+pub mod facets;
 mod format;
-mod lexer;
-mod line_cache;
-mod parser;
 mod settings;
+mod syntax;
 mod text;
 mod value;
 
-pub use ast::{BinaryOp, Expr, MachineSpec, ModuleUse, Span, Statement, StatementKind};
-pub use belt::{BeltTier, belt_capacity, belt_value, stack_size};
-pub use detail::{Details, DetailsRow, DetailsSection, details};
-pub use eval::{
-    Eval, EvalError, LineOutput, MachineOutput, MachineValue, ModuleCount, Output, RecipeOutput,
-    RecipeQuantity, RecipeValue, StatementOutput, evaluate, line_hash,
+pub use belt::{BeltTier, belt_capacity};
+pub use facet_eval::{
+    EvalError, LineOutput, StatementOutput, Variables, eval_expr, eval_statement, evaluate,
+    line_hash,
 };
-pub use format::{
-    Formatted, format_amount, format_energy, format_output, format_power, format_value,
-};
-pub use line_cache::LineCache;
-pub use parser::{ParseError, parse_line};
+pub use facet_format::{format_capacity, format_config, format_facet, format_machine, format_rate};
+pub use format::{format_amount, format_energy, format_power, format_value};
 pub use settings::{Settings, TimeUnit};
+pub use syntax::{BinaryOp, Span};
 pub use text::{from_plaintext, to_plaintext};
-pub use value::{BaseUnit, Value, ValueError};
+pub use value::{BaseUnit, Value};

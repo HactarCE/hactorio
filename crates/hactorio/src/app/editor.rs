@@ -1,7 +1,8 @@
 //! The tab editor: one multiline text field with outputs painted alongside it.
 
 use egui::{Color32, Context, CursorIcon, Rect, ScrollArea, Sense, TextEdit, TextStyle, Ui};
-use hactorio_core::{LineOutput, Settings, StatementOutput, line_hash};
+use hactorio_core::Settings;
+use hactorio_core::facet_eval::{LineOutput, StatementOutput, line_hash};
 use hactorio_data::Registry;
 
 use super::completion::{self, CompletionState, completion_items, completion_word};

@@ -189,7 +189,7 @@ fn word_start_matches_beat_longer_prefixes() {
 }
 
 #[test]
-fn completion_after_at_only_offers_machines() {
+fn completion_after_in_only_offers_machines() {
     let registry = fixture_registry();
     let machine = registry
         .entry("assembling-machine-3")
@@ -198,10 +198,10 @@ fn completion_after_at_only_offers_machines() {
         .to_string();
     let plate = registry.entry("iron-plate").unwrap().glyph.to_string();
 
-    let inserts = suggested_ids(&registry, "@asm");
+    let inserts = suggested_ids(&registry, "in asm");
     assert!(inserts.contains(&machine), "{inserts:?}");
 
-    let inserts = suggested_ids(&registry, "@ipl");
+    let inserts = suggested_ids(&registry, "in ipl");
     assert!(!inserts.contains(&plate), "{inserts:?}");
 }
 
@@ -327,10 +327,10 @@ fn variables_outrank_similar_prototype_matches() {
 #[test]
 fn variables_are_not_suggested_in_machine_or_recipe_contexts() {
     let registry = fixture_registry();
-    let machine = suggested_ids(&registry, "rate = 3\n@ra");
+    let machine = suggested_ids(&registry, "rate = 3\nin ra");
     assert!(!machine.contains(&"rate".to_string()), "{machine:?}");
 
-    let recipe = suggested_ids(&registry, "rate = 3\n@:assembling-machine-3: making ra");
+    let recipe = suggested_ids(&registry, "rate = 3\n:assembling-machine-3: making ra");
     assert!(!recipe.contains(&"rate".to_string()), "{recipe:?}");
 }
 
@@ -841,6 +841,8 @@ fn exact_names_outrank_near_miss_fuzzy_matches() {
             fluid: false,
             module: None,
             recipe: None,
+            beacon: None,
+            equipment: None,
         }
     }
 

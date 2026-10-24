@@ -2,7 +2,7 @@ use super::*;
 use crate::app::detail::{DetailContext, HoverTarget};
 use crate::document::Tab;
 use egui_kittest::kittest::Queryable;
-use hactorio_core::{LineCache, evaluate};
+use hactorio_core::facet_eval::evaluate;
 
 fn tooltip_is_open(harness: &Harness<'_, Option<HactorioApp>>) -> bool {
     harness.ctx.memory(|memory| {
@@ -161,8 +161,7 @@ fn detail_columns_do_not_wrap_at_large_font() {
       "energy_usage": "375kW"}
   }
 }"#;
-    let text =
-        "yb :iron-plate: in @:assembling-machine-3: 2:speed-module-3: making :iron-gear-wheel:";
+    let text = ":transport-belt: :iron-plate: in (:assembling-machine-3: with 2 :speed-module-3: making :iron-gear-wheel:)";
     let mut document = editor_document(&format!("# prod test\n{text}\n"), 1, 0);
     document.font_size = 24.0;
     document.settings.item_rate_belt = Some(hactorio_core::BeltTier::Yellow);
@@ -225,7 +224,7 @@ fn details_for_a_variable_show_its_value() {
     let settings = Settings::default();
     let text = "# Main\nrate = 3 :iron-plate: / second\n";
     let tabs = vec![Tab::from_text(text)];
-    let outputs = evaluate(text, &settings, &registry, &mut LineCache::new());
+    let outputs = evaluate(text, &settings, &registry);
     let mut harness = Harness::builder()
         .with_size(egui::vec2(500.0, 400.0))
         .with_accessibility_check(false)

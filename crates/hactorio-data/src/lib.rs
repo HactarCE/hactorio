@@ -16,9 +16,9 @@ pub use dump::{GameInstall, locate};
 pub use icons::{IconImage, IconSource, STACK_SIZE_GLYPH, STACK_SIZE_ICON};
 pub use postprocess::{Locale, postprocess};
 pub use registry::{
-    AllowedEffects, Entry, EntryId, Ingredient, Item, Machine, Module, ModuleEffect, PUA_COUNT,
-    PUA_FIRST, Product, ProductivityResearch, PrototypeKind, Recipe, RecipeId, RecipeProductivity,
-    Registry, glyph_for,
+    AllowedEffects, Beacon, Belt, Container, Entry, EntryId, Equipment, Ingredient, Inserter, Item,
+    Machine, Module, ModuleEffect, PUA_COUNT, PUA_FIRST, Product, ProductivityResearch,
+    PrototypeKind, Pump, Recipe, RecipeId, RecipeProductivity, Registry, glyph_for,
 };
 
 /// Errors from loading, validating, or post-processing prototype data.

@@ -56,6 +56,7 @@ pub fn postprocess(raw_dump_json: &str, locale: &Locale) -> Result<Registry> {
         .ok_or_else(|| Error::Invalid("dump root is not an object".into()))?;
 
     let machines = collect_machines(root);
+    let entities = collect_entities(root);
     let has_item = |name: &str| has_prototype(root, "item", name);
     let has_fluid = |name: &str| has_prototype(root, "fluid", name);
 
@@ -91,9 +92,16 @@ pub fn postprocess(raw_dump_json: &str, locale: &Locale) -> Result<Registry> {
             let draft = drafts.entry(id.as_str().into()).or_default();
             draft.display_name = locale.items.get(id.as_str()).cloned();
             draft.icon = icon_path(proto);
+            let entity = entities.get(id.as_str());
             draft.item = Some(Item {
                 stack_size: uint(proto, "stack_size", 1) as u32,
                 machine,
+                belt: entity.and_then(|entity| entity.belt),
+                inserter: entity.and_then(|entity| entity.inserter),
+                container: entity.and_then(|entity| entity.container),
+                pump: entity.and_then(|entity| entity.pump),
+                power_w: entity.and_then(|entity| entity.power_w),
+                stored_energy_j: entity.and_then(|entity| entity.stored_energy_j),
             });
         }
     }
@@ -142,6 +150,12 @@ pub fn postprocess(raw_dump_json: &str, locale: &Locale) -> Result<Registry> {
             ))
         })?;
         let recipe = recipe_ids.get(&id).copied();
+        let beacon = entities
+            .get(id.as_ref())
+            .and_then(|entity| entity.beacon.clone());
+        let equipment = entities
+            .get(id.as_ref())
+            .and_then(|entity| entity.equipment);
         entries.push(Entry {
             id,
             glyph,
@@ -151,6 +165,8 @@ pub fn postprocess(raw_dump_json: &str, locale: &Locale) -> Result<Registry> {
             fluid: draft.fluid,
             module: draft.module,
             recipe,
+            beacon,
+            equipment,
         });
     }
 
@@ -226,6 +242,137 @@ fn table<'a>(root: &'a Map<String, Value>, key: &str) -> Vec<(&'a str, &'a Value
                 .collect()
         })
         .unwrap_or_default()
+}
+
+#[derive(Default)]
+struct EntityMeta {
+    belt: Option<crate::Belt>,
+    inserter: Option<crate::Inserter>,
+    container: Option<crate::Container>,
+    pump: Option<crate::Pump>,
+    beacon: Option<crate::Beacon>,
+    equipment: Option<crate::Equipment>,
+    power_w: Option<f64>,
+    stored_energy_j: Option<f64>,
+}
+
+fn collect_entities(root: &Map<String, Value>) -> HashMap<Box<str>, EntityMeta> {
+    let mut out: HashMap<Box<str>, EntityMeta> = HashMap::new();
+    for (_table_name, table_value) in root {
+        let Some(prototypes) = table_value.as_object() else {
+            continue;
+        };
+        for (id, proto) in prototypes {
+            let kind = proto.get("type").and_then(Value::as_str).unwrap_or("");
+            let meta = out.entry(id.as_str().into()).or_default();
+            match kind {
+                "transport-belt" => {
+                    meta.belt = Some(crate::Belt {
+                        speed: proto.get("speed").and_then(Value::as_f64).unwrap_or(0.0),
+                    });
+                }
+                "inserter" => {
+                    meta.inserter = Some(crate::Inserter {
+                        rotation_speed: proto
+                            .get("rotation_speed")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(0.0),
+                        bulk: flag(proto, "bulk"),
+                        stack_size_bonus: uint(proto, "stack_size_bonus", 0) as u32,
+                    });
+                }
+                "pump" => {
+                    meta.pump = Some(crate::Pump {
+                        pumping_speed: proto
+                            .get("pumping_speed")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(0.0),
+                    });
+                }
+                "beacon" => {
+                    meta.beacon = Some(crate::Beacon {
+                        module_slots: uint(proto, "module_slots", 0) as u32,
+                        allowed_effects: allowed_effects(proto.get("allowed_effects")),
+                        distribution_effectivity: proto
+                            .get("distribution_effectivity")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(0.0),
+                        profile: proto
+                            .get("profile")
+                            .and_then(Value::as_array)
+                            .map(|values| values.iter().filter_map(Value::as_f64).collect())
+                            .unwrap_or_default(),
+                        energy_usage_w: proto
+                            .get("energy_usage")
+                            .and_then(Value::as_str)
+                            .and_then(parse_watts)
+                            .unwrap_or(0.0),
+                    });
+                }
+                _ => {}
+            }
+            if proto.get("inventory_size").is_some() || proto.get("fluid_box").is_some() {
+                meta.container = Some(crate::Container {
+                    slots: uint(proto, "inventory_size", 0) as u32,
+                    fluid_capacity: fluid_capacity(proto),
+                });
+            }
+            let power_w = proto
+                .get("energy_usage")
+                .or_else(|| proto.get("energy_consumption"))
+                .or_else(|| proto.get("power"))
+                .and_then(Value::as_str)
+                .and_then(parse_watts);
+            let stored_energy_j = proto
+                .get("buffer_capacity")
+                .or_else(|| proto.get("max_energy"))
+                .and_then(Value::as_str)
+                .and_then(parse_watts)
+                .or_else(|| {
+                    proto
+                        .get("energy_source")
+                        .and_then(|source| source.get("buffer_capacity"))
+                        .and_then(Value::as_str)
+                        .and_then(parse_watts)
+                });
+            meta.power_w = power_w;
+            meta.stored_energy_j = stored_energy_j;
+            if kind.ends_with("-equipment") || kind == "equipment" {
+                meta.equipment = Some(crate::Equipment {
+                    power_w,
+                    stored_energy_j,
+                });
+            }
+        }
+    }
+    out
+}
+
+fn fluid_capacity(proto: &Value) -> f64 {
+    let mut boxes: Vec<&Value> = Vec::new();
+    if let Some(fluid_box) = proto.get("fluid_box") {
+        boxes.push(fluid_box);
+    }
+    if let Some(array) = proto.get("fluid_boxes").and_then(Value::as_array) {
+        boxes.extend(array);
+    }
+    boxes.into_iter().map(fluid_box_volume).sum()
+}
+
+fn fluid_box_volume(fluid_box: &Value) -> f64 {
+    fluid_box
+        .get("volume")
+        .or_else(|| fluid_box.get("capacity"))
+        .and_then(Value::as_f64)
+        .or_else(|| {
+            let base_area = fluid_box.get("base_area").and_then(Value::as_f64)?;
+            let height = fluid_box
+                .get("height")
+                .and_then(Value::as_f64)
+                .unwrap_or(1.0);
+            Some(base_area * height * 10.0)
+        })
+        .unwrap_or(0.0)
 }
 
 fn collect_machines(root: &Map<String, Value>) -> HashMap<Box<str>, Machine> {

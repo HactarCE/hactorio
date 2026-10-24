@@ -7,9 +7,13 @@
 use std::sync::Arc;
 
 use egui::{Color32, RichText, Sense, TextStyle, Ui};
+use hactorio_core::facet_eval::{LineOutput, StatementOutput, line_hash};
+use hactorio_core::facet_format::{
+    format_capacity, format_config, format_facet, format_machine, format_rate,
+};
+use hactorio_core::facets::{Extent, FacetValue};
 use hactorio_core::{
-    BaseUnit, Eval, LineOutput, Output, RecipeQuantity, Settings, StatementOutput, Value,
-    format_amount, format_energy, format_output, format_power, format_value, line_hash,
+    BaseUnit, Settings, Value, format_amount, format_energy, format_power, format_value,
 };
 use hactorio_data::{Entry, PrototypeKind, Registry};
 
@@ -357,11 +361,11 @@ impl DetailContext<'_> {
         let LineOutput::Value(value) = &statement.output else {
             return;
         };
-        let formatted = format_output(value, self.settings, self.registry);
+        let formatted = format_facet(value, self.settings, self.registry);
 
         ui.heading(name);
-        ui.label(RichText::new(format!("{name} = {}", formatted.headline)).strong());
-        if let Some(value) = &statement.eval {
+        ui.label(RichText::new(format!("{name} = {formatted}")).strong());
+        if let Some(value) = &statement.value {
             self.value_details_ui(ui, value);
         }
     }
@@ -375,23 +379,78 @@ impl DetailContext<'_> {
             .find_map(|(index, text)| (definition_name(text) == Some(name)).then_some(index))
     }
 
-    fn value_details_ui(&self, ui: &mut Ui, value: &Eval) {
-        let details = hactorio_core::details(value, self.settings, self.registry);
-        for section in details.sections {
-            ui.add_space(6.0);
-            let title = section.title;
-            ui.label(RichText::new(&title).strong());
-            egui::Grid::new(ui.make_persistent_id(("details", &title)))
-                .num_columns(2)
-                .striped(true)
-                .show(ui, |ui| {
-                    for row in section.rows {
-                        ui.label(row.label);
-                        ui.label(row.value);
-                        ui.end_row();
-                    }
-                });
+    fn value_details_ui(&self, ui: &mut Ui, value: &FacetValue) {
+        let mut rows = Vec::new();
+        if let Some(item) = &value.item {
+            let value = Value::new(
+                item.coef(),
+                item.units()
+                    .iter()
+                    .map(|(unit, exponent)| (*unit, *exponent)),
+            );
+            rows.push((
+                "item".to_string(),
+                format_value(&value, self.settings, self.registry),
+            ));
         }
+        if let Some(recipe) = value.recipe {
+            rows.push((
+                "recipe".to_string(),
+                self.registry.recipe(recipe).id.to_string(),
+            ));
+        }
+        if let Some(machine) = &value.machine {
+            rows.push((
+                "machine".to_string(),
+                format_machine(machine, self.settings, self.registry),
+            ));
+        }
+        if let Some(process) = &value.process {
+            if let Some(extent) = process.extent {
+                rows.push((
+                    "extent".to_string(),
+                    match extent {
+                        Extent::Machines(count) => format!("{count} machines"),
+                        Extent::MachineSeconds(seconds) => format!("{seconds} machine-seconds"),
+                    },
+                ));
+            }
+            for (unit, amount) in &process.net {
+                let rate = !matches!(process.extent, Some(Extent::MachineSeconds(_)));
+                rows.push((
+                    unit_label(self.registry, *unit),
+                    format_amount(*amount, *unit, rate, self.settings, self.registry),
+                ));
+            }
+            if let Some(power) = process.power_w {
+                rows.push(("power".to_string(), format_power(power, self.settings)));
+            }
+            if let Some(energy) = process.energy_j {
+                rows.push(("energy".to_string(), format_energy(energy, self.settings)));
+            }
+        }
+        if let Some(config) = &value.config {
+            rows.push((
+                "config".to_string(),
+                format_config(config, self.settings, self.registry),
+            ));
+        }
+        if let Some(belt) = &value.belt {
+            rows.push(("belt count".to_string(), format!("{}", belt.count)));
+        }
+        if let Some(rate) = &value.rate {
+            rows.push((
+                "rate".to_string(),
+                format_rate(rate, self.settings, self.registry),
+            ));
+        }
+        if let Some(capacity) = &value.capacity {
+            rows.push((
+                "capacity".to_string(),
+                format_capacity(capacity, self.settings, self.registry),
+            ));
+        }
+        self.section_grid(ui, "value", rows);
     }
 
     fn section_grid(&self, ui: &mut Ui, title: &str, rows: Vec<(String, String)>) {
@@ -545,102 +604,73 @@ fn detail_ui(
             ui.label(RichText::new(&error.message).color(Color32::from_rgb(220, 90, 90)));
         }
         LineOutput::Value(value) => {
-            let formatted = format_output(value, settings, registry);
-            hovered = icon_label(ui, &formatted.headline, registry);
+            let formatted = format_facet(value, settings, registry);
+            hovered = icon_label(ui, &formatted, registry);
 
-            let Output::Recipe(recipe) = value else {
-                return hovered;
-            };
-            let rate = matches!(recipe.quantity, RecipeQuantity::Machines(_));
-
-            let mut units: Vec<(BaseUnit, f64)> = recipe
-                .net
-                .iter()
-                .filter(|(unit, _)| **unit != BaseUnit::Craft)
-                .map(|(unit, amount)| (*unit, *amount))
-                .collect();
-            units.sort_by_key(|(unit, _)| unit_label(registry, *unit));
-
-            let mut produces = Vec::new();
-            let mut consumes = Vec::new();
-            for (unit, amount) in units {
-                let text = format_amount(amount.abs(), unit, rate, settings, registry);
-                if amount > 0.0 {
-                    produces.push(text);
-                } else {
-                    consumes.push(text);
-                }
-            }
-
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = 18.0;
-                ui.vertical(|ui| {
-                    ui.set_min_width(90.0);
-                    ui.label(RichText::new("produces").weak());
-                    for produce in &produces {
-                        if hovered.is_none() {
-                            hovered = icon_label(ui, produce, registry);
-                        }
+            if let Some(process) = &value.process {
+                let rate = !matches!(process.extent, Some(Extent::MachineSeconds(_)));
+                let mut produces = Vec::new();
+                let mut consumes = Vec::new();
+                for (unit, amount) in &process.net {
+                    if *unit == BaseUnit::Craft {
+                        continue;
                     }
-                });
-                ui.vertical(|ui| {
-                    ui.set_min_width(90.0);
-                    ui.label(RichText::new("consumes").weak());
-                    for consume in &consumes {
-                        if hovered.is_none() {
-                            hovered = icon_label(ui, consume, registry);
-                        }
+                    let text = format_amount(amount.abs(), *unit, rate, settings, registry);
+                    if *amount > 0.0 {
+                        produces.push(text);
+                    } else {
+                        consumes.push(text);
                     }
+                }
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = 18.0;
+                    ui.vertical(|ui| {
+                        ui.set_min_width(90.0);
+                        ui.label(RichText::new("produces").weak());
+                        for produce in &produces {
+                            if hovered.is_none() {
+                                hovered = icon_label(ui, produce, registry);
+                            }
+                        }
+                    });
+                    ui.vertical(|ui| {
+                        ui.set_min_width(90.0);
+                        ui.label(RichText::new("consumes").weak());
+                        for consume in &consumes {
+                            if hovered.is_none() {
+                                hovered = icon_label(ui, consume, registry);
+                            }
+                        }
+                    });
                 });
-            });
-
-            if let Some(craft) = recipe.net.get(&BaseUnit::Craft).copied() {
-                let value = if rate {
-                    Value::new(craft, [(BaseUnit::Craft, 1), (BaseUnit::Second, -1)])
-                } else {
-                    Value::crafts(craft)
-                };
-                if hovered.is_none() {
-                    hovered = icon_label(ui, &format_value(&value, settings, registry), registry);
+                if let Some(craft) = process.net.get(&BaseUnit::Craft).copied() {
+                    let text = if rate {
+                        format!("{} craft/s", format_plain_count(craft, settings, registry))
+                    } else {
+                        format!("{} craft", format_plain_count(craft, settings, registry))
+                    };
+                    if hovered.is_none() {
+                        hovered = icon_label(ui, &text, registry);
+                    }
                 }
-            }
-
-            let glyph = registry.entry_by_index(recipe.machine).glyph;
-            if hovered.is_none() {
-                hovered = icon_label(
-                    ui,
-                    &format!(
-                        "{}/{glyph}",
-                        format_power(recipe.per_machine_power_w, settings)
-                    ),
-                    registry,
-                );
-            }
-            let count = recipe.quantity.magnitude();
-            if rate && count != 1.0 {
-                if hovered.is_none() {
-                    hovered = icon_label(
-                        ui,
-                        &format!(
-                            "{} total",
-                            format_power(recipe.per_machine_power_w * count, settings)
-                        ),
-                        registry,
-                    );
+                if let Some(power) = process.power_w {
+                    if hovered.is_none() {
+                        hovered = icon_label(ui, &format_power(power, settings), registry);
+                    }
                 }
-            }
-            if !rate && let Some(energy) = recipe.total_energy_j {
-                if hovered.is_none() {
-                    hovered = icon_label(
-                        ui,
-                        &format!("{} total energy", format_energy(energy, settings)),
-                        registry,
-                    );
+                if let Some(energy) = process.energy_j {
+                    if hovered.is_none() {
+                        hovered = icon_label(ui, &format_energy(energy, settings), registry);
+                    }
                 }
             }
         }
     }
     hovered
+}
+
+fn format_plain_count(value: f64, settings: &Settings, registry: &Registry) -> String {
+    format_value(&Value::scalar(value), settings, registry)
 }
 
 fn unit_label(registry: &Registry, unit: BaseUnit) -> String {
@@ -660,14 +690,6 @@ pub(super) fn output_text(
     match &statement.output {
         LineOutput::Nothing => None,
         LineOutput::Error(error) => Some(error.message.clone()),
-        LineOutput::Value(value) => {
-            let formatted = format_output(value, settings, registry);
-            let mut text = formatted.headline;
-            for row in formatted.rows {
-                text.push_str(" · ");
-                text.push_str(&row);
-            }
-            Some(text)
-        }
+        LineOutput::Value(value) => Some(format_facet(value, settings, registry)),
     }
 }

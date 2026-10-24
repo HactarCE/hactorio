@@ -20,10 +20,10 @@ mod tooltips;
 fn sample_document() -> Document {
     let text = "# Main\n\
         rate = 3 :iron-plate: / second\n\
-        100 :electronic-circuit: / second in @:assembling-machine-3: making :electronic-circuit:\n\
-        @:electric-furnace: 2 :productivity-module-3: making :iron-plate:\n\
-        100 :iron-plate: in @:electric-furnace:\n\
-        2 sgb :iron-plate:\n\
+        100 :electronic-circuit: / second in (:assembling-machine-3: making :electronic-circuit:)\n\
+        2 :electric-furnace: with 2 :productivity-module-3: making :iron-plate:\n\
+        100 :iron-plate: in :electric-furnace:\n\
+        :stack-size: :transport-belt: :iron-plate:\n\
         3 m + 4\n";
     Document {
         tabs: vec![text.to_string()],
