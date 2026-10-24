@@ -393,10 +393,16 @@ impl DetailContext<'_> {
                 format_value(&value, self.settings, self.registry),
             ));
         }
-        if let Some(recipe) = value.recipe {
+        if let Some(rate) = &value.rate {
             rows.push((
-                "recipe".to_string(),
-                self.registry.recipe(recipe).id.to_string(),
+                "rate".to_string(),
+                format_rate(rate, self.settings, self.registry),
+            ));
+        }
+        if let Some(capacity) = &value.capacity {
+            rows.push((
+                "capacity".to_string(),
+                format_capacity(capacity, self.settings, self.registry),
             ));
         }
         if let Some(machine) = &value.machine {
@@ -435,19 +441,10 @@ impl DetailContext<'_> {
                 format_config(config, self.settings, self.registry),
             ));
         }
-        if let Some(belt) = &value.belt {
-            rows.push(("belt count".to_string(), format!("{}", belt.count)));
-        }
-        if let Some(rate) = &value.rate {
+        if let Some(recipe) = value.recipe {
             rows.push((
-                "rate".to_string(),
-                format_rate(rate, self.settings, self.registry),
-            ));
-        }
-        if let Some(capacity) = &value.capacity {
-            rows.push((
-                "capacity".to_string(),
-                format_capacity(capacity, self.settings, self.registry),
+                "recipe".to_string(),
+                self.registry.recipe(recipe).id.to_string(),
             ));
         }
         self.section_grid(ui, "value", rows);

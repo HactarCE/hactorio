@@ -7,22 +7,13 @@ use egui::ColorImage;
 use egui::epaint::text::{
     FontPriority, GlyphBitmap, GlyphRasterizer, GlyphRasterizerRequest, RasterizedGlyph,
 };
-use hactorio_data::{IconImage, IconSource, Registry, STACK_SIZE_GLYPH, STACK_SIZE_ICON};
+use hactorio_data::{IconImage, IconSource, Registry, SIGNALS};
 
-/// Glyph for a variable in the completion popup.
-///
-/// Uses the game's `V` virtual signal; it is not a namespace entry.
-pub const VARIABLE: char = '\u{F8FE}';
 /// Icon path of the variable's virtual signal.
 const VARIABLE_ICON: &str = "__base__/graphics/icons/signal/signal-item-parameter.png";
 
-/// Icons that are not namespace entries, as `(glyph, data path)`.
-/// Paths come from the dump verbatim; file names mix `_` and `-`
-/// (`signal_V.png`, `signal-item-parameter.png`), and missing files are silently skipped.
-const EXTRAS: &[(char, &str)] = &[
-    (STACK_SIZE_GLYPH, STACK_SIZE_ICON),
-    (VARIABLE, VARIABLE_ICON),
-];
+/// Glyph for a variable in the completion popup.
+pub use hactorio_data::VARIABLE_GLYPH as VARIABLE;
 
 /// Installs a highest-priority rasterizer that draws namespace glyphs as icons.
 ///
@@ -38,10 +29,13 @@ pub fn install(ctx: &egui::Context, registry: Arc<Registry>, source: &IconSource
             icons.insert(entry.glyph, image);
         }
     }
-    for &(glyph, path) in EXTRAS {
-        if let Some(image) = source.read_rgba(path) {
-            icons.insert(glyph, image);
+    for signal in &SIGNALS {
+        if let Some(image) = source.read_rgba(signal.icon) {
+            icons.insert(signal.glyph, image);
         }
+    }
+    if let Some(image) = source.read_rgba(VARIABLE_ICON) {
+        icons.insert(VARIABLE, image);
     }
     let icons = Arc::new(icons);
     type ScaleCache = Arc<Mutex<HashMap<(char, u32), Arc<ColorImage>>>>;

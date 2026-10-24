@@ -29,8 +29,10 @@ pub fn token_value(
     let entry = registry.entry_by_index(entry_id);
     let mut value = if entry.fluid {
         FacetValue::item(Monomial::new(1.0, [(BaseUnit::Fluid(entry_id), 1)]))
-    } else {
+    } else if entry.item.is_some() {
         FacetValue::item(Monomial::new(1.0, [(BaseUnit::Item(entry_id), 1)]))
+    } else {
+        FacetValue::empty()
     };
 
     value.recipe = entry.recipe;
@@ -121,9 +123,7 @@ fn inserter_capacity(
         .inserter_capacity
         .min(registry.inserter_research().max_level());
     let bonus = registry.inserter_research().bonus(level);
-    let bonus = if inserter.stack_size_bonus > 0 {
-        bonus.bulk + bonus.stack
-    } else if inserter.bulk {
+    let bonus = if inserter.bulk || inserter.stack_size_bonus > 0 {
         bonus.bulk
     } else {
         bonus.non_bulk
@@ -170,7 +170,8 @@ mod tests {
         "speed-module-3": {"type": "module", "name": "speed-module-3", "category": "speed", "tier": 3, "stack_size": 50, "effect": {"speed": 0.5}}
       },
       "recipe": {
-        "iron-plate": {"type": "recipe", "name": "iron-plate", "categories": ["smelting"], "energy_required": 3.2, "results": [{"type": "item", "name": "iron-plate", "amount": 1}]}
+        "iron-plate": {"type": "recipe", "name": "iron-plate", "categories": ["smelting"], "energy_required": 3.2, "results": [{"type": "item", "name": "iron-plate", "amount": 1}]},
+        "casting-iron": {"type": "recipe", "name": "casting-iron", "categories": ["metallurgy"], "energy_required": 3.2, "results": [{"type": "item", "name": "iron-plate", "amount": 1}]}
       },
       "transport-belt": {
         "transport-belt": {"type": "transport-belt", "name": "transport-belt", "speed": 0.03125}
@@ -308,5 +309,84 @@ mod tests {
         let config = value.config.unwrap();
         assert_eq!(config.beacons.len(), 1);
         assert!(config.beacons[0].modules.is_empty());
+    }
+
+    #[test]
+    fn recipe_only_token_has_no_item_facet() {
+        let registry = registry();
+        let value = token_value(
+            entry_id(&registry, "casting-iron"),
+            &registry,
+            &Settings::default(),
+        )
+        .unwrap();
+        assert!(value.item.is_none());
+        assert!(value.recipe.is_some());
+    }
+
+    #[test]
+    fn module_token_has_item_config_and_recipe() {
+        const MODULE_DUMP: &str = r#"{
+          "item": {
+            "iron-plate": {"type": "item", "name": "iron-plate", "stack_size": 100}
+          },
+          "fluid": {},
+          "module": {
+            "speed-module-3": {"type": "module", "name": "speed-module-3", "category": "speed", "tier": 3, "stack_size": 50, "effect": {"speed": 0.5}}
+          },
+          "recipe": {
+            "speed-module-3": {"type": "recipe", "name": "speed-module-3", "categories": ["crafting"], "energy_required": 60, "ingredients": [{"type": "item", "name": "iron-plate", "amount": 1}], "results": [{"type": "item", "name": "speed-module-3", "amount": 1}]}
+          }
+        }"#;
+        let registry = postprocess(MODULE_DUMP, &Locale::empty()).unwrap();
+        let value = token_value(
+            entry_id(&registry, "speed-module-3"),
+            &registry,
+            &Settings::default(),
+        )
+        .unwrap();
+        let item = value.item.expect("module token must have an item facet");
+        assert_eq!(item.units().len(), 1);
+        assert!(value.config.is_some(), "module token must have config");
+        assert!(value.recipe.is_some(), "module token must have recipe");
+    }
+
+    #[test]
+    fn stack_inserter_uses_only_the_bulk_bonus() {
+        const INSERTER_DUMP: &str = r#"{
+          "item": {
+            "inserter": {"type": "item", "name": "inserter", "stack_size": 50},
+            "bulk-inserter": {"type": "item", "name": "bulk-inserter", "stack_size": 50},
+            "stack-inserter": {"type": "item", "name": "stack-inserter", "stack_size": 50}
+          },
+          "fluid": {},
+          "inserter": {
+            "inserter": {"type": "inserter", "name": "inserter", "rotation_speed": 0.014, "bulk": false},
+            "bulk-inserter": {"type": "inserter", "name": "bulk-inserter", "rotation_speed": 0.014, "bulk": true},
+            "stack-inserter": {"type": "inserter", "name": "stack-inserter", "rotation_speed": 0.014, "bulk": true, "stack_size_bonus": 4}
+          },
+          "technology": {
+            "inserter-capacity-bonus-1": {"type": "technology", "effects": [
+              {"type": "inserter-stack-size-bonus", "modifier": 1},
+              {"type": "bulk-inserter-capacity-bonus", "modifier": 2},
+              {"type": "stack-inserter-capacity-bonus", "modifier": 5}
+            ]}
+          }
+        }"#;
+        let registry = postprocess(INSERTER_DUMP, &Locale::empty()).unwrap();
+        let settings = Settings {
+            inserter_capacity: 1,
+            ..Settings::default()
+        };
+        for (id, expected) in [("inserter", 2), ("bulk-inserter", 4), ("stack-inserter", 8)] {
+            let value = token_value(entry_id(&registry, id), &registry, &settings).unwrap();
+            let RateFacet::Items(items) = value.rate.unwrap() else {
+                panic!("expected item rate");
+            };
+            assert!(
+                items.contains_key(&Cap::Limit(expected)),
+                "{id}: expected {expected}, got {items:?}"
+            );
+        }
     }
 }

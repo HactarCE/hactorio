@@ -9,7 +9,7 @@ use crate::registry::{Entry, InserterResearch, ProductivityResearch, Recipe, Reg
 use crate::{Error, Result};
 
 /// Bumping this invalidates every existing cache.
-pub(crate) const CACHE_VERSION: u32 = 7;
+pub(crate) const CACHE_VERSION: u32 = 8;
 
 #[derive(Serialize)]
 struct CacheRef<'a> {

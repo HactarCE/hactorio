@@ -259,6 +259,12 @@ impl Parser<'_> {
                     ));
                 }
             };
+            if !is_valid_identifier(&name) {
+                return Err(ParseError::new(
+                    first,
+                    format!("`{name}` is not a valid identifier"),
+                ));
+            }
             if self.registry.entry(&name).is_some() {
                 return Err(ParseError::new(
                     first,
@@ -450,6 +456,12 @@ impl Parser<'_> {
             TokenKind::Signal(_) => {
                 return Err(ParseError::new(span, "signals are only valid after `.`"));
             }
+            TokenKind::Ident(name) if !is_valid_identifier(&name) => {
+                return Err(ParseError::new(
+                    span,
+                    format!("`{name}` is not an identifier"),
+                ));
+            }
             TokenKind::Ident(name) => Expr {
                 kind: ExprKind::Variable(name),
                 span,
@@ -625,6 +637,12 @@ enum Infix {
     In,
 }
 
+fn is_valid_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(ch) if ch.is_ascii_alphabetic() || ch == '_')
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+}
+
 fn property(name: &str) -> Option<Property> {
     Some(match name {
         "rate" => Property::Rate,
@@ -652,8 +670,8 @@ fn keyword(word: &str) -> Option<TokenKind> {
         "in" => Some(TokenKind::In),
         "with" => Some(TokenKind::With),
         "making" => Some(TokenKind::Making),
-        "joule" => Some(TokenKind::Joule),
-        "watt" => Some(TokenKind::Watt),
+        "joule" | "J" => Some(TokenKind::Joule),
+        "watt" | "W" => Some(TokenKind::Watt),
         "craft" => Some(TokenKind::Craft),
         _ => TimeUnit::from_word(word).map(TokenKind::Time),
     }
@@ -720,6 +738,20 @@ fn lex(line: &str, registry: &Registry) -> Result<Vec<Token>, ParseError> {
                 let start = index;
                 index += ch.len_utf8();
                 let span = Span::new(start as u32, index as u32);
+                if let Some(signal) = hactorio_data::signal_by_glyph(ch) {
+                    let kind = match signal.id {
+                        "stack-size" => Signal::StackSize,
+                        "clock" => Signal::Clock,
+                        "speed" => Signal::Speed,
+                        "lightning" => Signal::Lightning,
+                        _ => return Err(ParseError::new(span, "unknown signal glyph")),
+                    };
+                    tokens.push(Token {
+                        kind: TokenKind::Signal(kind),
+                        span,
+                    });
+                    continue;
+                }
                 let entry = registry
                     .entry_by_glyph(ch)
                     .ok_or_else(|| ParseError::new(span, "unknown prototype glyph"))?;
@@ -818,9 +850,12 @@ fn lex_number(line: &str, index: &mut usize) -> Result<f64, ParseError> {
             break;
         }
     }
-    let mut text = line[start..*index].to_string();
+    let text = &line[start..*index];
     if text.ends_with('.') {
-        text.push('0');
+        return Err(ParseError::new(
+            Span::new(start as u32, *index as u32),
+            "a number cannot end with `.`",
+        ));
     }
     let mut value: f64 = text
         .parse()
@@ -904,6 +939,48 @@ mod tests {
         assert!(matches!(
             expr("3 s").kind,
             ExprKind::Time { count: 3.0, .. }
+        ));
+        assert!(matches!(expr("3 J").kind, ExprKind::Joule(3.0)));
+        assert!(matches!(expr("3 W").kind, ExprKind::Watt(3.0)));
+        assert!(matches!(expr("3J").kind, ExprKind::Joule(3.0)));
+        assert!(matches!(expr("3W").kind, ExprKind::Watt(3.0)));
+    }
+
+    #[test]
+    fn rejects_trailing_dot_numbers() {
+        assert!(parse_line("3.", &registry()).is_err());
+        assert!(parse_line("3. + 1", &registry()).is_err());
+        assert!(parse_line(".5", &registry()).is_ok());
+        assert!(parse_line("3.5", &registry()).is_ok());
+    }
+
+    #[test]
+    fn rejects_stack_size_as_an_identifier() {
+        assert!(parse_line("stack-size = 7", &registry()).is_err());
+        assert!(parse_line("stack-size", &registry()).is_err());
+        assert!(parse_line("x.stack-size", &registry()).is_ok());
+        assert!(parse_line(".:stack-size:", &registry()).is_err());
+    }
+
+    #[test]
+    fn lexes_signal_glyphs() {
+        let clock = hactorio_data::signal_by_id("clock").unwrap().glyph;
+        let clock_expr = expr(&format!("x.{clock}"));
+        assert!(matches!(
+            clock_expr.kind,
+            ExprKind::Property {
+                selector: Selector::Signal(Signal::Clock),
+                ..
+            }
+        ));
+        let stack = hactorio_data::signal_by_id("stack-size").unwrap().glyph;
+        let stack_expr = expr(&format!("x.{stack}"));
+        assert!(matches!(
+            stack_expr.kind,
+            ExprKind::Property {
+                selector: Selector::Signal(Signal::StackSize),
+                ..
+            }
         ));
     }
 

@@ -8,8 +8,10 @@ use crate::{Error, Result};
 
 /// First codepoint of the BMP private use area, where glyphs are assigned.
 pub const PUA_FIRST: u32 = 0xE000;
-/// Number of codepoints in the BMP private use area.
-pub const PUA_COUNT: u32 = 0xF8FF - PUA_FIRST + 1;
+/// Last codepoint available to namespace entries.
+pub const PUA_LAST: u32 = 0xF8EF;
+/// Number of codepoints available to namespace entries.
+pub const PUA_COUNT: u32 = PUA_LAST - PUA_FIRST + 1;
 
 /// The glyph assigned to the entry at `index`, or `None` if the namespace is
 /// too large to fit in the private use area.
@@ -245,7 +247,6 @@ pub struct Product {
 pub struct InserterBonus {
     pub non_bulk: f64,
     pub bulk: f64,
-    pub stack: f64,
 }
 
 /// Inserter capacity research, indexed by completed level.
@@ -460,6 +461,9 @@ impl Registry {
 
     /// Resolves a private-use codepoint back to its entry.
     pub fn entry_by_glyph(&self, glyph: char) -> Option<&Entry> {
+        if (glyph as u32) > PUA_LAST {
+            return None;
+        }
         let index = (glyph as u32).checked_sub(PUA_FIRST)? as usize;
         let entry = self.entries.get(index)?;
         (entry.glyph == glyph).then_some(entry)

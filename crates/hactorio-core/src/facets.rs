@@ -761,7 +761,7 @@ impl FacetValue {
     ) -> Result<Self, FacetError> {
         if let Some(rate) = &self.rate {
             if let Some((unit, coef)) = other.pure_item_amount() {
-                return apply_rate_or_capacity(rate, unit, coef, rhs_item_stack_size);
+                return apply_rate(rate, unit, coef, rhs_item_stack_size);
             }
         }
         if let Some(capacity) = &self.capacity {
@@ -943,6 +943,7 @@ fn rate_to_capacity(rate: &RateFacet, time: f64) -> FacetValue {
             items
                 .iter()
                 .map(|(cap, amount)| (*cap, *amount * time))
+                .filter(|(_, amount)| *amount != 0.0)
                 .collect(),
         ),
         RateFacet::Fluid(value) => CapacityFacet::Fluid(value * time),
@@ -960,7 +961,8 @@ fn effective_stack(cap: Cap, stack_size: u32) -> u32 {
     }
 }
 
-fn apply_rate_or_capacity(
+/// Applies a rate facet to an item/fluid quantity, producing a rate quantity.
+fn apply_rate(
     facet: &RateFacet,
     unit: BaseUnit,
     coef: f64,
@@ -978,9 +980,13 @@ fn apply_rate_or_capacity(
         }
         _ => return Err(FacetError::RateCapacityMismatch),
     };
-    Ok(FacetValue::item(Monomial::new(amount, [(unit, 1)])))
+    Ok(FacetValue::item(Monomial::new(
+        amount,
+        [(unit, 1), (BaseUnit::Second, -1)],
+    )))
 }
 
+/// Applies a capacity facet to an item/fluid quantity, producing an amount.
 fn apply_capacity(
     facet: &CapacityFacet,
     unit: BaseUnit,
@@ -1083,6 +1089,7 @@ fn scale_rate(rate: &RateFacet, factor: f64) -> RateFacet {
             items
                 .iter()
                 .map(|(cap, amount)| (*cap, *amount * factor))
+                .filter(|(_, amount)| *amount != 0.0)
                 .collect(),
         ),
         RateFacet::Fluid(value) => RateFacet::Fluid(value * factor),
@@ -1095,6 +1102,7 @@ fn scale_capacity(capacity: &CapacityFacet, factor: f64) -> CapacityFacet {
             items
                 .iter()
                 .map(|(cap, amount)| (*cap, *amount * factor))
+                .filter(|(_, amount)| *amount != 0.0)
                 .collect(),
         ),
         CapacityFacet::Fluid(value) => CapacityFacet::Fluid(value * factor),
@@ -1107,6 +1115,7 @@ fn scale_capacity_to_rate(capacity: &CapacityFacet, factor: f64) -> FacetValue {
             items
                 .iter()
                 .map(|(cap, amount)| (*cap, *amount * factor))
+                .filter(|(_, amount)| *amount != 0.0)
                 .collect(),
         ),
         CapacityFacet::Fluid(value) => RateFacet::Fluid(value * factor),
@@ -1711,12 +1720,35 @@ mod tests {
         let iron = FacetValue::item(Monomial::new(2.0, [(BaseUnit::Item(item), 1)]));
         let result = belt.juxtapose(&iron, Some(10)).unwrap();
         // 2 * min(Full,10) + 3 * min(Limit(4),10) = 20 + 12 = 32, times 2.
-        assert_eq!(result.item.unwrap().coef(), 64.0);
+        let applied = result.item.unwrap();
+        assert_eq!(applied.coef(), 64.0);
+        assert_eq!(applied.exponent(BaseUnit::Second), -1);
 
         let mut chest = FacetValue::empty();
         chest.capacity = Some(CapacityFacet::Items(BTreeMap::from([(Cap::Full, 4.0)])));
         let result = chest.juxtapose(&iron, Some(10)).unwrap();
-        assert_eq!(result.item.unwrap().coef(), 80.0);
+        let applied = result.item.unwrap();
+        assert_eq!(applied.coef(), 80.0);
+        assert_eq!(applied.exponent(BaseUnit::Second), 0);
+    }
+
+    #[test]
+    fn scaling_by_zero_removes_rate_and_capacity_terms() {
+        let mut rate = FacetValue::empty();
+        rate.rate = Some(RateFacet::Items(BTreeMap::from([(Cap::Limit(1), 15.0)])));
+        let scaled = rate.mul(&FacetValue::scalar(0.0)).unwrap();
+        let RateFacet::Items(items) = scaled.rate.unwrap() else {
+            panic!("expected item rate");
+        };
+        assert!(items.is_empty());
+
+        let mut capacity = FacetValue::empty();
+        capacity.capacity = Some(CapacityFacet::Items(BTreeMap::from([(Cap::Full, 48.0)])));
+        let scaled = capacity.mul(&FacetValue::scalar(0.0)).unwrap();
+        let CapacityFacet::Items(items) = scaled.capacity.unwrap() else {
+            panic!("expected item capacity");
+        };
+        assert!(items.is_empty());
     }
 
     #[test]

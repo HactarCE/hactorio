@@ -120,6 +120,18 @@ pub fn postprocess(raw_dump_json: &str, locale: &Locale) -> Result<Registry> {
     for (id, proto) in table(root, "module") {
         let draft = drafts.entry(id.into()).or_default();
         draft.icon = icon_path(proto);
+        if draft.item.is_none() {
+            draft.item = Some(Item {
+                stack_size: uint(proto, "stack_size", 1) as u32,
+                machine: None,
+                belt: None,
+                inserter: None,
+                container: None,
+                pump: None,
+                power_w: None,
+                stored_energy_j: None,
+            });
+        }
         draft.module = Some(Module {
             category: proto
                 .get("category")
@@ -252,7 +264,6 @@ fn collect_inserter_research(root: &Map<String, Value>) -> InserterResearch {
             match kind {
                 "inserter-stack-size-bonus" => bonus.non_bulk += modifier,
                 "bulk-inserter-capacity-bonus" => bonus.bulk += modifier,
-                "stack-inserter-capacity-bonus" => bonus.stack += modifier,
                 _ => {}
             }
         }
@@ -265,7 +276,6 @@ fn collect_inserter_research(root: &Map<String, Value>) -> InserterResearch {
         if let Some(bonus) = per_level.get(&level) {
             cumulative.non_bulk += bonus.non_bulk;
             cumulative.bulk += bonus.bulk;
-            cumulative.stack += bonus.stack;
         }
         levels.push(cumulative);
     }
@@ -378,14 +388,19 @@ fn collect_entities(root: &Map<String, Value>) -> HashMap<Box<str>, EntityMeta> 
                 .get("buffer_capacity")
                 .or_else(|| proto.get("max_energy"))
                 .and_then(Value::as_str)
-                .and_then(parse_watts)
+                .and_then(parse_joules)
                 .or_else(|| {
                     proto
                         .get("energy_source")
                         .and_then(|source| source.get("buffer_capacity"))
                         .and_then(Value::as_str)
-                        .and_then(parse_watts)
+                        .and_then(parse_joules)
                 });
+            if matches!(kind, "item" | "fluid" | "module" | "recipe" | "resource") {
+                // These tables can share an id with an entity; the entity owns
+                // the power/energy metadata.
+                continue;
+            }
             meta.power_w = power_w;
             meta.stored_energy_j = stored_energy_j;
             if kind.ends_with("-equipment") || kind == "equipment" {
@@ -750,6 +765,23 @@ fn parse_watts(value: &str) -> Option<f64> {
         "MW" => 1e6,
         "GW" => 1e9,
         "TW" => 1e12,
+        _ => return None,
+    };
+    Some(number * multiplier)
+}
+
+fn parse_joules(value: &str) -> Option<f64> {
+    let split = value
+        .find(|c: char| c.is_ascii_alphabetic())
+        .unwrap_or(value.len());
+    let (number, unit) = value.split_at(split);
+    let number: f64 = number.trim().parse().ok()?;
+    let multiplier = match unit.trim() {
+        "" | "J" => 1.0,
+        "kJ" => 1e3,
+        "MJ" => 1e6,
+        "GJ" => 1e9,
+        "TJ" => 1e12,
         _ => return None,
     };
     Some(number * multiplier)

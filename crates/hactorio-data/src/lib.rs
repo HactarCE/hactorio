@@ -13,11 +13,14 @@ mod registry;
 use thiserror::Error;
 
 pub use dump::{GameInstall, locate};
-pub use icons::{IconImage, IconSource, STACK_SIZE_GLYPH, STACK_SIZE_ICON};
+pub use icons::{
+    IconImage, IconSource, SIGNALS, STACK_SIZE_GLYPH, STACK_SIZE_ICON, SignalIcon, VARIABLE_GLYPH,
+    signal_by_glyph, signal_by_id,
+};
 pub use postprocess::{Locale, postprocess};
 pub use registry::{
     AllowedEffects, Beacon, Belt, Container, Entry, EntryId, Equipment, Ingredient, Inserter, Item,
-    Machine, Module, ModuleEffect, PUA_COUNT, PUA_FIRST, Product, ProductivityResearch,
+    Machine, Module, ModuleEffect, PUA_COUNT, PUA_FIRST, PUA_LAST, Product, ProductivityResearch,
     PrototypeKind, Pump, Recipe, RecipeId, RecipeProductivity, Registry, glyph_for,
 };
 

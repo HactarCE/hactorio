@@ -4,14 +4,57 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+/// One fixed signal: its plaintext id, PUA glyph, and icon path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SignalIcon {
+    pub id: &'static str,
+    pub glyph: char,
+    pub icon: &'static str,
+}
+
 /// Glyph for the game's stack-size signal, which is not a prototype entry.
-///
-/// It occupies the last BMP private-use codepoint, far above any prototype's
-/// glyph in practice.
 pub const STACK_SIZE_GLYPH: char = '\u{F8FF}';
 
 /// Icon path of the stack-size signal.
 pub const STACK_SIZE_ICON: &str = "__base__/graphics/icons/signal/signal-stack-size.png";
+
+/// Glyph reserved for the variable icon in the completion popup.
+pub const VARIABLE_GLYPH: char = '\u{F8FE}';
+
+/// Fixed signal table. Signals are not namespace entries.
+///
+/// `F8F0..F8FA` are reserved, and namespace entries stop at `F8EF`, so signal
+/// lookup always precedes entry lookup.
+pub const SIGNALS: [SignalIcon; 4] = [
+    SignalIcon {
+        id: "stack-size",
+        glyph: STACK_SIZE_GLYPH,
+        icon: STACK_SIZE_ICON,
+    },
+    SignalIcon {
+        id: "clock",
+        glyph: '\u{F8FD}',
+        icon: "__base__/graphics/icons/signal/signal-clock.png",
+    },
+    SignalIcon {
+        id: "speed",
+        glyph: '\u{F8FC}',
+        icon: "__base__/graphics/icons/signal/signal-speed.png",
+    },
+    SignalIcon {
+        id: "lightning",
+        glyph: '\u{F8FB}',
+        icon: "__base__/graphics/icons/signal/signal-lightning.png",
+    },
+];
+
+pub fn signal_by_id(id: &str) -> Option<&'static SignalIcon> {
+    SIGNALS.iter().find(|signal| signal.id == id)
+}
+
+pub fn signal_by_glyph(glyph: char) -> Option<&'static SignalIcon> {
+    SIGNALS.iter().find(|signal| signal.glyph == glyph)
+}
 
 /// Resolves `__base__/...`, `__core__/...`, and `__mod__/...` icon paths.
 #[derive(Debug, Clone)]

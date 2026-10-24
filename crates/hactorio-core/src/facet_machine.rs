@@ -41,8 +41,33 @@ pub fn validate(
         validate_module(registry, module, data.allowed_effects, entry.id.as_ref())?;
     }
 
+    validate_beacon_groups(registry, config)?;
+
+    if let Some(recipe) = recipe {
+        if !data
+            .categories
+            .iter()
+            .any(|category| recipe.categories.contains(category))
+        {
+            return Err(format!("`{}` cannot craft `{}`", entry.id, recipe.id));
+        }
+        if !recipe.allow_productivity && config_has_productivity(registry, config) {
+            return Err(format!(
+                "`{}` does not allow productivity modules",
+                recipe.id
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Validates a config's beacon slots and allowed effects.
+///
+/// Called when a beacon group is constructed (config juxtaposition) and again
+/// by `with`/`making`/`in`.
+pub fn validate_beacon_groups(registry: &Registry, config: &Config) -> Result<(), String> {
     if config.has_multiple_beacon_types() {
-        return Err("a machine config may contain only one type of beacon".into());
+        return Err("a config may contain only one type of beacon".into());
     }
     for group in &config.beacons {
         let beacon_entry = registry.entry_by_index(group.beacon);
@@ -63,22 +88,6 @@ pub fn validate(
                 beacon.allowed_effects,
                 beacon_entry.id.as_ref(),
             )?;
-        }
-    }
-
-    if let Some(recipe) = recipe {
-        if !data
-            .categories
-            .iter()
-            .any(|category| recipe.categories.contains(category))
-        {
-            return Err(format!("`{}` cannot craft `{}`", entry.id, recipe.id));
-        }
-        if !recipe.allow_productivity && config_has_productivity(registry, config) {
-            return Err(format!(
-                "`{}` does not allow productivity modules",
-                recipe.id
-            ));
         }
     }
     Ok(())

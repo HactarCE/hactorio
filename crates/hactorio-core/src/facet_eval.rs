@@ -70,7 +70,7 @@ pub fn eval_expr(
         },
         ExprKind::Neg(inner) => {
             let value = eval_expr(inner, variables, registry, settings)?;
-            map_facet(value.neg(), span)
+            map_unary(value.neg(), span, &value)
         }
         ExprKind::Binary { op, lhs, rhs } => {
             let lhs = eval_expr(lhs, variables, registry, settings)?;
@@ -82,13 +82,27 @@ pub fn eval_expr(
                 crate::syntax::BinaryOp::Div => lhs.div(&rhs),
                 crate::syntax::BinaryOp::Pow => lhs.pow(&rhs),
             };
-            map_facet(result, span)
+            let name = match op {
+                crate::syntax::BinaryOp::Add => "+",
+                crate::syntax::BinaryOp::Sub => "-",
+                crate::syntax::BinaryOp::Mul => "*",
+                crate::syntax::BinaryOp::Div => "/",
+                crate::syntax::BinaryOp::Pow => "^",
+            };
+            map_binary(result, span, name, &lhs, &rhs)
         }
         ExprKind::Juxtapose { lhs, rhs } => {
             let lhs = eval_expr(lhs, variables, registry, settings)?;
             let rhs = eval_expr(rhs, variables, registry, settings)?;
             let stack = item_stack_size(&rhs, registry);
-            map_facet(lhs.juxtapose(&rhs, stack), span)
+            let value = lhs.juxtapose(&rhs, stack).map_err(|error| {
+                EvalError::new(span, explain_failure("juxtaposition", &lhs, &rhs, error))
+            })?;
+            if let Some(config) = &value.config {
+                facet_machine::validate_beacon_groups(registry, config)
+                    .map_err(|error| EvalError::new(span, error))?;
+            }
+            Ok(value)
         }
         ExprKind::With { machine, config } => {
             let machine = eval_expr(machine, variables, registry, settings)?;
@@ -154,6 +168,149 @@ fn scale_literal(value: FacetValue, count: f64, span: Span) -> Result<FacetValue
 
 fn map_facet(result: Result<FacetValue, FacetError>, span: Span) -> Result<FacetValue, EvalError> {
     result.map_err(|error| EvalError::new(span, error.to_string()))
+}
+
+const FACETS: [&str; 8] = [
+    "item", "rate", "capacity", "machine", "process", "config", "belt", "recipe",
+];
+
+fn facet_present(value: &FacetValue, facet: &str) -> bool {
+    match facet {
+        "item" => value.item.is_some(),
+        "rate" => value.rate.is_some(),
+        "capacity" => value.capacity.is_some(),
+        "machine" => value.machine.is_some(),
+        "process" => value.process.is_some(),
+        "config" => value.config.is_some(),
+        "belt" => value.belt.is_some(),
+        "recipe" => value.recipe.is_some(),
+        _ => false,
+    }
+}
+
+fn facet_names(value: &FacetValue) -> String {
+    FACETS
+        .iter()
+        .filter(|facet| facet_present(value, facet))
+        .copied()
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn drop_reason(op: &str, facet: &str, lhs: &FacetValue, rhs: &FacetValue) -> &'static str {
+    let left = facet_present(lhs, facet);
+    let right = facet_present(rhs, facet);
+    match facet {
+        "recipe" => "unsupported operation",
+        "item" => {
+            if left && right {
+                if matches!(op, "+" | "-")
+                    && lhs.item.as_ref().map(|m| m.units()) != rhs.item.as_ref().map(|m| m.units())
+                {
+                    "incompatible values"
+                } else {
+                    "unsupported operation"
+                }
+            } else {
+                "missing counterpart"
+            }
+        }
+        "machine" => {
+            if (left && right) || matches!(op, "*" | "/") {
+                "incompatible values"
+            } else {
+                "missing counterpart"
+            }
+        }
+        "config" => {
+            if (left && right) || op == "/" {
+                "unsupported operation"
+            } else if matches!(op, "*" | "juxtaposition") {
+                "incompatible values"
+            } else {
+                "missing counterpart"
+            }
+        }
+        "belt" | "rate" | "capacity" | "process" => {
+            if left && right {
+                "incompatible values"
+            } else {
+                "missing counterpart"
+            }
+        }
+        _ => "unsupported operation",
+    }
+}
+
+fn explain_failure(op: &str, lhs: &FacetValue, rhs: &FacetValue, error: FacetError) -> String {
+    if !matches!(
+        error,
+        FacetError::NoFacetSurvives | FacetError::UnsupportedOperation
+    ) {
+        return error.to_string();
+    }
+    if op == "juxtaposition" && error == FacetError::UnsupportedOperation {
+        return format!(
+            "juxtaposition matched no rule (left: [{}], right: [{}]); use explicit `*` between unit-bearing values",
+            facet_names(lhs),
+            facet_names(rhs)
+        );
+    }
+    let reasons: Vec<String> = FACETS
+        .iter()
+        .filter(|facet| facet_present(lhs, facet) || facet_present(rhs, facet))
+        .map(|facet| format!("{facet}: {}", drop_reason(op, facet, lhs, rhs)))
+        .collect();
+    format!(
+        "`{op}` dropped every facet (left: [{}], right: [{}]); {}",
+        facet_names(lhs),
+        facet_names(rhs),
+        reasons.join("; ")
+    )
+}
+
+fn explain_unary(value: &FacetValue, error: FacetError) -> String {
+    if !matches!(
+        error,
+        FacetError::NoFacetSurvives | FacetError::UnsupportedOperation
+    ) {
+        return error.to_string();
+    }
+    let reasons: Vec<String> = FACETS
+        .iter()
+        .filter(|facet| facet_present(value, facet))
+        .map(|facet| {
+            let reason = if matches!(*facet, "config" | "recipe") {
+                "unsupported operation"
+            } else {
+                "missing counterpart"
+            };
+            format!("{facet}: {reason}")
+        })
+        .collect();
+    format!(
+        "unary `-` dropped every facet (operand: [{}]); {}",
+        facet_names(value),
+        reasons.join("; ")
+    )
+}
+
+fn map_binary(
+    result: Result<FacetValue, FacetError>,
+    span: Span,
+    op: &str,
+    lhs: &FacetValue,
+    rhs: &FacetValue,
+) -> Result<FacetValue, EvalError> {
+    result.map_err(|error| EvalError::new(span, explain_failure(op, lhs, rhs, error)))
+}
+
+fn map_unary(
+    result: Result<FacetValue, FacetError>,
+    span: Span,
+    value: &FacetValue,
+) -> Result<FacetValue, EvalError> {
+    result.map_err(|error| EvalError::new(span, explain_unary(value, error)))
 }
 
 fn item_stack_size(value: &FacetValue, registry: &Registry) -> Option<u32> {
@@ -263,31 +420,23 @@ struct InQuantity {
 
 fn in_quantity(value: &FacetValue) -> Option<InQuantity> {
     let item = value.item.as_ref()?;
-    let mut units = item.units().iter();
-    let (unit, exponent) = units.next()?;
-    if *exponent != 1 {
-        return None;
-    }
+    let mut unit = None;
     let mut second = false;
-    if let Some((next, next_exponent)) = units.next() {
-        if *next == BaseUnit::Second && *next_exponent == -1 && units.next().is_none() {
-            second = true;
-        } else {
-            return None;
+    for (base, exponent) in item.units() {
+        match (base, *exponent) {
+            (BaseUnit::Second, -1) if !second => second = true,
+            (BaseUnit::Item(_) | BaseUnit::Fluid(_) | BaseUnit::Craft, 1) if unit.is_none() => {
+                unit = Some(*base);
+            }
+            _ => return None,
         }
     }
-    let craft = *unit == BaseUnit::Craft;
-    if !matches!(
-        unit,
-        BaseUnit::Item(_) | BaseUnit::Fluid(_) | BaseUnit::Craft
-    ) {
-        return None;
-    }
+    let unit = unit?;
     Some(InQuantity {
-        unit: *unit,
+        unit,
         coefficient: item.coef(),
         rate: second,
-        craft,
+        craft: unit == BaseUnit::Craft,
     })
 }
 
@@ -621,23 +770,6 @@ fn power_property(
         }
         return Err(EvalError::new(span, "process has no power or energy"));
     }
-    if let Some(config) = &value.config {
-        if !config.beacons.is_empty() {
-            let power: f64 = config
-                .beacons
-                .iter()
-                .map(|group| {
-                    f64::from(group.count)
-                        * registry
-                            .entry_by_index(group.beacon)
-                            .beacon
-                            .as_ref()
-                            .map_or(0.0, |beacon| beacon.energy_usage_w)
-                })
-                .sum();
-            return Ok(watts(power));
-        }
-    }
     if let Some(item) = &value.item {
         let (unit, exponent) = item
             .units()
@@ -675,6 +807,24 @@ fn power_property(
             if electric {
                 return Ok(joules(energy * item.coef()));
             }
+        }
+        return Err(EvalError::new(span, "no power for this value"));
+    }
+    if let Some(config) = &value.config {
+        if !config.beacons.is_empty() {
+            let power: f64 = config
+                .beacons
+                .iter()
+                .map(|group| {
+                    f64::from(group.count)
+                        * registry
+                            .entry_by_index(group.beacon)
+                            .beacon
+                            .as_ref()
+                            .map_or(0.0, |beacon| beacon.energy_usage_w)
+                })
+                .sum();
+            return Ok(watts(power));
         }
     }
     Err(EvalError::new(span, "no power for this value"))
@@ -901,6 +1051,7 @@ mod tests {
     const DUMP: &str = r#"{
       "item": {
         "iron-plate": {"type": "item", "name": "iron-plate", "stack_size": 100},
+        "copper-plate": {"type": "item", "name": "copper-plate", "stack_size": 100},
         "iron-gear-wheel": {"type": "item", "name": "iron-gear-wheel", "stack_size": 100},
         "transport-belt": {"type": "item", "name": "transport-belt", "stack_size": 100},
         "steel-chest": {"type": "item", "name": "steel-chest", "stack_size": 50},
@@ -927,7 +1078,7 @@ mod tests {
         "assembling-machine-3": {"type": "assembling-machine", "name": "assembling-machine-3", "crafting_categories": ["crafting"], "crafting_speed": 1.0, "module_slots": 4, "allowed_effects": ["speed"], "energy_usage": "100kW"}
       },
       "beacon": {
-        "beacon": {"type": "beacon", "name": "beacon", "module_slots": 2, "distribution_effectivity": 1.5, "profile": [1.0], "energy_usage": "480kW"}
+        "beacon": {"type": "beacon", "name": "beacon", "module_slots": 2, "allowed_effects": ["speed"], "distribution_effectivity": 1.5, "profile": [1.0], "energy_usage": "480kW"}
       },
       "radar": {
         "radar": {"type": "radar", "name": "radar", "energy_usage": "300kW"}
@@ -964,9 +1115,64 @@ mod tests {
     #[test]
     fn evaluates_rate_and_capacity_application() {
         let value = eval(":transport-belt: :iron-plate:").unwrap();
-        assert_eq!(value.item.unwrap().coef(), 15.0);
+        let item = value.item.unwrap();
+        assert_eq!(item.coef(), 15.0);
+        assert_eq!(item.exponent(BaseUnit::Second), -1);
         let value = eval(":steel-chest: :iron-plate:").unwrap();
-        assert_eq!(value.item.unwrap().coef(), 4800.0);
+        let item = value.item.unwrap();
+        assert_eq!(item.coef(), 4800.0);
+        assert_eq!(item.exponent(BaseUnit::Second), 0);
+    }
+
+    #[test]
+    fn applies_rates_as_rates() {
+        let value = eval(":transport-belt: :iron-plate:").unwrap();
+        let item = value.item.unwrap();
+        assert_eq!(item.units().len(), 2);
+        assert_eq!(item.exponent(BaseUnit::Second), -1);
+        // A rate has no item mode for the stack-size prefix.
+        assert!(eval(":stack-size: (:transport-belt: :iron-plate:)").is_err());
+    }
+
+    #[test]
+    fn accepts_craft_rates_in() {
+        let value = eval("1 craft/s in (:assembling-machine-3: making :iron-gear-wheel:)").unwrap();
+        let process = value.process.unwrap();
+        assert_eq!(process.extent, Some(Extent::Machines(1.0)));
+    }
+
+    #[test]
+    fn validates_beacon_groups_at_juxtaposition() {
+        assert!(eval(":beacon: 2 :speed-module-3:").is_ok());
+        assert!(eval(":beacon: 3 :speed-module-3:").is_err());
+    }
+
+    #[test]
+    fn evaluates_stored_energy_in_joules() {
+        let value = eval(":accumulator:.energy").unwrap();
+        let item = value.item.unwrap();
+        assert_eq!(item.exponent(BaseUnit::Joule), 1);
+        assert_eq!(item.coef(), 5_000_000.0);
+        let value = eval(":accumulator:.electric").unwrap();
+        assert_eq!(value.item.unwrap().coef(), 5_000_000.0);
+        assert!(eval(":accumulator:.power").is_err());
+    }
+
+    #[test]
+    fn explains_dropped_facets() {
+        let error = eval("2 :iron-plate: + 3 :copper-plate:").unwrap_err();
+        assert!(error.message.contains("`+`"), "{}", error.message);
+        assert!(error.message.contains("item"), "{}", error.message);
+        assert!(error.message.contains("incompatible"), "{}", error.message);
+
+        let error = eval("2 :iron-plate: 3 :copper-plate:").unwrap_err();
+        assert!(error.message.contains("juxtaposition"), "{}", error.message);
+        assert!(error.message.contains("explicit `*`"), "{}", error.message);
+
+        let error = eval("(:assembling-machine-3: with 2 :speed-module-3:) * 2 s").unwrap_err();
+        assert!(error.message.contains("`*`"), "{}", error.message);
+        assert!(error.message.contains("machine"), "{}", error.message);
+        assert!(error.message.contains("item"), "{}", error.message);
     }
 
     #[test]
@@ -983,7 +1189,9 @@ mod tests {
         assert_eq!(value.item.unwrap().coef(), 100.0);
         assert_eq!(value.belt.unwrap().cap, Cap::Limit(4));
         let value = eval(":stack-size: :transport-belt: :iron-plate:").unwrap();
-        assert_eq!(value.item.unwrap().coef(), 60.0);
+        let item = value.item.unwrap();
+        assert_eq!(item.coef(), 60.0);
+        assert_eq!(item.exponent(BaseUnit::Second), -1);
     }
 
     #[test]

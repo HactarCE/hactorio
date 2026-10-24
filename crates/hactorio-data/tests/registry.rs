@@ -331,6 +331,32 @@ fn reference_counts_track_recipe_usage() {
     assert_eq!(count("assembling-machine-3"), 0);
 }
 
+#[test]
+fn pua_tail_is_reserved_for_signals() {
+    use hactorio_data::{PUA_COUNT, PUA_LAST, SIGNALS, glyph_for};
+
+    assert_eq!(PUA_LAST, 0xF8EF);
+    assert_eq!(glyph_for(PUA_COUNT as usize - 1).unwrap() as u32, PUA_LAST);
+    assert!(glyph_for(PUA_COUNT as usize).is_none());
+    for signal in SIGNALS {
+        assert!(signal.glyph as u32 > PUA_LAST);
+    }
+}
+
+#[test]
+fn module_only_prototype_gets_an_item_facet() {
+    const DUMP: &str = r#"{
+      "fluid": {},
+      "module": {
+        "speed-module-1": {"type": "module", "name": "speed-module-1", "category": "speed", "tier": 1, "stack_size": 40, "effect": {"speed": 0.2}}
+      }
+    }"#;
+    let registry = postprocess(DUMP, &Locale::empty()).unwrap();
+    let entry = registry.entry("speed-module-1").unwrap();
+    assert_eq!(entry.item.as_ref().unwrap().stack_size, 40);
+    assert!(entry.module.is_some());
+}
+
 fn temp_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("hactorio-data-{}-{name}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);

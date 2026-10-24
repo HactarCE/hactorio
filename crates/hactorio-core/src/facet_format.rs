@@ -122,8 +122,8 @@ pub fn format_rate(rate: &RateFacet, settings: &Settings, _registry: &Registry) 
     match rate {
         RateFacet::Fluid(value) => format!("{}/s", format_plain_number(*value, settings)),
         RateFacet::Items(terms) => {
-            let terms: Vec<String> = terms
-                .iter()
+            let terms: Vec<String> = ordered_terms(terms)
+                .into_iter()
                 .map(|(cap, amount)| {
                     format!(
                         "{}{}/s",
@@ -141,6 +141,16 @@ pub fn format_rate(rate: &RateFacet, settings: &Settings, _registry: &Registry) 
     }
 }
 
+/// `Full` first, then `Limit` in descending order.
+fn ordered_terms(terms: &std::collections::BTreeMap<Cap, f64>) -> Vec<(&Cap, &f64)> {
+    let mut ordered: Vec<(&Cap, &f64)> = terms.iter().collect();
+    ordered.sort_by_key(|(cap, _)| match cap {
+        Cap::Full => (0, std::cmp::Reverse(0)),
+        Cap::Limit(limit) => (1, std::cmp::Reverse(*limit)),
+    });
+    ordered
+}
+
 pub fn format_capacity(
     capacity: &CapacityFacet,
     settings: &Settings,
@@ -150,8 +160,8 @@ pub fn format_capacity(
     match capacity {
         CapacityFacet::Fluid(value) => format_plain_number(*value, settings),
         CapacityFacet::Items(terms) => {
-            let terms: Vec<String> = terms
-                .iter()
+            let terms: Vec<String> = ordered_terms(terms)
+                .into_iter()
                 .map(|(cap, amount)| {
                     format!(
                         "{}{}",
@@ -226,4 +236,37 @@ pub fn format_process(process: &Process, settings: &Settings, registry: &Registr
 /// A convenience for the detail pane: the item facet as a display value.
 pub fn item_value(item: &Monomial) -> Value {
     to_value(item)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn rate_and_capacity_terms_are_ordered_full_then_descending_limit() {
+        let settings = Settings::default();
+        let registry = hactorio_data::postprocess("{}", &hactorio_data::Locale::empty()).unwrap();
+        let rate = RateFacet::Items(BTreeMap::from([
+            (Cap::Limit(1), 10.0),
+            (Cap::Full, 30.0),
+            (Cap::Limit(4), 20.0),
+            (Cap::Limit(2), 15.0),
+        ]));
+        assert_eq!(
+            format_rate(&rate, &settings, &registry),
+            format!(
+                "30{STACK_SIZE_GLYPH}/s + 20{STACK_SIZE_GLYPH}₄/s + 15{STACK_SIZE_GLYPH}₂/s + 10/s"
+            )
+        );
+        let capacity = CapacityFacet::Items(BTreeMap::from([
+            (Cap::Limit(1), 10.0),
+            (Cap::Full, 30.0),
+            (Cap::Limit(4), 20.0),
+        ]));
+        assert_eq!(
+            format_capacity(&capacity, &settings, &registry),
+            format!("30{STACK_SIZE_GLYPH} + 20{STACK_SIZE_GLYPH}₄ + 10")
+        );
+    }
 }
