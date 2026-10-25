@@ -22,6 +22,7 @@ use crate::glyphs;
 
 mod completion;
 mod editor;
+mod highlight;
 mod results;
 
 use completion::CompletionState;

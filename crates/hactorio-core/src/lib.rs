@@ -23,6 +23,6 @@ pub use facet_eval::{
 pub use facet_format::{format_capacity, format_config, format_facet, format_machine, format_rate};
 pub use format::{format_amount, format_energy, format_power, format_value};
 pub use settings::{Settings, TimeUnit};
-pub use syntax::{BinaryOp, Span};
+pub use syntax::{BinaryOp, Highlight, Span, highlights};
 pub use text::{from_plaintext, to_plaintext};
 pub use value::{APPROX_ZERO, BaseUnit, Value, is_integer, is_nonzero, is_zero};

@@ -9,7 +9,7 @@ use std::fmt;
 use hactorio_data::{EntryId, Registry};
 
 use crate::settings::TimeUnit;
-use crate::syntax::{BinaryOp, Span};
+use crate::syntax::{BinaryOp, Keyword, Span};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Signal {
@@ -717,23 +717,15 @@ fn property(name: &str) -> Option<Property> {
 }
 
 fn keyword(word: &str) -> Option<TokenKind> {
-    match word {
-        "in" => Some(TokenKind::In),
-        "with" => Some(TokenKind::With),
-        "making" => Some(TokenKind::Making),
-        "joule" | "J" => Some(TokenKind::Joule(1.0)),
-        "kJ" => Some(TokenKind::Joule(1e3)),
-        "MJ" => Some(TokenKind::Joule(1e6)),
-        "GJ" => Some(TokenKind::Joule(1e9)),
-        "TJ" => Some(TokenKind::Joule(1e12)),
-        "watt" | "W" => Some(TokenKind::Watt(1.0)),
-        "kW" => Some(TokenKind::Watt(1e3)),
-        "MW" => Some(TokenKind::Watt(1e6)),
-        "GW" => Some(TokenKind::Watt(1e9)),
-        "TW" => Some(TokenKind::Watt(1e12)),
-        "craft" => Some(TokenKind::Craft),
-        _ => TimeUnit::from_word(word).map(TokenKind::Time),
-    }
+    Some(match crate::syntax::keyword(word)? {
+        Keyword::In => TokenKind::In,
+        Keyword::With => TokenKind::With,
+        Keyword::Making => TokenKind::Making,
+        Keyword::Joule(multiplier) => TokenKind::Joule(multiplier),
+        Keyword::Watt(multiplier) => TokenKind::Watt(multiplier),
+        Keyword::Craft => TokenKind::Craft,
+        Keyword::Time(unit) => TokenKind::Time(unit),
+    })
 }
 
 fn lex(line: &str, registry: &Registry) -> Result<Vec<Token>, ParseError> {
