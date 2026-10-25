@@ -18,10 +18,17 @@ enum NumberStyle {
 /// Prototype units are rendered as their private-use glyph, so the app's glyph
 /// rasterizer draws the icon. Time follows the global time unit, item
 /// quantities follow the prefix toggle (belt modes take over item rates), and
-/// electricity always uses metric prefixes.
+/// electricity is rendered as `J`/`W` with metric prefixes.
 pub fn format_value(value: &Value, settings: &Settings, registry: &Registry) -> String {
     if value.is_dimensionless() {
         return format_number(value.coef(), settings, NumberStyle::Plain);
+    }
+
+    if is_energy(value) {
+        return format_energy(value.coef(), settings);
+    }
+    if is_power(value) {
+        return format_power(value.coef(), settings);
     }
 
     if is_craft_rate(value) {
@@ -65,6 +72,19 @@ pub fn format_value(value: &Value, settings: &Settings, registry: &Registry) -> 
         text.push_str(&join_units(&denominator));
     }
     text
+}
+
+/// Exactly one joule, with no other units.
+fn is_energy(value: &Value) -> bool {
+    value.units().len() == 1 && value.exponent(BaseUnit::Joule) == 1
+}
+
+/// Exactly one joule per second. Power is shown in watts regardless of the
+/// global time unit, since a watt does not depend on a display timescale.
+fn is_power(value: &Value) -> bool {
+    value.units().len() == 2
+        && value.exponent(BaseUnit::Joule) == 1
+        && value.exponent(BaseUnit::Second) == -1
 }
 
 fn is_craft_rate(value: &Value) -> bool {
@@ -146,7 +166,7 @@ fn unit_name_of(unit: BaseUnit, time_unit: TimeUnit, registry: &Registry) -> Str
     match unit {
         BaseUnit::Item(id) | BaseUnit::Fluid(id) => registry.entry_by_index(id).glyph.to_string(),
         BaseUnit::Second => time_unit.short_name().to_string(),
-        BaseUnit::Joule => "joule".to_string(),
+        BaseUnit::Joule => "J".to_string(),
         BaseUnit::Craft => "craft".to_string(),
     }
 }
@@ -268,4 +288,83 @@ fn format_si(value: f64, unit: &str, settings: &Settings) -> String {
         "{} {prefix}{unit}",
         format_decimal(scaled, settings.max_decimals)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hactorio_data::{Locale, postprocess};
+
+    fn registry() -> Registry {
+        postprocess("{}", &Locale::empty()).unwrap()
+    }
+
+    fn energy(joules: f64) -> Value {
+        Value::new(joules, [(BaseUnit::Joule, 1)])
+    }
+
+    fn power(watts: f64) -> Value {
+        Value::new(watts, [(BaseUnit::Joule, 1), (BaseUnit::Second, -1)])
+    }
+
+    #[test]
+    fn energy_uses_joule_symbol() {
+        let registry = registry();
+        let settings = Settings::default();
+        for (joules, expected) in [
+            (0.0, "0 J"),
+            (3.0, "3 J"),
+            (3e3, "3 kJ"),
+            (3e6, "3 MJ"),
+            (3e9, "3 GJ"),
+            (10.8e9, "10.8 GJ"),
+        ] {
+            assert_eq!(
+                format_value(&energy(joules), &settings, &registry),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn power_uses_watt_symbol() {
+        let registry = registry();
+        let settings = Settings::default();
+        for (watts, expected) in [
+            (3.0, "3 W"),
+            (375e3, "375 kW"),
+            (2.5e6, "2.5 MW"),
+            (0.0, "0 W"),
+        ] {
+            assert_eq!(format_value(&power(watts), &settings, &registry), expected);
+        }
+    }
+
+    #[test]
+    fn power_ignores_time_unit() {
+        let registry = registry();
+        for time_unit in [TimeUnit::Minute, TimeUnit::Hour] {
+            let settings = Settings {
+                time_unit,
+                ..Settings::default()
+            };
+            assert_eq!(format_value(&power(375e3), &settings, &registry), "375 kW");
+        }
+    }
+
+    #[test]
+    fn compound_joule_units_keep_numeric_prefix() {
+        let registry = registry();
+        let settings = Settings::default();
+        let per_second_squared = Value::new(3e3, [(BaseUnit::Joule, 1), (BaseUnit::Second, -2)]);
+        assert_eq!(
+            format_value(&per_second_squared, &settings, &registry),
+            "3k J/s^2"
+        );
+        let joule_seconds = Value::new(3.0, [(BaseUnit::Joule, 1), (BaseUnit::Second, 1)]);
+        assert_eq!(
+            format_value(&joule_seconds, &settings, &registry),
+            "3 J * s"
+        );
+    }
 }
