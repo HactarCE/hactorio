@@ -29,7 +29,7 @@ pub const EMPTY_GLYPH: char = '\u{F8F8}';
 ///
 /// `F8F0..F8F7` are reserved, and namespace entries stop at `F8EF`, so signal
 /// lookup always precedes entry lookup.
-pub const SIGNALS: [SignalIcon; 5] = [
+pub const SIGNALS: [SignalIcon; 6] = [
     SignalIcon {
         id: "stack-size",
         glyph: STACK_SIZE_GLYPH,
@@ -54,6 +54,11 @@ pub const SIGNALS: [SignalIcon; 5] = [
         id: "electric",
         glyph: '\u{F8FB}',
         icon: "__base__/graphics/icons/signal/signal-lightning.png",
+    },
+    SignalIcon {
+        id: "module-slots",
+        glyph: '\u{F8F9}',
+        icon: "__core__/graphics/icons/mip/empty-module-slot.png",
     },
 ];
 
