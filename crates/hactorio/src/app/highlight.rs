@@ -71,7 +71,7 @@ mod tests {
     #[test]
     fn sections_cover_the_whole_text() {
         let font_id = FontId::monospace(13.0);
-        for text in ["", "plain text", "1 in :x: 2s # c"] {
+        for text in ["", "plain text", "v = 1 in :x: 2s # c"] {
             let job = layout_job(text, &font_id, palette(&Visuals::dark()));
             assert_eq!(job.text, text);
             assert!(sections_cover_text(&job), "{text:?}: {job:?}");
@@ -82,7 +82,7 @@ mod tests {
     fn each_category_uses_its_palette_color() {
         let font_id = FontId::monospace(13.0);
         let palette = palette(&Visuals::dark());
-        let text = "1 in :x: 2s # c";
+        let text = "v = 1 in :x: 2s # c";
         let job = layout_job(text, &font_id, palette);
         for (span, highlight) in super::highlights(text) {
             let start = span.start as usize;
@@ -104,17 +104,18 @@ mod tests {
     #[test]
     fn light_and_dark_use_different_colors() {
         let font_id = FontId::monospace(13.0);
-        let text = "1 in :x: 2s # c";
+        let text = "v = 1 in :x: 2s # c";
         let dark = palette(&Visuals::dark());
         let light = palette(&Visuals::light());
         let dark_job = layout_job(text, &font_id, dark);
         let light_job = layout_job(text, &font_id, light);
         for (byte, highlight) in [
-            (0, Highlight::Number),
-            (2, Highlight::OperatorKeyword),
-            (5, Highlight::Icon),
-            (10, Highlight::UnitKeyword),
-            (12, Highlight::Comment),
+            (0, Highlight::Variable),
+            (4, Highlight::Number),
+            (6, Highlight::OperatorKeyword),
+            (9, Highlight::Icon),
+            (14, Highlight::UnitKeyword),
+            (16, Highlight::Comment),
         ] {
             assert_eq!(
                 color_at(&light_job, byte),

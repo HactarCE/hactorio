@@ -13,6 +13,7 @@ pub(super) struct Palette {
     pub(super) operator_keyword: Color32,
     pub(super) unit_keyword: Color32,
     pub(super) number: Color32,
+    pub(super) variable: Color32,
     pub(super) comment: Color32,
     pub(super) icon: Color32,
 }
@@ -29,6 +30,7 @@ impl Palette {
             Highlight::OperatorKeyword => self.operator_keyword,
             Highlight::UnitKeyword => self.unit_keyword,
             Highlight::Number => self.number,
+            Highlight::Variable => self.variable,
             Highlight::Comment => self.comment,
             Highlight::Icon => self.icon,
         }
@@ -40,11 +42,13 @@ const DARK: Palette = Palette {
     background: Color32::from_rgb(0x12, 0x13, 0x14),
     plain: Color32::from_rgb(0xBB, 0xBE, 0xBF),
     // keyword
-    operator_keyword: Color32::from_rgb(0xFF, 0x7B, 0x72),
+    operator_keyword: Color32::from_rgb(0xC5, 0x86, 0xC0),
     // constant
     unit_keyword: Color32::from_rgb(0x79, 0xC0, 0xFF),
-    // constant
+    // number
     number: Color32::from_rgb(0xB5, 0xCE, 0xA8),
+    // variable
+    variable: Color32::from_rgb(0xFF, 0xA6, 0x57),
     // comment
     comment: Color32::from_rgb(0x8B, 0x94, 0x9E),
     // string
@@ -56,11 +60,13 @@ const LIGHT: Palette = Palette {
     background: Color32::from_rgb(0xFF, 0xFF, 0xFF),
     plain: Color32::from_rgb(0x20, 0x20, 0x20),
     // keyword
-    operator_keyword: Color32::from_rgb(0xCF, 0x22, 0x2E),
+    operator_keyword: Color32::from_rgb(0x82, 0x50, 0xDF),
     // constant
     unit_keyword: Color32::from_rgb(0x05, 0x50, 0xAE),
-    // constant
+    // number
     number: Color32::from_rgb(0x09, 0x86, 0x58),
+    // variable
+    variable: Color32::from_rgb(0x95, 0x38, 0x00),
     // comment
     comment: Color32::from_rgb(0x6E, 0x77, 0x81),
     // string
