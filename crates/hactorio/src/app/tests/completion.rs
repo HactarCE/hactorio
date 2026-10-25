@@ -4,7 +4,7 @@ use egui::{Key, Modifiers};
 fn suggested_ids(registry: &Registry, text: &str) -> Vec<String> {
     let cursor = text.chars().count();
     let (start, word) = completion_word(text, cursor);
-    completion_items(registry, text, start, &word)
+    completion_items(registry, &Settings::default(), text, start, &word)
         .into_iter()
         .map(|item| item.insert)
         .collect()
@@ -177,7 +177,7 @@ fn word_start_matches_beat_longer_prefixes() {
 
     let cursor = "castir".chars().count();
     let (start, word) = completion_word("castir", cursor);
-    let item = completion_items(&registry, "castir", start, &word)
+    let item = completion_items(&registry, &Settings::default(), "castir", start, &word)
         .into_iter()
         .find(|item| item.label == "casting-iron")
         .expect("casting-iron");
@@ -213,7 +213,7 @@ fn completion_fuzzy_matches_highlighted_characters() {
     let registry = fixture_registry();
     let cursor = "eec".chars().count();
     let (start, word) = completion_word("eec", cursor);
-    let item = completion_items(&registry, "eec", start, &word)
+    let item = completion_items(&registry, &Settings::default(), "eec", start, &word)
         .into_iter()
         .find(|item| item.label == "electronic-circuit")
         .expect("electronic-circuit");
@@ -261,7 +261,7 @@ fn aliases_resolve_to_prototypes() {
     for (query, expected) in cases {
         let cursor = query.chars().count();
         let (start, word) = completion_word(query, cursor);
-        let items = completion_items(&registry, query, start, &word);
+        let items = completion_items(&registry, &Settings::default(), query, start, &word);
         let item = items
             .iter()
             .find(|item| item.label == expected)
@@ -282,7 +282,7 @@ fn aliases_resolve_to_prototypes() {
     // The alias, not the canonical name, is displayed when it is the best match.
     let cursor = "green-chip".chars().count();
     let (start, word) = completion_word("green-chip", cursor);
-    let items = completion_items(&registry, "green-chip", start, &word);
+    let items = completion_items(&registry, &Settings::default(), "green-chip", start, &word);
     assert!(items.iter().all(|item| item.label != "electronic-circuit"));
 }
 
@@ -299,7 +299,7 @@ fn completion_shows_the_prototype_name_after_the_matched_alias() {
     let registry = hactorio_data::postprocess(FIXTURE, &hactorio_data::Locale::load(&dir)).unwrap();
 
     let (start, word) = completion_word("green-chip", "green-chip".chars().count());
-    let items = completion_items(&registry, "green-chip", start, &word);
+    let items = completion_items(&registry, &Settings::default(), "green-chip", start, &word);
     let item = items
         .iter()
         .find(|item| item.label == "green-chip")
@@ -327,7 +327,7 @@ fn dot_context_offers_properties_and_items() {
     let (start, word) = completion_word(text, cursor);
     assert_eq!(start, cursor);
     assert!(word.is_empty());
-    let items = completion_items(&registry, text, start, &word);
+    let items = completion_items(&registry, &Settings::default(), text, start, &word);
     let labels: Vec<&str> = items.iter().map(|item| item.insert.as_str()).collect();
     assert!(labels.contains(&"rate"), "{labels:?}");
     assert!(labels.contains(&"capacity"), "{labels:?}");
@@ -339,7 +339,7 @@ fn dot_context_offers_properties_and_items() {
     let cursor = text.chars().count();
     let (start, word) = completion_word(text, cursor);
     assert_eq!(word, "ra");
-    let items = completion_items(&registry, text, start, &word);
+    let items = completion_items(&registry, &Settings::default(), text, start, &word);
     assert_eq!(items.first().map(|item| item.insert.as_str()), Some("rate"));
 }
 
@@ -363,7 +363,7 @@ fn stack_signals_rank_highest_for_sta() {
     let text = "sta";
     let cursor = text.chars().count();
     let (start, word) = completion_word(text, cursor);
-    let items = completion_items(&registry, text, start, &word);
+    let items = completion_items(&registry, &Settings::default(), text, start, &word);
     let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
     assert_eq!(labels.first().copied(), Some("stack-size"), "{labels:?}");
     assert_eq!(labels.get(1).copied(), Some("stacked-belt"), "{labels:?}");
@@ -394,10 +394,10 @@ fn property_completions_use_dotted_names_and_glyphs() {
     let text = "x.";
     let cursor = text.chars().count();
     let (start, word) = completion_word(text, cursor);
-    let items = completion_items(&registry, text, start, &word);
+    let items = completion_items(&registry, &Settings::default(), text, start, &word);
     let rate = items.iter().find(|item| item.insert == "rate").unwrap();
     assert_eq!(rate.label, ".rate");
-    assert_eq!(rate.glyph, hactorio_data::EMPTY_GLYPH);
+    assert_eq!(rate.glyphs, hactorio_data::EMPTY_GLYPH.to_string());
     let time = items
         .iter()
         .find(|item| item.insert != "time" && item.label == ".time");
@@ -441,19 +441,19 @@ fn variable_rows_use_the_variable_signal() {
     let text = "rate = 3 :iron-plate: / second\nra";
     let cursor = text.chars().count();
     let (start, word) = completion_word(text, cursor);
-    let items = completion_items(&registry, text, start, &word);
+    let items = completion_items(&registry, &Settings::default(), text, start, &word);
     let item = items
         .iter()
         .find(|item| item.insert == "rate")
         .expect("variable row");
 
-    assert_eq!(item.glyph, crate::glyphs::VARIABLE);
+    assert_eq!(item.glyphs, crate::glyphs::VARIABLE.to_string());
     let font_id = egui::FontId::monospace(13.0);
     let job = completion_layout_job(item, 13, false, &font_id, &egui::Visuals::dark());
     let glyph_section = &job.sections[0];
     assert_eq!(
-        &job.text[glyph_section.byte_range.start.0..glyph_section.byte_range.end.0],
-        format!("{} ", crate::glyphs::VARIABLE)
+        job.text[glyph_section.byte_range.start.0..glyph_section.byte_range.end.0].trim_end(),
+        crate::glyphs::VARIABLE.to_string()
     );
     assert_eq!(glyph_section.format.extra_letter_spacing, 0.0);
 }
@@ -977,6 +977,246 @@ fn exact_names_outrank_near_miss_fuzzy_matches() {
     let exact = entry("pm2", None);
     let fuzzy_score = best_name_match(&fuzzy, "pm2").unwrap().0;
     let exact_score = best_name_match(&exact, "pm2").unwrap().0;
-    assert_eq!(fuzzy_score, 152);
+    // 152 from the fuzzy match, plus the first-character bonus.
+    assert_eq!(fuzzy_score, 182);
     assert!(exact_score > fuzzy_score, "{exact_score} <= {fuzzy_score}");
+}
+
+const AUTOCOMPLETE_FIXTURE: &str = r#"{
+  "item": {
+    "transport-belt": {"type": "item", "name": "transport-belt", "stack_size": 100},
+    "fast-transport-belt": {"type": "item", "name": "fast-transport-belt", "stack_size": 100},
+    "express-transport-belt": {"type": "item", "name": "express-transport-belt", "stack_size": 100},
+    "turbo-transport-belt": {"type": "item", "name": "turbo-transport-belt", "stack_size": 100},
+    "underground-belt": {"type": "item", "name": "underground-belt", "stack_size": 50},
+    "fast-underground-belt": {"type": "item", "name": "fast-underground-belt", "stack_size": 50},
+    "express-underground-belt": {"type": "item", "name": "express-underground-belt", "stack_size": 50},
+    "turbo-underground-belt": {"type": "item", "name": "turbo-underground-belt", "stack_size": 50},
+    "splitter": {"type": "item", "name": "splitter", "stack_size": 50},
+    "fast-splitter": {"type": "item", "name": "fast-splitter", "stack_size": 50},
+    "express-splitter": {"type": "item", "name": "express-splitter", "stack_size": 50},
+    "turbo-splitter": {"type": "item", "name": "turbo-splitter", "stack_size": 50},
+    "petroleum-gas-barrel": {"type": "item", "name": "petroleum-gas-barrel", "stack_size": 10},
+    "atomic-bomb": {"type": "item", "name": "atomic-bomb", "stack_size": 10}
+  },
+  "fluid": {
+    "lubricant": {"type": "fluid", "name": "lubricant"}
+  },
+  "module": {
+    "speed-module": {"type": "module", "name": "speed-module", "category": "speed", "tier": 1, "stack_size": 50, "effect": {"speed": 0.2}},
+    "speed-module-2": {"type": "module", "name": "speed-module-2", "category": "speed", "tier": 2, "stack_size": 50, "effect": {"speed": 0.3}},
+    "speed-module-3": {"type": "module", "name": "speed-module-3", "category": "speed", "tier": 3, "stack_size": 50, "effect": {"speed": 0.5}},
+    "productivity-module": {"type": "module", "name": "productivity-module", "category": "productivity", "tier": 1, "stack_size": 50, "effect": {"productivity": 0.04}},
+    "productivity-module-2": {"type": "module", "name": "productivity-module-2", "category": "productivity", "tier": 2, "stack_size": 50, "effect": {"productivity": 0.06}},
+    "productivity-module-3": {"type": "module", "name": "productivity-module-3", "category": "productivity", "tier": 3, "stack_size": 50, "effect": {"productivity": 0.1}},
+    "efficiency-module": {"type": "module", "name": "efficiency-module", "category": "efficiency", "tier": 1, "stack_size": 50, "effect": {"consumption": -0.3}},
+    "efficiency-module-2": {"type": "module", "name": "efficiency-module-2", "category": "efficiency", "tier": 2, "stack_size": 50, "effect": {"consumption": -0.4}},
+    "efficiency-module-3": {"type": "module", "name": "efficiency-module-3", "category": "efficiency", "tier": 3, "stack_size": 50, "effect": {"consumption": -0.5}},
+    "quality-module": {"type": "module", "name": "quality-module", "category": "quality", "tier": 1, "stack_size": 50, "effect": {"quality": 0.01}},
+    "quality-module-2": {"type": "module", "name": "quality-module-2", "category": "quality", "tier": 2, "stack_size": 50, "effect": {"quality": 0.02}},
+    "quality-module-3": {"type": "module", "name": "quality-module-3", "category": "quality", "tier": 3, "stack_size": 50, "effect": {"quality": 0.025}}
+  }
+}"#;
+
+fn autocomplete_registry() -> Registry {
+    hactorio_data::postprocess(AUTOCOMPLETE_FIXTURE, &hactorio_data::Locale::empty()).unwrap()
+}
+
+fn completion_labels(registry: &Registry, text: &str) -> Vec<String> {
+    let cursor = text.chars().count();
+    let (start, word) = completion_word(text, cursor);
+    completion_items(registry, &Settings::default(), text, start, &word)
+        .into_iter()
+        .map(|item| item.label)
+        .collect()
+}
+
+fn first_completion(registry: &Registry, text: &str) -> CompletionItem {
+    let cursor = text.chars().count();
+    let (start, word) = completion_word(text, cursor);
+    let items = completion_items(registry, &Settings::default(), text, start, &word);
+    assert!(
+        !items.is_empty(),
+        "{text}: no completions, labels {:?}",
+        items.iter().map(|item| &item.label).collect::<Vec<_>>()
+    );
+    items[0].clone()
+}
+
+#[test]
+fn belt_color_tokens_pick_their_belt() {
+    let registry = autocomplete_registry();
+    for (query, expected, canonical) in [
+        ("yb", "yellow-belt", "transport-belt"),
+        ("rb", "red-belt", "fast-transport-belt"),
+        ("bb", "blue-belt", "express-transport-belt"),
+        ("gb", "green-belt", "turbo-transport-belt"),
+    ] {
+        let labels = completion_labels(&registry, query);
+        assert_eq!(
+            labels.first().map(String::as_str),
+            Some(expected),
+            "{query}: {labels:?}"
+        );
+        assert_eq!(
+            first_completion(&registry, query).insert,
+            registry.entry(canonical).unwrap().glyph.to_string(),
+            "{query}"
+        );
+    }
+}
+
+#[test]
+fn stacked_belt_tokens_insert_the_stacked_prefix() {
+    let registry = autocomplete_registry();
+    let stacked = hactorio_data::SIGNALS
+        .iter()
+        .find(|signal| signal.id == "stacked-belt")
+        .unwrap()
+        .glyph;
+    for (query, label, tier) in [
+        ("syb", "stacked-yellow-belt", BeltTier::Yellow),
+        ("srb", "stacked-red-belt", BeltTier::Red),
+        ("sbb", "stacked-blue-belt", BeltTier::Blue),
+        ("sgb", "stacked-green-belt", BeltTier::Green),
+    ] {
+        let item = first_completion(&registry, query);
+        assert_eq!(item.label, label, "{query}");
+        let belt = registry.entry(tier.item_id()).unwrap().glyph;
+        assert_eq!(item.insert, format!("{stacked}{belt}"), "{query}");
+    }
+}
+
+#[test]
+fn accepting_a_stacked_belt_row_inserts_both_glyphs() {
+    let document = editor_document("# Main\n", 0, 6);
+    let (mut harness, dir) =
+        completion_harness_with("stacked-accept", document, AUTOCOMPLETE_FIXTURE);
+    harness.run();
+    type_into_editor(&mut harness, " :syb");
+    let labels: Vec<String> = harness
+        .state()
+        .as_ref()
+        .expect("app")
+        .completion
+        .items
+        .iter()
+        .map(|item| item.label.clone())
+        .collect();
+    assert_eq!(
+        labels.first().map(String::as_str),
+        Some("stacked-yellow-belt"),
+        "{labels:?}"
+    );
+
+    harness.key_press(Key::Enter);
+    harness.run();
+
+    let registry = autocomplete_registry();
+    let stacked = hactorio_data::SIGNALS
+        .iter()
+        .find(|signal| signal.id == "stacked-belt")
+        .unwrap()
+        .glyph;
+    let belt = registry.entry("transport-belt").unwrap().glyph;
+    let text = &harness.state().as_ref().expect("app").tabs[0].text;
+    assert_eq!(*text, format!("# Main {stacked}{belt}\n"));
+
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn color_aliases_name_underground_belts_and_splitters() {
+    let registry = autocomplete_registry();
+    let cases = [
+        ("yellow-underground-belt", "underground-belt"),
+        ("red-underground-belt", "fast-underground-belt"),
+        ("blue-underground-belt", "express-underground-belt"),
+        ("green-underground-belt", "turbo-underground-belt"),
+        ("yellow-splitter", "splitter"),
+        ("red-splitter", "fast-splitter"),
+        ("blue-splitter", "express-splitter"),
+        ("green-splitter", "turbo-splitter"),
+    ];
+    for (alias, canonical) in cases {
+        let item = first_completion(&registry, alias);
+        assert_eq!(item.label, alias);
+        assert_eq!(
+            item.insert,
+            registry.entry(canonical).unwrap().glyph.to_string()
+        );
+    }
+}
+
+#[test]
+fn community_aliases_cover_nuclear_bomb_and_lubricant() {
+    let registry = autocomplete_registry();
+    for (alias, canonical) in [("nuclear-bomb", "atomic-bomb"), ("lube", "lubricant")] {
+        let item = first_completion(&registry, alias);
+        assert_eq!(
+            item.insert,
+            registry.entry(canonical).unwrap().glyph.to_string()
+        );
+    }
+}
+
+#[test]
+fn module_abbreviations_pick_their_module() {
+    let registry = autocomplete_registry();
+    let cases = [
+        ("sm1", "speed-module"),
+        ("pm1", "productivity-module"),
+        ("em1", "efficiency-module"),
+        ("qm1", "quality-module"),
+        ("sm2", "speed-module-2"),
+        ("pm2", "productivity-module-2"),
+        ("em2", "efficiency-module-2"),
+        ("qm2", "quality-module-2"),
+        ("sm3", "speed-module-3"),
+        ("pm3", "productivity-module-3"),
+        ("em3", "efficiency-module-3"),
+        ("qm3", "quality-module-3"),
+    ];
+    for (query, canonical) in cases {
+        let labels = completion_labels(&registry, query);
+        let expected = registry.entry(canonical).unwrap().glyph.to_string();
+        assert_eq!(
+            first_completion(&registry, query).insert,
+            expected,
+            "{query}: {labels:?}"
+        );
+    }
+}
+
+#[test]
+fn completion_after_dot_offers_only_units_in_the_value() {
+    let registry = fixture_registry();
+    let text = ":assembling-machine-3: making :electronic-circuit:.";
+    let labels = completion_labels(&registry, text);
+    assert!(
+        labels.iter().any(|label| label == "iron-plate"),
+        "{labels:?}"
+    );
+    assert!(
+        !labels.iter().any(|label| label == "electronic-circuit"),
+        "{labels:?}"
+    );
+    assert!(
+        !labels.iter().any(|label| label == "copper-cable"),
+        "{labels:?}"
+    );
+}
+
+#[test]
+fn completion_after_dot_hides_properties_the_value_lacks() {
+    let registry = fixture_registry();
+    let labels = completion_labels(&registry, "2 :assembling-machine-3:.");
+    assert!(labels.iter().any(|label| label == ".speed"), "{labels:?}");
+    assert!(
+        labels.iter().any(|label| label == ".machines"),
+        "{labels:?}"
+    );
+    assert!(!labels.iter().any(|label| label == ".rate"), "{labels:?}");
+    assert!(!labels.iter().any(|label| label == ".time"), "{labels:?}");
+    assert!(!labels.iter().any(|label| label == ".crafts"), "{labels:?}");
 }

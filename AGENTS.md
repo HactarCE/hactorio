@@ -31,7 +31,9 @@ the results column.
 
 A private-use character is a **glyph**; the PNG it renders into is an **icon**.
 So `:iron-plate:` is a glyph, its entry's `icon` path points at an icon, and
-`GLYPH_SIZE` is how large the character is drawn.
+`GLYPH_SIZE` is how large the character is drawn. A PUA glyph is not
+necessarily the same width as other characters in the monospace font, so do not
+rely on column alignment between glyphs and text.
 
 A tip only opens when it has something to describe: hovering a keyword, a typo,
 or a variable that does not resolve shows nothing.

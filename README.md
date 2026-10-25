@@ -8,7 +8,7 @@ This README is 100% human-written.
 
 - text editor with autocomplete for keywords and Factorio items/recipes/etc.
 - results column to the right of the text editor with a single-line result per row
-- floating panel with a multi-line result for the current line
+- floating panel with a multiline result for the current line
 - tooltip with details of the hovered icon/variable
 
 ## LLM policy

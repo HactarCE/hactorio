@@ -40,6 +40,25 @@ pub enum Property {
     Abs,
 }
 
+impl Property {
+    /// The property a bare name selects, as in `value.rate`.
+    pub fn from_name(name: &str) -> Option<Property> {
+        Some(match name {
+            "rate" => Property::Rate,
+            "capacity" => Property::Capacity,
+            "power" => Property::Power,
+            "energy" => Property::Energy,
+            "machines" => Property::Machines,
+            "crafts" => Property::Crafts,
+            "productivity" => Property::Productivity,
+            "prod" => Property::Prod,
+            "pollution" => Property::Pollution,
+            "abs" => Property::Abs,
+            _ => return None,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selector {
     Property(Property),
@@ -660,19 +679,7 @@ fn is_valid_identifier(name: &str) -> bool {
 }
 
 fn property(name: &str) -> Option<Property> {
-    Some(match name {
-        "rate" => Property::Rate,
-        "capacity" => Property::Capacity,
-        "power" => Property::Power,
-        "energy" => Property::Energy,
-        "machines" => Property::Machines,
-        "crafts" => Property::Crafts,
-        "productivity" => Property::Productivity,
-        "prod" => Property::Prod,
-        "pollution" => Property::Pollution,
-        "abs" => Property::Abs,
-        _ => return None,
-    })
+    Property::from_name(name)
 }
 
 fn keyword(word: &str) -> Option<TokenKind> {

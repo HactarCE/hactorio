@@ -1,7 +1,11 @@
 //! Autocomplete: word extraction, aliases, fuzzy ranking, and the popup.
 
 use egui::{Key, Modifiers, TextStyle, Ui};
-use hactorio_data::{EMPTY_GLYPH, EntryId, Registry};
+use hactorio_core::facet_eval::{evaluate, property_is_available};
+use hactorio_core::facet_parser::Property;
+use hactorio_core::facets::FacetValue;
+use hactorio_core::{BaseUnit, BeltTier, Settings};
+use hactorio_data::{EMPTY_GLYPH, Entry, EntryId, Registry, SIGNALS};
 
 /// Maximum height of the autocomplete popup, before it scrolls.
 pub(super) const COMPLETION_MAX_HEIGHT: f32 = 240.0;
@@ -33,8 +37,11 @@ pub(super) struct CompletionState {
 #[derive(Clone)]
 pub(super) struct CompletionItem {
     pub(super) insert: String,
-    /// Glyph; variables use [`crate::glyphs::VARIABLE`].
-    pub(super) glyph: char,
+    /// Glyphs; variables use [`crate::glyphs::VARIABLE`].
+    ///
+    /// Most rows show one glyph. A stacked belt row shows the `stacked-belt`
+    /// prefix followed by its belt.
+    pub(super) glyphs: String,
     /// The name or alias that matched best, as shown in the popup.
     pub(super) label: String,
     /// Character indices in `label` that matched the query.
@@ -164,6 +171,16 @@ const ALIASES: &[(&str, &[&str])] = &[
     ("fast-transport-belt", &["red-belt"]),
     ("express-transport-belt", &["blue-belt"]),
     ("turbo-transport-belt", &["green-belt"]),
+    ("underground-belt", &["yellow-underground-belt"]),
+    ("fast-underground-belt", &["red-underground-belt"]),
+    ("express-underground-belt", &["blue-underground-belt"]),
+    ("turbo-underground-belt", &["green-underground-belt"]),
+    ("splitter", &["yellow-splitter"]),
+    ("fast-splitter", &["red-splitter"]),
+    ("express-splitter", &["blue-splitter"]),
+    ("turbo-splitter", &["green-splitter"]),
+    ("atomic-bomb", &["nuclear-bomb"]),
+    ("lubricant", &["lube"]),
     ("speed-module", &["speed-mod-1"]),
     ("speed-module-2", &["speed-mod-2"]),
     ("speed-module-3", &["speed-mod-3"]),
@@ -207,6 +224,24 @@ const ALIASES: &[(&str, &[&str])] = &[
         "cryogenic-science-pack",
         &["cyan-science-pack", "aquilo-science-pack"],
     ),
+    (
+        "casting-iron",
+        &["iron-plate-casting", "casting-iron-plate"],
+    ),
+    ("casting-pipe", &["pipe-casting"]),
+    ("casting-steel", &["steel-casting"]),
+    (
+        "casting-copper-plate",
+        &["copper-plate-casting", "casting-copper-plate"],
+    ),
+    ("casting-iron-stick", &["iron-stick-casting"]),
+    ("casting-copper-cable", &["copper-cable-casting"]),
+    ("casting-pipe-to-ground", &["pipe-to-ground-casting"]),
+    ("casting-iron-gear-wheel", &["iron-gear-wheel-casting"]),
+    (
+        "casting-low-density-structure",
+        &["low-density-structure-casting"],
+    ),
 ];
 
 fn aliases_for(id: &str) -> &'static [&'static str] {
@@ -241,6 +276,20 @@ fn completion_rank(score: isize, references: u32) -> f64 {
 /// Short exact names such as `pm2` can score below a multi-word name whose
 /// word starts earn more points. Exact matches should win those near-ties.
 const COMPLETION_EXACT_MATCH_BONUS: isize = 50;
+
+/// Bonus for a name whose first character is the needle's first character.
+///
+/// `gb` matches both `green-belt` and `petroleum-gas-barrel` at word starts.
+/// The initial letters are what a player types, so they break that tie.
+const COMPLETION_FIRST_CHAR_BONUS: isize = 30;
+
+/// Whether `name` and `needle` start with the same character, ignoring case.
+fn first_char_matches(name: &str, needle: &str) -> bool {
+    match (name.chars().next(), needle.chars().next()) {
+        (Some(name), Some(needle)) => name.eq_ignore_ascii_case(&needle),
+        _ => false,
+    }
+}
 
 /// Fuzzy scoring weights tuned for prototype names.
 ///
@@ -282,6 +331,11 @@ pub(super) fn best_name_match<'a>(
             let score = score
                 + if name.eq_ignore_ascii_case(needle) {
                     COMPLETION_EXACT_MATCH_BONUS
+                } else {
+                    0
+                }
+                + if first_char_matches(name, needle) {
+                    COMPLETION_FIRST_CHAR_BONUS
                 } else {
                     0
                 };
@@ -355,6 +409,24 @@ const PROPERTIES: &[&str] = &[
     "abs",
 ];
 
+/// Signals that select like a property after a dot, with the property they read.
+const SELECTOR_SIGNALS: [(&str, Property); 5] = [
+    ("stack-size", Property::StackSize),
+    ("speed", Property::Speed),
+    ("time", Property::Time),
+    ("electric", Property::Electric),
+    ("module-slots", Property::Slots),
+];
+
+/// Stacked belt rows: one per tier, labelled by color but inserting the
+/// `stacked-belt` prefix followed by the belt's own glyph.
+const STACKED_BELTS: [(&str, BeltTier); 4] = [
+    ("stacked-yellow-belt", BeltTier::Yellow),
+    ("stacked-red-belt", BeltTier::Red),
+    ("stacked-blue-belt", BeltTier::Blue),
+    ("stacked-green-belt", BeltTier::Green),
+];
+
 fn exact_rank(label: &str, insert: &str, needle: &str) -> u8 {
     let stripped = label.strip_prefix('.').unwrap_or(label);
     if label == needle || insert == needle || stripped == needle {
@@ -372,7 +444,7 @@ fn exact_rank(label: &str, insert: &str, needle: &str) -> u8 {
 fn word_completion(
     label: &str,
     insert: String,
-    glyph: char,
+    glyphs: String,
     needle: &str,
     bonus: f64,
 ) -> Option<(u8, f64, CompletionItem)> {
@@ -386,7 +458,7 @@ fn word_completion(
         score as f64 + bonus,
         CompletionItem {
             insert,
-            glyph,
+            glyphs,
             label: label.to_string(),
             matched,
             name: None,
@@ -402,8 +474,41 @@ fn signal_matches(id: &str, needle: &str) -> bool {
             .starts_with(&needle.to_ascii_lowercase())
 }
 
+/// The value the selector after the dot ending at `word_start` applies to.
+///
+/// The text up to the dot is evaluated as its own document, so variables from
+/// earlier lines and the rest of the current line are in scope. `None` means
+/// the prefix does not evaluate, so nothing is known about the value.
+fn value_before_dot(
+    text: &str,
+    word_start: usize,
+    settings: &Settings,
+    registry: &Registry,
+) -> Option<FacetValue> {
+    let dot = word_start.checked_sub(1)?;
+    let prefix: String = text.chars().take(dot).collect();
+    evaluate(&prefix, settings, registry).last()?.value.clone()
+}
+
+/// Whether `entry` is a unit of the process `value` holds.
+///
+/// Unit selectors only read a process; an item outside its net would select
+/// nothing.
+fn unit_in_value(value: &FacetValue, id: EntryId, entry: &Entry) -> bool {
+    let Some(process) = &value.process else {
+        return false;
+    };
+    let unit = if entry.fluid {
+        BaseUnit::Fluid(id)
+    } else {
+        BaseUnit::Item(id)
+    };
+    process.net.contains_key(&unit)
+}
+
 pub(super) fn completion_items(
     registry: &Registry,
+    settings: &Settings,
     text: &str,
     word_start: usize,
     word: &str,
@@ -419,6 +524,12 @@ pub(super) fn completion_items(
             _ => CompletionContext::Normal,
         }
     };
+    // Properties and unit selectors only exist for a value; resolve it once.
+    let value = if context == CompletionContext::Property {
+        value_before_dot(text, word_start, settings, registry)
+    } else {
+        None
+    };
     let needle = word.trim_start_matches(':').trim_end_matches(':');
     if (needle.is_empty() && context != CompletionContext::Property)
         || needle.chars().next().is_some_and(|ch| ch.is_ascii_digit())
@@ -430,11 +541,14 @@ pub(super) fn completion_items(
         .entries()
         .iter()
         .enumerate()
-        .filter(|(_, entry)| match context {
+        .filter(|(index, entry)| match context {
             CompletionContext::Machine => entry.machine().is_some(),
             CompletionContext::Recipe => entry.recipe.is_some(),
             CompletionContext::Config => entry.module.is_some() || entry.beacon.is_some(),
-            CompletionContext::Property => entry.is_item_or_fluid(),
+            CompletionContext::Property => match &value {
+                Some(value) => unit_in_value(value, EntryId::from_index(*index), entry),
+                None => entry.is_item_or_fluid(),
+            },
             CompletionContext::Normal => true,
         })
         .filter_map(|(index, entry)| {
@@ -464,7 +578,7 @@ pub(super) fn completion_items(
                 },
                 CompletionItem {
                     insert,
-                    glyph: entry.glyph,
+                    glyphs: entry.glyph.to_string(),
                     label: label.to_string(),
                     matched,
                     name: name.map(str::to_string),
@@ -487,7 +601,7 @@ pub(super) fn completion_items(
                 score as f64 + COMPLETION_VARIABLE_BONUS,
                 CompletionItem {
                     insert: name.clone(),
-                    glyph: crate::glyphs::VARIABLE,
+                    glyphs: crate::glyphs::VARIABLE.to_string(),
                     label: name,
                     matched,
                     name: None,
@@ -500,7 +614,7 @@ pub(super) fn completion_items(
             if let Some(item) = word_completion(
                 keyword,
                 (*keyword).to_string(),
-                EMPTY_GLYPH,
+                EMPTY_GLYPH.to_string(),
                 needle,
                 COMPLETION_KEYWORD_BONUS,
             ) {
@@ -511,28 +625,42 @@ pub(super) fn completion_items(
 
     if context == CompletionContext::Property {
         for property in PROPERTIES {
+            if let Some(value) = &value {
+                let Some(known) = Property::from_name(property) else {
+                    continue;
+                };
+                if !property_is_available(value, known, registry, settings) {
+                    continue;
+                }
+            }
             let label = format!(".{property}");
             if let Some(item) = word_completion(
                 &label,
                 (*property).to_string(),
-                EMPTY_GLYPH,
+                EMPTY_GLYPH.to_string(),
                 needle,
                 COMPLETION_PROPERTY_BONUS,
             ) {
                 items.push(item);
             }
         }
-        for signal in hactorio_data::SIGNALS.iter().filter(|signal| {
-            matches!(
-                signal.id,
-                "stack-size" | "speed" | "time" | "electric" | "module-slots"
-            ) && signal_matches(signal.id, needle)
-        }) {
+        for (id, property) in SELECTOR_SIGNALS {
+            if let Some(value) = &value
+                && !property_is_available(value, property, registry, settings)
+            {
+                continue;
+            }
+            let Some(signal) = SIGNALS.iter().find(|signal| signal.id == id) else {
+                continue;
+            };
+            if !signal_matches(signal.id, needle) {
+                continue;
+            }
             let label = format!(".{}", signal.id);
             if let Some(item) = word_completion(
                 &label,
                 signal.glyph.to_string(),
-                signal.glyph,
+                signal.glyph.to_string(),
                 needle,
                 COMPLETION_SIGNAL_BONUS,
             ) {
@@ -540,18 +668,29 @@ pub(super) fn completion_items(
             }
         }
     } else if context == CompletionContext::Normal {
-        for signal in hactorio_data::SIGNALS.iter().filter(|signal| {
+        for signal in SIGNALS.iter().filter(|signal| {
             matches!(signal.id, "stack-size" | "stacked-belt") && signal_matches(signal.id, needle)
         }) {
             let label = signal.id.to_string();
             if let Some(item) = word_completion(
                 &label,
                 signal.glyph.to_string(),
-                signal.glyph,
+                signal.glyph.to_string(),
                 needle,
                 COMPLETION_SIGNAL_BONUS,
             ) {
                 items.push(item);
+            }
+        }
+        if let Some(stacked) = SIGNALS.iter().find(|signal| signal.id == "stacked-belt") {
+            for (label, tier) in STACKED_BELTS {
+                let Some(belt) = registry.entry(tier.item_id()) else {
+                    continue;
+                };
+                let glyphs = format!("{}{}", stacked.glyph, belt.glyph);
+                if let Some(item) = word_completion(label, glyphs.clone(), glyphs, needle, 0.0) {
+                    items.push(item);
+                }
             }
         }
     }
@@ -585,7 +724,9 @@ fn append_glyph_column(
     item: &CompletionItem,
     normal: &egui::TextFormat,
 ) {
-    job.append(&item.glyph.to_string(), 0.0, normal.clone());
+    // A stacked belt row shows two glyphs, so its label starts one cell later
+    // than the others. That is accepted rather than padding every row.
+    job.append(&item.glyphs, 0.0, normal.clone());
     job.append(" ", 0.0, normal.clone());
 }
 

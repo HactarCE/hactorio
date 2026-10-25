@@ -254,7 +254,7 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                     completion.items = if word.is_empty() && !after_dot {
                         Vec::new()
                     } else {
-                        completion_items(registry, &tab.text, word_start, &word)
+                        completion_items(registry, settings, &tab.text, word_start, &word)
                     };
                     if completion.dismissed.as_deref() != Some(word.as_str()) {
                         completion.dismissed = None;

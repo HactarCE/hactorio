@@ -129,7 +129,7 @@ pub fn eval_expr(
         }
         ExprKind::Property { value, selector } => {
             let value = eval_expr(value, variables, registry, settings)?;
-            property(value, selector, span, registry, settings)
+            read_property(value, selector, span, registry, settings)
         }
     }
 }
@@ -629,7 +629,24 @@ fn cap_rate(rate: RateFacet, cap: Cap) -> RateFacet {
     }
 }
 
-fn property(
+/// Whether `property` can be read from `value`, by the same rules `eval` uses.
+pub fn property_is_available(
+    value: &FacetValue,
+    property: Property,
+    registry: &Registry,
+    settings: &Settings,
+) -> bool {
+    read_property(
+        value.clone(),
+        &Selector::Property(property),
+        Span::new(0, 0),
+        registry,
+        settings,
+    )
+    .is_ok()
+}
+
+fn read_property(
     value: FacetValue,
     selector: &Selector,
     span: Span,
