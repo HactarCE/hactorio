@@ -14,31 +14,16 @@ fn token_tip_is_open(harness: &Harness<'_, Option<HactorioApp>>) -> bool {
 
 #[test]
 fn hovering_an_editor_glyph_opens_the_token_tip() {
-    let document = editor_document("# Main\n3 :iron-plate:\n", 1, 0);
+    let text = "# Main\n3 :iron-plate:\n";
+    let document = editor_document(text, 1, 0);
     let (mut harness, dir) = completion_harness("hover", document);
     harness.run();
 
-    let rect = harness
-        .ctx
-        .memory(|memory| memory.focused())
-        .and_then(|id| harness.ctx.read_response(id))
-        .map(|response| response.rect)
-        .expect("focused editor");
-
-    let left = rect.left() as i32;
-    let top = rect.top() as i32;
-    let mut shown = false;
-    'search: for y in (top..=top + 60).step_by(3) {
-        for x in (left..=left + 100).step_by(2) {
-            harness.hover_at(egui::pos2(x as f32, y as f32));
-            harness.run();
-            if token_tip_is_open(&harness) {
-                shown = true;
-                break 'search;
-            }
-        }
-    }
-    assert!(shown, "no token tip appeared");
+    let rect = editor_text_rect(&harness, editor_rect(&harness), text);
+    assert!(
+        hover_until_token_tip(&mut harness, rect),
+        "no token tip appeared"
+    );
     if std::env::var_os("HACTORIO_UI_SNAPSHOT").is_some() {
         harness.snapshot("token_tip");
     }
@@ -52,26 +37,17 @@ fn hovering_a_single_line_result_glyph_opens_the_token_tip() {
     let (mut harness, dir) = completion_harness("output-hover", document);
     harness.run();
 
-    let editor = harness
-        .ctx
-        .memory(|memory| memory.focused())
-        .and_then(|id| harness.ctx.read_response(id))
-        .map(|response| response.rect)
-        .expect("focused editor");
-    let left = editor.right() as i32 + 4;
-    let top = editor.top() as i32;
-    let mut shown = false;
-    'search: for y in (top..=top + 60).step_by(3) {
-        for x in (left..=left + 300).step_by(4) {
-            harness.hover_at(egui::pos2(x as f32, y as f32));
-            harness.run();
-            if token_tip_is_open(&harness) {
-                shown = true;
-                break 'search;
-            }
-        }
-    }
-    assert!(shown, "no token tip appeared");
+    let editor = editor_rect(&harness);
+    // The results column starts just right of the editor, and the glyph sits in
+    // the second row's projection, near its start.
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(editor.right() + 4.0, editor.top()),
+        egui::vec2(200.0, 60.0),
+    );
+    assert!(
+        hover_until_token_tip(&mut harness, rect),
+        "no token tip appeared"
+    );
 
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -82,24 +58,12 @@ fn hovering_a_multiline_result_glyph_opens_the_token_tip() {
     let (mut harness, dir) = completion_harness("multiline-hover", document);
     harness.run();
 
-    let area = harness
-        .ctx
-        .memory(|memory| memory.area_rect(egui::Id::unique("multiline_result")))
-        .expect("multiline result");
-    let left = area.left() as i32;
-    let top = area.top() as i32;
-    let mut shown = false;
-    'search: for y in (top..=top + 40).step_by(3) {
-        for x in (left..=left + 120).step_by(3) {
-            harness.hover_at(egui::pos2(x as f32, y as f32));
-            harness.run();
-            if token_tip_is_open(&harness) {
-                shown = true;
-                break 'search;
-            }
-        }
-    }
-    assert!(shown, "no token tip appeared");
+    let area = multiline_result_rect(&harness);
+    let rect = egui::Rect::from_min_size(area.min, egui::vec2(120.0, 40.0));
+    assert!(
+        hover_until_token_tip(&mut harness, rect),
+        "no token tip appeared"
+    );
 
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -276,17 +240,49 @@ fn editor_rect(harness: &Harness<'_, Option<HactorioApp>>) -> egui::Rect {
 }
 
 /// Sweeps `rect` until a token tip opens, returning whether one did.
+///
+/// The tip is created in the same frame the pointer move is handled, so a
+/// single `step` per probe is enough; `run` would settle several extra frames
+/// per position.
 fn hover_until_token_tip(harness: &mut Harness<'_, Option<HactorioApp>>, rect: egui::Rect) -> bool {
     for y in (rect.top() as i32..rect.bottom() as i32).step_by(3) {
         for x in (rect.left() as i32..rect.right() as i32).step_by(2) {
             harness.hover_at(egui::pos2(x as f32, y as f32));
-            harness.run();
+            harness.step();
             if token_tip_is_open(harness) {
                 return true;
             }
         }
     }
     false
+}
+
+/// The part of an editor's response rect that holds the laid-out text.
+///
+/// The response rect spans the whole editor, most of which is empty; sweeping
+/// it for a token is thousands of probes with nothing to hit. The galley starts
+/// at the editor's margin and each character advances by the monospace glyph
+/// width.
+fn editor_text_rect(
+    harness: &Harness<'_, Option<HactorioApp>>,
+    editor: egui::Rect,
+    text: &str,
+) -> egui::Rect {
+    let style = harness.ctx.style_of(harness.ctx.theme());
+    let font = egui::TextStyle::Monospace.resolve(&style);
+    let (row_height, char_width) = harness
+        .ctx
+        .fonts_mut(|fonts| (fonts.row_height(&font), fonts.glyph_width(&font, ' ')));
+    let lines = text.lines().count().max(1);
+    let columns = text
+        .lines()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0);
+    egui::Rect::from_min_size(
+        editor.min + egui::vec2(4.0, 4.0),
+        egui::vec2(columns as f32 * char_width, lines as f32 * row_height),
+    )
 }
 
 fn multiline_result_rect(harness: &Harness<'_, Option<HactorioApp>>) -> egui::Rect {
@@ -298,20 +294,22 @@ fn multiline_result_rect(harness: &Harness<'_, Option<HactorioApp>>) -> egui::Re
 
 #[test]
 fn hovering_a_variable_opens_the_token_tip() {
-    let document = editor_document("# Main\nrate = 3 :iron-plate:\nrate * 2\n", 2, 0);
+    let text = "# Main\nrate = 3 :iron-plate:\nrate * 2\n";
+    let document = editor_document(text, 2, 0);
     let (mut harness, dir) = completion_harness("variable-hover", document);
     harness.run();
-    let rect = editor_rect(&harness);
+    let rect = editor_text_rect(&harness, editor_rect(&harness), text);
     assert!(hover_until_token_tip(&mut harness, rect));
     std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
 fn hovering_a_keyword_opens_no_token_tip() {
-    let document = editor_document("# Main\nwith\n", 1, 0);
+    let text = "# Main\nwith\n";
+    let document = editor_document(text, 1, 0);
     let (mut harness, dir) = completion_harness("keyword-hover", document);
     harness.run();
-    let rect = editor_rect(&harness);
+    let rect = editor_text_rect(&harness, editor_rect(&harness), text);
     assert!(
         !hover_until_token_tip(&mut harness, rect),
         "a keyword opened a token tip"
