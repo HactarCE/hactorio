@@ -106,6 +106,8 @@ fn harness_with(
 
     let builder = Harness::builder()
         .with_size(egui::vec2(800.0, 600.0))
+        // Virtualized rows request a restyle the first time they scroll in.
+        .with_max_steps(16)
         .with_accessibility_check(false)
         .allow_missing_glyphs();
     let builder = if std::env::var_os("HACTORIO_UI_SNAPSHOT").is_some() {

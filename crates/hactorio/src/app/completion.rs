@@ -1,5 +1,7 @@
 //! Autocomplete: word extraction, aliases, fuzzy ranking, and the popup.
 
+use std::collections::HashMap;
+
 use egui::{Key, Modifiers, TextStyle, Ui};
 use hactorio_core::facet_eval::{evaluate, property_is_available};
 use hactorio_core::facet_parser::Property;
@@ -29,6 +31,8 @@ pub(super) struct CompletionState {
     pub(super) dismissed: Option<String>,
     /// Whether the next render should scroll the selected row into view.
     pub(super) needs_scroll: bool,
+    /// The popup's measured width, recomputed whenever the items change.
+    metrics: Option<PopupMetrics>,
     /// The selected row's rect from the last render.
     #[cfg(test)]
     pub(super) selected_rect: Option<egui::Rect>,
@@ -738,11 +742,6 @@ pub(super) fn completion_items(
                 }
             })
     });
-    // Typed queries only keep the best-scoring rows; an explicit empty listing
-    // is meant to show everything the context allows.
-    if !needle.is_empty() {
-        items.truncate(40);
-    }
     items.into_iter().map(|(_, _, item)| item).collect()
 }
 
@@ -854,6 +853,69 @@ pub(super) fn completion_layout_job(
     job
 }
 
+/// The popup's measured width, cached until the items or font change.
+#[derive(Clone)]
+struct PopupMetrics {
+    font_id: egui::FontId,
+    /// Character count of the widest label, for column alignment.
+    label_width: usize,
+    /// Pixel width of the widest row.
+    text_width: f32,
+}
+
+/// Measures the widest completion row without laying out text.
+///
+/// A glyph advances exactly its font size, and monospace text advances by its
+/// character count. A non-ASCII display name is summed per character, because
+/// wide scripts do not share the ASCII advance.
+fn popup_metrics(ui: &Ui, items: &[CompletionItem], font_id: &egui::FontId) -> PopupMetrics {
+    let label_width = items
+        .iter()
+        .map(|item| item.label.chars().count())
+        .max()
+        .unwrap_or(0);
+    let advance = ui.fonts_mut(|fonts| fonts.glyph_width(font_id, 'M'));
+    let mut wide: HashMap<char, f32> = HashMap::new();
+    let mut text_width: f32 = 0.0;
+    for item in items {
+        let mut width = item.glyphs.chars().count() as f32 * font_id.size + advance;
+        width += advance_of(ui, font_id, &item.label, advance, &mut wide);
+        if let Some(name) = &item.name {
+            let padding =
+                label_width.saturating_sub(item.label.chars().count()) + COMPLETION_NAME_GAP;
+            width += padding as f32 * advance;
+            width += advance_of(ui, font_id, name, advance, &mut wide);
+        }
+        text_width = text_width.max(width);
+    }
+    PopupMetrics {
+        font_id: font_id.clone(),
+        label_width,
+        text_width,
+    }
+}
+
+/// The width of `text`, whose characters are monospace widths unless they fall
+/// outside ASCII.
+fn advance_of(
+    ui: &Ui,
+    font_id: &egui::FontId,
+    text: &str,
+    advance: f32,
+    wide: &mut HashMap<char, f32>,
+) -> f32 {
+    if text.is_ascii() {
+        return text.len() as f32 * advance;
+    }
+    text.chars()
+        .map(|ch| {
+            *wide
+                .entry(ch)
+                .or_insert_with(|| ui.fonts_mut(|fonts| fonts.glyph_width(font_id, ch)))
+        })
+        .sum()
+}
+
 /// Keys the popup owns while it is open.
 ///
 /// They are consumed before the text editor sees them, so Tab and Enter pick a
@@ -891,6 +953,12 @@ pub(super) fn popup_keys(ui: &mut Ui) -> PopupKeys {
 }
 
 impl CompletionState {
+    /// Replaces the candidate rows, dropping the measured popup width.
+    pub(super) fn set_items(&mut self, items: Vec<CompletionItem>) {
+        self.items = items;
+        self.metrics = None;
+    }
+
     /// Whether the popup should be shown, unless it was dismissed for this word.
     pub(super) fn is_open(&self) -> bool {
         !self.items.is_empty() && self.dismissed.as_deref() != Some(self.word.as_str())
@@ -967,21 +1035,21 @@ pub(super) fn popup(ui: &mut Ui, request: PopupRequest<'_>) -> bool {
         .show(ui.ctx(), |ui| {
             let style = ui.style();
             let font_id = TextStyle::Monospace.resolve(style);
-            let label_width = completion
-                .items
-                .iter()
-                .map(|item| item.label.chars().count())
-                .max()
-                .unwrap_or(0);
-            let text_width = completion
-                .items
-                .iter()
-                .map(|item| {
-                    let job =
-                        completion_layout_job(item, label_width, false, &font_id, ui.visuals());
-                    ui.fonts_mut(|fonts| fonts.layout_job(job).size().x)
-                })
-                .fold(0.0, f32::max);
+            let cached = completion
+                .metrics
+                .as_ref()
+                .filter(|metrics| metrics.font_id == font_id)
+                .cloned();
+            let metrics = match cached {
+                Some(metrics) => metrics,
+                None => {
+                    let metrics = popup_metrics(ui, &completion.items, &font_id);
+                    completion.metrics = Some(metrics.clone());
+                    metrics
+                }
+            };
+            let label_width = metrics.label_width;
+            let text_width = metrics.text_width;
             let chrome = egui::Frame::popup(style);
             let chrome_width = chrome.inner_margin.sum().x + 2.0 * chrome.stroke.width;
             let content_width = (text_width
@@ -991,6 +1059,10 @@ pub(super) fn popup(ui: &mut Ui, request: PopupRequest<'_>) -> bool {
             let total_width =
                 (content_width + chrome_width).min(ui.ctx().viewport_rect().width() - 16.0);
             let content_width = (total_width - chrome_width).max(100.0);
+            // One row is a single-line button: its text, plus the button padding.
+            let text_height = ui.fonts_mut(|fonts| fonts.row_height(&font_id));
+            let row_height = (text_height + 2.0 * ui.spacing().button_padding.y)
+                .max(ui.spacing().interact_size.y);
 
             // The area is sized by its contents, and its remembered size
             // would otherwise cap this frame's available size.
@@ -1004,8 +1076,13 @@ pub(super) fn popup(ui: &mut Ui, request: PopupRequest<'_>) -> bool {
                 egui::ScrollArea::vertical()
                     .id_salt(("completion_scroll", active_tab))
                     .max_height(COMPLETION_MAX_HEIGHT)
-                    .show(ui, |ui| {
-                        for (index, item) in completion.items.iter().enumerate() {
+                    .show_rows(ui, row_height, completion.items.len(), |ui, range| {
+                        let row_width = ui.available_width();
+                        let range_start = range.start;
+                        let mut first_row: Option<egui::Rect> = None;
+                        let mut selected_row: Option<egui::Rect> = None;
+                        for index in range {
+                            let item = &completion.items[index];
                             let job = completion_layout_job(
                                 item,
                                 label_width,
@@ -1013,17 +1090,46 @@ pub(super) fn popup(ui: &mut Ui, request: PopupRequest<'_>) -> bool {
                                 &font_id,
                                 ui.visuals(),
                             );
-                            let response = ui.selectable_label(index == selected, job);
+                            // The full popup width is clickable, not just the text,
+                            // and every row occupies the pitch `show_rows` assumes.
+                            let response = ui
+                                .allocate_ui_with_layout(
+                                    egui::vec2(row_width, row_height),
+                                    egui::Layout::top_down(egui::Align::Min),
+                                    |ui| {
+                                        ui.add(
+                                            egui::Button::selectable(index == selected, job)
+                                                .min_size(egui::vec2(row_width, row_height)),
+                                        )
+                                    },
+                                )
+                                .inner;
+                            first_row.get_or_insert(response.rect);
+                            if index == selected {
+                                selected_row = Some(response.rect);
+                                #[cfg(test)]
+                                {
+                                    completion.selected_rect = Some(response.rect);
+                                }
+                            }
                             if response.clicked() {
                                 clicked = Some(index);
                             }
-                            #[cfg(test)]
-                            if index == selected {
-                                completion.selected_rect = Some(response.rect);
-                            }
-                            if needs_scroll && index == selected {
+                        }
+                        if needs_scroll {
+                            let step = row_height + ui.spacing().item_spacing.y;
+                            let target = selected_row.or_else(|| {
+                                let first = first_row?;
+                                let top =
+                                    first.top() + (selected as f32 - range_start as f32) * step;
+                                Some(egui::Rect::from_min_size(
+                                    egui::pos2(first.left(), top),
+                                    egui::vec2(first.width(), row_height),
+                                ))
+                            });
+                            if let Some(target) = target {
                                 ui.scroll_to_rect_animation(
-                                    response.rect,
+                                    target,
                                     Some(egui::Align::Center),
                                     egui::style::ScrollAnimation::none(),
                                 );

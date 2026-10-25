@@ -314,11 +314,12 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                     completion.word = word.clone();
                     completion.selected = 0;
                     completion.needs_scroll = true;
-                    completion.items = if word.is_empty() && !after_dot {
+                    let items = if word.is_empty() && !after_dot {
                         Vec::new()
                     } else {
                         completion_items(registry, settings, &tab.text, word_start, &word)
                     };
+                    completion.set_items(items);
                     if completion.dismissed.as_deref() != Some(word.as_str()) {
                         completion.dismissed = None;
                     }
@@ -328,8 +329,9 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                     completion.selected = 0;
                     completion.needs_scroll = true;
                     completion.dismissed = None;
-                    completion.items =
-                        completion_items(registry, settings, &tab.text, word_start, &word);
+                    completion.set_items(completion_items(
+                        registry, settings, &tab.text, word_start, &word,
+                    ));
                 }
                 completion.cursor = cursor_char;
 

@@ -67,15 +67,16 @@ fn completion_scrolls_to_the_selected_item() {
     let (mut harness, dir) = completion_harness_with("scroll", document, &fixture);
     harness.run();
     type_into_editor(&mut harness, " i");
-    assert_eq!(
+    // The 40 test items plus keywords that contain `i`.
+    assert!(
         harness
             .state()
             .as_ref()
             .expect("app")
             .completion
             .items
-            .len(),
-        40
+            .len()
+            >= 40
     );
 
     for _ in 0..20 {
