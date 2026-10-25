@@ -392,8 +392,8 @@ const COMPLETION_PROPERTY_BONUS: f64 = 100.0;
 const COMPLETION_SIGNAL_BONUS: f64 = 10_000.0;
 
 const KEYWORDS: &[&str] = &[
-    "in", "with", "making", "s", "second", "m", "minute", "h", "hour", "joule", "J", "watt", "W",
-    "craft",
+    "in", "with", "making", "s", "second", "m", "minute", "h", "hour", "joule", "J", "kJ", "MJ",
+    "GJ", "TJ", "watt", "W", "kW", "MW", "GW", "TW", "craft",
 ];
 
 const PROPERTIES: &[&str] = &[

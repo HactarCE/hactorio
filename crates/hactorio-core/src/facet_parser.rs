@@ -180,8 +180,8 @@ enum TokenKind {
     With,
     Making,
     Time(TimeUnit),
-    Joule,
-    Watt,
+    Joule(f64),
+    Watt(f64),
     Craft,
 }
 
@@ -205,8 +205,8 @@ impl TokenKind {
             TokenKind::With => "`with`".into(),
             TokenKind::Making => "`making`".into(),
             TokenKind::Time(unit) => format!("`{}`", unit.name()),
-            TokenKind::Joule => "`joule`".into(),
-            TokenKind::Watt => "`watt`".into(),
+            TokenKind::Joule(_) => "`joule`".into(),
+            TokenKind::Watt(_) => "`watt`".into(),
             TokenKind::Craft => "`craft`".into(),
         }
     }
@@ -221,8 +221,8 @@ impl TokenKind {
                 | TokenKind::Ident(_)
                 | TokenKind::LParen
                 | TokenKind::Time(_)
-                | TokenKind::Joule
-                | TokenKind::Watt
+                | TokenKind::Joule(_)
+                | TokenKind::Watt(_)
                 | TokenKind::Craft
         )
     }
@@ -505,12 +505,12 @@ impl Parser<'_> {
                 kind: ExprKind::Time { count: 1.0, unit },
                 span,
             },
-            TokenKind::Joule => Expr {
-                kind: ExprKind::Joule(1.0),
+            TokenKind::Joule(scale) => Expr {
+                kind: ExprKind::Joule(scale),
                 span,
             },
-            TokenKind::Watt => Expr {
-                kind: ExprKind::Watt(1.0),
+            TokenKind::Watt(scale) => Expr {
+                kind: ExprKind::Watt(scale),
                 span,
             },
             TokenKind::Craft => Expr {
@@ -551,17 +551,19 @@ impl Parser<'_> {
                     span: Span::new(span.start, self.last_end()),
                 })
             }
-            Some(TokenKind::Joule) => {
+            Some(TokenKind::Joule(scale)) => {
+                let scale = *scale;
                 self.pos += 1;
                 Ok(Expr {
-                    kind: ExprKind::Joule(count),
+                    kind: ExprKind::Joule(count * scale),
                     span: Span::new(span.start, self.last_end()),
                 })
             }
-            Some(TokenKind::Watt) => {
+            Some(TokenKind::Watt(scale)) => {
+                let scale = *scale;
                 self.pos += 1;
                 Ok(Expr {
-                    kind: ExprKind::Watt(count),
+                    kind: ExprKind::Watt(count * scale),
                     span: Span::new(span.start, self.last_end()),
                 })
             }
@@ -687,8 +689,16 @@ fn keyword(word: &str) -> Option<TokenKind> {
         "in" => Some(TokenKind::In),
         "with" => Some(TokenKind::With),
         "making" => Some(TokenKind::Making),
-        "joule" | "J" => Some(TokenKind::Joule),
-        "watt" | "W" => Some(TokenKind::Watt),
+        "joule" | "J" => Some(TokenKind::Joule(1.0)),
+        "kJ" => Some(TokenKind::Joule(1e3)),
+        "MJ" => Some(TokenKind::Joule(1e6)),
+        "GJ" => Some(TokenKind::Joule(1e9)),
+        "TJ" => Some(TokenKind::Joule(1e12)),
+        "watt" | "W" => Some(TokenKind::Watt(1.0)),
+        "kW" => Some(TokenKind::Watt(1e3)),
+        "MW" => Some(TokenKind::Watt(1e6)),
+        "GW" => Some(TokenKind::Watt(1e9)),
+        "TW" => Some(TokenKind::Watt(1e12)),
         "craft" => Some(TokenKind::Craft),
         _ => TimeUnit::from_word(word).map(TokenKind::Time),
     }
@@ -910,7 +920,12 @@ fn lex_number(line: &str, index: &mut usize) -> Result<f64, ParseError> {
             let word = &line[start..end];
             let is_unit = matches!(
                 keyword(word),
-                Some(TokenKind::Time(_) | TokenKind::Joule | TokenKind::Watt | TokenKind::Craft)
+                Some(
+                    TokenKind::Time(_)
+                        | TokenKind::Joule(_)
+                        | TokenKind::Watt(_)
+                        | TokenKind::Craft
+                )
             );
             if !is_unit {
                 return Err(ParseError::new(
@@ -995,6 +1010,15 @@ mod tests {
         assert!(matches!(expr("3kJ").kind, ExprKind::Joule(3_000.0)));
         assert!(matches!(expr("3kW").kind, ExprKind::Watt(3_000.0)));
         assert!(matches!(expr("3TW").kind, ExprKind::Watt(3e12)));
+        assert!(matches!(expr("3 kJ").kind, ExprKind::Joule(3_000.0)));
+        assert!(matches!(expr("3 MJ").kind, ExprKind::Joule(3e6)));
+        assert!(matches!(expr("3 GJ").kind, ExprKind::Joule(3e9)));
+        assert!(matches!(expr("3 TJ").kind, ExprKind::Joule(3e12)));
+        assert!(matches!(expr("3 kW").kind, ExprKind::Watt(3_000.0)));
+        assert!(matches!(expr("3 MW").kind, ExprKind::Watt(3e6)));
+        assert!(matches!(expr("3 GW").kind, ExprKind::Watt(3e9)));
+        assert!(matches!(expr("kJ").kind, ExprKind::Joule(1_000.0)));
+        assert!(matches!(expr("TW").kind, ExprKind::Watt(1e12)));
         assert!(matches!(
             expr("3T").kind,
             ExprKind::Number(value) if value == 3e12

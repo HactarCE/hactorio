@@ -317,6 +317,13 @@ fn keywords_are_suggested_in_normal_context() {
     assert!(inserts.contains(&"making".to_string()), "{inserts:?}");
     let inserts = suggested_ids(&registry, " i");
     assert!(inserts.contains(&"in".to_string()), "{inserts:?}");
+    for unit in ["kJ", "MJ", "GJ", "TJ", "kW", "MW", "GW", "TW"] {
+        let inserts = suggested_ids(&registry, unit);
+        assert!(inserts.contains(&unit.to_string()), "{unit}: {inserts:?}");
+    }
+    let inserts = suggested_ids(&registry, "5k");
+    assert!(inserts.contains(&"kJ".to_string()), "{inserts:?}");
+    assert!(inserts.contains(&"kW".to_string()), "{inserts:?}");
 }
 
 #[test]
