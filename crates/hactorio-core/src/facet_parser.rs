@@ -37,7 +37,6 @@ pub enum Property {
     Prod,
     Pollution,
     Slots,
-    Recipe,
     Abs,
 }
 
@@ -671,7 +670,6 @@ fn property(name: &str) -> Option<Property> {
         "productivity" => Property::Productivity,
         "prod" => Property::Prod,
         "pollution" => Property::Pollution,
-        "recipe" => Property::Recipe,
         "abs" => Property::Abs,
         _ => return None,
     })

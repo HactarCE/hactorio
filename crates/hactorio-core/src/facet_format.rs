@@ -391,7 +391,7 @@ mod tests {
     use super::*;
     use crate::facets::{ConfigFacet, Extent, MachineSpec, ModuleCount, ProcessFacet};
     use hactorio_data::{Locale, postprocess};
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeMap;
 
     const MACHINE_DUMP: &str = r#"{
       "item": {
@@ -536,7 +536,6 @@ mod tests {
             ]),
             power_w: Some(300_000.0),
             energy_j: None,
-            recipes: BTreeSet::new(),
         };
         let machine_glyph = glyph(&registry, "assembling-machine");
         let suffix = format_config_suffix(&configured.config, &settings, &registry);

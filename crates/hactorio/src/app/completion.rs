@@ -352,7 +352,6 @@ const PROPERTIES: &[&str] = &[
     "productivity",
     "prod",
     "pollution",
-    "recipe",
     "abs",
 ];
 

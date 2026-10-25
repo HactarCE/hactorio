@@ -71,15 +71,14 @@ pipeline, and persistence stay in place.
 - Reuse `config.rs` machine/module arithmetic where possible. Rewrite
   `resolve_recipe` for product-unit selection, productivity gating, and the
   same-id tiebreaker.
-- Process representation stores net, power/energy, recipes, and extent exactly
-  as the design doc.
+- Process representation stores net, power/energy, and extent exactly as the
+  design doc.
 
 ### Properties and display
 
 - Implement `.rate`, `.capacity`, `.stack-size`, `.power`, `.energy`,
   `.electric`/`.:lightning:`, `.machines`, `.time`, `.crafts`, `.speed`,
-  `.productivity`/`.prod`, `.pollution`, `.slots`, `.recipe`, unit selectors,
-  and `.abs`.
+  `.productivity`/`.prod`, `.pollution`, `.slots`, unit selectors, and `.abs`.
 - Update `format.rs`/`detail.rs` to read `FacetValue`; belt remains internal,
   with `.capacity`/`.rate` exposing it.
 

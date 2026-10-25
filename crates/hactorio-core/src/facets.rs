@@ -4,7 +4,7 @@
 //! `2026-10-22_design_doc_2.md`. The old single-monomial [`crate::value::Value`]
 //! remains in place while the parser and evaluator are migrated.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use hactorio_data::{EntryId, RecipeId};
 use thiserror::Error;
@@ -502,7 +502,6 @@ pub struct ProcessFacet {
     pub net: BTreeMap<BaseUnit, f64>,
     pub power_w: Option<f64>,
     pub energy_j: Option<f64>,
-    pub recipes: BTreeSet<RecipeId>,
 }
 
 /// A facet value with independent optional facets.
@@ -587,7 +586,6 @@ impl FacetValue {
                 .collect(),
             power_w: process.power_w.map(f64::abs),
             energy_j: process.energy_j.map(f64::abs),
-            recipes: process.recipes.clone(),
         });
         out.config = self.config.clone();
         out.belt = self.belt.map(|belt| BeltFacet {
@@ -693,7 +691,6 @@ impl FacetValue {
             net: negate_map(&process.net),
             power_w: process.power_w.map(|value| -value),
             energy_j: process.energy_j.map(|value| -value),
-            recipes: process.recipes.clone(),
         });
         out.belt = self.belt.map(|belt| BeltFacet {
             count: -belt.count,
@@ -935,7 +932,6 @@ impl FacetValue {
                 .collect(),
             power_w: process.power_w.map(|value| value * factor),
             energy_j: process.energy_j.map(|value| value * factor),
-            recipes: process.recipes.clone(),
         });
         out.config = match (&self.config, is_nonnegative_integer(factor)) {
             (Some(config), true) => {
@@ -1247,7 +1243,6 @@ fn scale_process_time(process: &ProcessFacet, time: f64) -> Result<FacetValue, F
             net,
             power_w: None,
             energy_j,
-            recipes: process.recipes.clone(),
         }),
         ..FacetValue::empty()
     })
@@ -1272,7 +1267,6 @@ fn divide_process_time(process: &ProcessFacet, time: f64) -> Result<FacetValue, 
             net,
             power_w,
             energy_j: None,
-            recipes: process.recipes.clone(),
         }),
         ..FacetValue::empty()
     })
@@ -1285,22 +1279,11 @@ fn combine_process(
 ) -> Result<ProcessFacet, FacetError> {
     let extent = a.extent.combined(&b.extent, subtract)?;
 
-    let recipes = if subtract {
-        if a.recipes.len() == 1 && a.recipes == b.recipes {
-            a.recipes.clone()
-        } else {
-            BTreeSet::new()
-        }
-    } else {
-        a.recipes.union(&b.recipes).copied().collect()
-    };
-
     Ok(ProcessFacet {
         extent,
         net: combine_amounts(&a.net, &b.net, subtract),
         power_w: combine_option(a.power_w, b.power_w, subtract)?,
         energy_j: combine_option(a.energy_j, b.energy_j, subtract)?,
-        recipes,
     })
 }
 
@@ -1473,7 +1456,6 @@ mod tests {
             net: BTreeMap::new(),
             power_w: None,
             energy_j: None,
-            recipes: BTreeSet::new(),
         });
         assert!(value.validate().is_ok());
         value.item = Some(Monomial::scalar(1.0));
@@ -1559,14 +1541,13 @@ mod tests {
     }
 
     #[test]
-    fn process_addition_unions_recipes() {
+    fn process_addition_combines_solved_extents() {
         let mut a = FacetValue::empty();
         a.process = Some(ProcessFacet {
             extent: Extent::machines(spec(0), 1.0),
             net: BTreeMap::from([(BaseUnit::Second, -1.0)]),
             power_w: Some(10.0),
             energy_j: None,
-            recipes: BTreeSet::from([RecipeId::from_index(0)]),
         });
         let mut b = FacetValue::empty();
         b.process = Some(ProcessFacet {
@@ -1574,12 +1555,10 @@ mod tests {
             net: BTreeMap::from([(BaseUnit::Second, -2.0)]),
             power_w: Some(20.0),
             energy_j: None,
-            recipes: BTreeSet::from([RecipeId::from_index(1)]),
         });
         let result = a.add(&b).unwrap().process.unwrap();
         assert_eq!(result.extent.kind, ExtentKind::Machines);
         assert_eq!(result.extent.magnitude(), 3.0);
-        assert_eq!(result.recipes.len(), 2);
         assert_eq!(result.power_w, Some(30.0));
     }
 
@@ -1604,7 +1583,6 @@ mod tests {
             net: BTreeMap::from([(BaseUnit::Second, 1.0)]),
             power_w: Some(5.0),
             energy_j: None,
-            recipes: BTreeSet::new(),
         });
         let process = value.neg().unwrap().process.unwrap();
         assert_eq!(process.extent.kind, ExtentKind::Machines);
@@ -1677,7 +1655,6 @@ mod tests {
             net: BTreeMap::from([(BaseUnit::Joule, 4.0)]),
             power_w: Some(10.0),
             energy_j: None,
-            recipes: BTreeSet::new(),
         });
         let time = FacetValue::item(Monomial::new(3.0, [(BaseUnit::Second, 1)]));
         let process = value.mul(&time).unwrap().process.unwrap();
@@ -1696,7 +1673,6 @@ mod tests {
             net: BTreeMap::from([(BaseUnit::Joule, 12.0)]),
             power_w: None,
             energy_j: Some(30.0),
-            recipes: BTreeSet::new(),
         });
         let time = FacetValue::item(Monomial::new(3.0, [(BaseUnit::Second, 1)]));
         let process = value.div(&time).unwrap().process.unwrap();

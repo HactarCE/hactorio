@@ -410,7 +410,6 @@ fn making(
             net,
             power_w,
             energy_j: None,
-            recipes: [recipe].into_iter().collect(),
         }),
         ..FacetValue::empty()
     })
@@ -454,17 +453,10 @@ fn in_expression(
 ) -> Result<FacetValue, EvalError> {
     let quantity = in_quantity(&quantity)
         .ok_or_else(|| EvalError::new(span, "`in` needs a pure item/fluid/craft quantity"))?;
-    let (recipe, net, power_w, spec) = if let Some(process) = &machine.process {
+    let (net, power_w, spec) = if let Some(process) = &machine.process {
         if !process.extent.is_unsolved() {
             return Err(EvalError::new(span, "`in` cannot use a solved process"));
         }
-        if process.recipes.len() != 1 {
-            return Err(EvalError::new(
-                span,
-                "`in` needs an unsolved process with exactly one recipe",
-            ));
-        }
-        let recipe = *process.recipes.iter().next().unwrap();
         let net = process.net.clone();
         let power = process.power_w.unwrap_or(0.0);
         let spec = process
@@ -474,7 +466,7 @@ fn in_expression(
             .next()
             .cloned()
             .ok_or_else(|| EvalError::new(span, "`in` needs an unsolved process with a machine"))?;
-        (recipe, net, power, spec)
+        (net, power, spec)
     } else if let Some(machine_facet) = &machine.machine {
         if machine_facet.count.is_some() {
             return Err(EvalError::new(
@@ -518,7 +510,7 @@ fn in_expression(
             Some(recipe_data),
             settings,
         );
-        (recipe, net, modifiers.power_w, machine_facet.spec())
+        (net, modifiers.power_w, machine_facet.spec())
     } else {
         return Err(EvalError::new(
             span,
@@ -567,7 +559,6 @@ fn in_expression(
             net,
             power_w,
             energy_j,
-            recipes: [recipe].into_iter().collect(),
         }),
         ..FacetValue::empty()
     })
@@ -704,15 +695,6 @@ fn property(
         | Property::Prod
         | Property::Pollution
         | Property::Slots => machine_scalar(&value, property, span, registry, settings),
-        Property::Recipe => value
-            .process
-            .as_ref()
-            .filter(|process| process.recipes.len() == 1)
-            .map(|process| FacetValue {
-                recipe: Some(*process.recipes.iter().next().unwrap()),
-                ..FacetValue::empty()
-            })
-            .ok_or_else(|| EvalError::new(span, "`.recipe` needs a process with one recipe")),
         Property::Abs => value
             .abs()
             .map_err(|error| EvalError::new(span, error.to_string())),

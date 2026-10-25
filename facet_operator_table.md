@@ -39,7 +39,7 @@ Facet sets that §3.1.1/§4 do construct inside one value, with constructors:
 | `I+K`, `I+K+R` | container token (chest, car, cargo wagon, tank, fluid wagon) |
 | `T`, `K` | `.rate`, `.capacity`, `K / time`, `:stacked-belt:` |
 | `C` | config addition/scaling |
-| `R` | recipe-only token, `.recipe` |
+| `R` | recipe-only token |
 
 Never constructed as one value: `P` with any other facet; `M` with a separate
 `C`; `T` with `K`; `I+T+K`; `B` without `T`; `R` with `P`. Recipe may coexist
@@ -108,9 +108,8 @@ The table is symmetric in facet survival and in the merged values.
   A differing machine/config drops the machine facet (no error by itself).
 - **Process:** both operands must be **solved** and of the same `Extent` kind.
   An unsolved operand or mixed `Machines`/`MachineSeconds` is an explicit error,
-  not a drop. `+` unions the recipe set; `net`, `power_w`/`energy_j`, and the
-  per-machine-spec counts or machine-seconds add; zero and negative values are
-  legal.
+  not a drop. `net`, `power_w`/`energy_j`, and the per-machine-spec counts or
+  machine-seconds add; zero and negative values are legal.
 - **Config:** counts are nonnegative integers by construction. `+` adds module
   counts by id and beacon-group counts for the same beacon+module set; groups
   with different module sets stay separate; zero terms are elided and an
@@ -156,7 +155,7 @@ the config rows:
 | `I+C` | `I+C` | `err` | different item units: item and config both drop |
 | `C` | `C` | `err` | config drops, nothing remains |
 | `I+M` | `I+M` | `I+M` / `I` / `err` | same machine and config; same machine with different config → machine drops, item remains; different machine → both drop |
-| `P` (solved) | `P` (solved) | `P` | same extent kind; recipe set kept only for a shared single recipe |
+| `P` (solved) | `P` (solved) | `P` | same extent kind |
 
 ### Special conditions (`-`)
 
@@ -164,9 +163,7 @@ the config rows:
 - **Values negate:** item coefficient, machine count (`a - b`, `None` as one,
   concrete result), process extent/`net`/`power_w`/`energy_j`, belt count, rate
   amounts, capacity amounts.
-- **Recipe:** always drops; a recipe never subtracts. For processes the recipe
-  set survives only when both operands hold the same single recipe, otherwise
-  it empties and `.recipe` errors — unlike `+`, which unions.
+- **Recipe:** always drops; a recipe never subtracts.
 - **Process:** both operands must be solved and of the same extent kind;
   otherwise `err!`. Zero and negative extents are legal.
 - **Config:** drops the config facet entirely (counts are not signed), so
@@ -524,14 +521,14 @@ recipe all drop; the RHS recipe is consumed.
 ## `in`
 
 Requires a quantity LHS and a machine with **no** attached count, or an
-unsolved process with exactly one recipe, on the right (§4.6). The LHS
+unsolved process, on the right (§4.6). The LHS
 contributes only its item/fluid/craft facet; every other LHS facet drops. The
 result is a solved process.
 
 | L \ R | S | U | R | M | P | C | B | T | K |
 |---|---|---|---|---|---|---|---|---|---|
 | **S** | `err!` | `err!` | `err!` | `err!` | `err!` | `err!` | `err!` | `err!` | `err!` |
-| **U** | `err!` | `err!` | `err!` | `P` (pure item/fluid amount or rate) / `err!` (time, energy, craft without an explicit recipe, multi-unit) | `P` (unsolved, one recipe) / `err!` (solved) | `err!` | `err!` | `err!` | `err!` |
+| **U** | `err!` | `err!` | `err!` | `P` (pure item/fluid amount or rate) / `err!` (time, energy, craft without an explicit recipe, multi-unit) | `P` (unsolved) / `err!` (solved) | `err!` | `err!` | `err!` | `err!` |
 | **R** | `err!` | `err!` | `err!` | `err!` | `err!` | `err!` | `err!` | `err!` | `err!` |
 | **M** | `err!` | `err!` | `err!` | `err!` | `err!` | `err!` | `err!` | `err!` | `err!` |
 | **P** | `err!` | `err!` | `err!` | `err!` | `err!` | `err!` | `err!` | `err!` | `err!` |
@@ -551,10 +548,10 @@ a quantity form.
 | `I` pure item/fluid **amount** | `M` (count `None`) | `P` (`MachineSeconds(m)`) | `m = coef / abs(k(unit))`; `energy_j = power_w·m` |
 | `I` pure item/fluid **rate** (`s⁻¹`) | `M` (count `None`) | `P` (`Machines(m)`) | `net`/`power_w` scaled by `m`; no `energy_j` |
 | `I` `craft` amount/rate | `M` | `err!` | craft requires an explicit recipe; a machine cannot supply one — use `in (m making r)` |
-| `I` `craft` amount/rate | `P` unsolved, exactly one recipe | `P` | the process recipe is the explicit recipe; `magnitude = coef / k(craft)` |
+| `I` `craft` amount/rate | `P` unsolved | `P` | the process supplies the explicit recipe; `magnitude = coef / k(craft)` |
 | `I+R` | `M` | `P` | LHS recipe is ignored; same-id recipe is only a tiebreaker |
 | `I+C` / `I+T` / `I+K` / `I+B+T` | `M` | `P` | extra LHS facets drop before resolution |
-| `I` pure amount/rate | `P` unsolved, exactly one recipe | `P` | the process supplies the recipe |
+| `I` pure amount/rate | `P` unsolved | `P` | the process supplies the recipe |
 | `I` pure amount/rate | `P` solved | `err!` | solved process is not accepted |
 | `I` pure amount/rate | `M` with `Some(n)` (even `1`) | `err!` | a count is attached |
 | `I` time value (`second`) | `M` | `err!` | not an amount/rate/craft form |
@@ -570,7 +567,8 @@ a quantity form.
 - **Validity depends on attachment, not on magnitude:** a count attached by
   scaling, including `1` (`1 :foundry:`, `0.5 * 2 * :foundry:`) or by `making`
   on a count, is rejected.
-- **Recipe selection order:** (1) the unsolved process's recipe; (2) machine
+- **Recipe selection order:** (1) an unsolved process supplies its baked
+  coefficients, with no recipe re-resolved; (2) machine
   auto-resolution — a craftable recipe whose products include the selected unit
   with positive expected amount, filtered by category and productivity gating;
   (3) the same-id recipe only as a tiebreaker among those candidates; (4) zero
@@ -584,7 +582,7 @@ a quantity form.
   kept, so a negative quantity yields a negative extent.
 - `in` takes a process expression on the right: `with`/`making` are included,
   arithmetic is not — `q in m * 2` parses as `(q in m) * 2`.
-- `in` does not use the LHS recipe facet and does not use a machine's `.recipe`.
+- `in` does not use the LHS recipe facet.
 
 ## `:stack-size:` prefix (unary)
 
