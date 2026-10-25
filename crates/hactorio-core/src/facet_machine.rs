@@ -9,10 +9,16 @@ use crate::facets::{BeaconGroup, ConfigFacet, ModuleCount};
 use crate::settings::Settings;
 use crate::value::{BaseUnit, is_nonzero};
 
+/// Maximum productivity bonus: +300%, so `1 + productivity` is at most 4.
+pub const PRODUCTIVITY_BONUS_CAP: f64 = 3.0;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Modifiers {
     pub speed: f64,
+    /// Productivity bonus, capped at [`PRODUCTIVITY_BONUS_CAP`].
     pub productivity: f64,
+    /// Uncapped productivity bonus, for display when the cap applies.
+    pub productivity_uncapped: f64,
     pub power_w: f64,
     pub pollution_per_minute: f64,
     /// `1 + Σ consumption effects`, before the game's 0.2 floor.
@@ -145,6 +151,7 @@ pub fn modifiers(
         return Ok(Modifiers {
             speed: 0.0,
             productivity: 0.0,
+            productivity_uncapped: 0.0,
             power_w: 0.0,
             pollution_per_minute: 0.0,
             consumption_multiplier: 1.0,
@@ -243,14 +250,16 @@ pub fn modifiers(
         0.0
     };
 
+    let productivity_uncapped = data.base_productivity
+        + module_productivity
+        + recipe.map_or(0.0, |recipe| {
+            research_productivity(registry, recipe, settings)
+        });
     let consumption_multiplier = 1.0 + consumption_sum;
     let mut modifiers = Modifiers {
         speed: data.speed * (1.0 + speed_sum),
-        productivity: data.base_productivity
-            + module_productivity
-            + recipe.map_or(0.0, |recipe| {
-                research_productivity(registry, recipe, settings)
-            }),
+        productivity: productivity_uncapped.min(PRODUCTIVITY_BONUS_CAP),
+        productivity_uncapped,
         power_w: 0.0,
         pollution_per_minute: 0.0,
         consumption_multiplier,
@@ -400,12 +409,36 @@ pub fn unit_of(
     })
 }
 
+/// Maximum useful level of a productivity research.
+///
+/// A level beyond the point where the productivity bonus reaches
+/// [`PRODUCTIVITY_BONUS_CAP`] has no effect. A research may boost several
+/// recipes with different per-level amounts, so the cap is the largest such
+/// point across its effects.
+pub fn productivity_research_cap(research: &hactorio_data::ProductivityResearch) -> u32 {
+    research
+        .effects
+        .iter()
+        .filter(|effect| effect.change > 0.0)
+        .map(|effect| {
+            // Trim float noise so an exact multiple (e.g. 3.0 / 0.3) does not
+            // round up to the next level.
+            let levels = PRODUCTIVITY_BONUS_CAP / effect.change;
+            (levels - levels * 1e-12).ceil() as u32
+        })
+        .max()
+        .unwrap_or(u32::MAX)
+}
+
 fn research_productivity(registry: &Registry, recipe: &Recipe, settings: &Settings) -> f64 {
     registry
         .productivity_researches()
         .iter()
         .map(|research| {
-            let level = f64::from(settings.research_level(&research.id));
+            let level = settings
+                .research_level(&research.id)
+                .min(productivity_research_cap(research));
+            let level = f64::from(level);
             research
                 .effects
                 .iter()
@@ -467,5 +500,69 @@ mod tests {
         assert_eq!(modifiers.clamped_consumption_multiplier(), 0.2);
         assert_eq!(modifiers.power_w, 20_000.0);
         assert_eq!(modifiers.pollution_per_minute, 2.0);
+    }
+
+    #[test]
+    fn productivity_caps_research_levels_and_the_total_bonus() {
+        const DUMP: &str = r#"{
+          "item": {
+            "iron-plate": {"type": "item", "name": "iron-plate", "stack_size": 100},
+            "assembling-machine": {"type": "item", "name": "assembling-machine", "stack_size": 50},
+            "prod-module": {"type": "module", "name": "prod-module", "category": "productivity", "tier": 3, "stack_size": 50, "effect": {"productivity": 0.5}}
+          },
+          "fluid": {},
+          "module": {
+            "prod-module": {"type": "module", "name": "prod-module", "category": "productivity", "tier": 3, "stack_size": 50, "effect": {"productivity": 0.5}}
+          },
+          "recipe": {
+            "iron-plate": {"type": "recipe", "name": "iron-plate", "categories": ["crafting"], "energy_required": 1.0, "allow_productivity": true, "results": [{"type": "item", "name": "iron-plate", "amount": 1}]}
+          },
+          "technology": {
+            "iron-plate-productivity": {"type": "technology", "name": "iron-plate-productivity", "effects": [
+              {"type": "change-recipe-productivity", "recipe": "iron-plate", "change": 0.1},
+              {"type": "change-recipe-productivity", "recipe": "iron-plate", "change": 0.05}
+            ]}
+          },
+          "assembling-machine": {
+            "assembling-machine": {"type": "assembling-machine", "name": "assembling-machine", "crafting_categories": ["crafting"], "crafting_speed": 1.0, "module_slots": 4, "allowed_effects": ["productivity"], "energy_usage": "100kW"}
+          }
+        }"#;
+        let registry = postprocess(DUMP, &Locale::empty()).unwrap();
+        let machine = registry.entry_id("assembling-machine").unwrap();
+        let module = registry.entry_id("prod-module").unwrap();
+        let config = ConfigFacet {
+            modules: vec![ModuleCount { module, count: 1 }],
+            beacons: Vec::new(),
+        };
+        let mut settings = Settings::default();
+        settings
+            .research_levels
+            .insert("iron-plate-productivity".into(), 100);
+
+        let research = &registry.productivity_researches()[0];
+        assert_eq!(productivity_research_cap(research), 60);
+
+        let recipe = registry.recipe(registry.recipe_id("iron-plate").unwrap());
+        let modifiers = modifiers(&registry, machine, &config, Some(recipe), &settings).unwrap();
+        assert_eq!(modifiers.productivity_effect, 0.5);
+        assert_eq!(modifiers.productivity_uncapped, 9.5);
+        assert_eq!(modifiers.productivity, PRODUCTIVITY_BONUS_CAP);
+
+        let net = coefficients(&registry, machine, &config, recipe, &settings).unwrap();
+        let product = BaseUnit::Item(registry.entry_id("iron-plate").unwrap());
+        assert_eq!(net[&product], 4.0);
+    }
+
+    #[test]
+    fn research_cap_does_not_round_exact_levels_up() {
+        let research = hactorio_data::ProductivityResearch {
+            id: "test".into(),
+            display_name: None,
+            effects: vec![hactorio_data::RecipeProductivity {
+                recipe: "test".into(),
+                change: 0.3,
+            }],
+        };
+        assert_eq!(productivity_research_cap(&research), 10);
     }
 }

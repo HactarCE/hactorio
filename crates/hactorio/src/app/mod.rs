@@ -721,13 +721,10 @@ impl HactorioApp {
                     ui.set_min_width(ui.available_width());
                 }
                 let label = research.display_name.as_deref().unwrap_or(&research.id);
-                let mut level = self.settings.research_level(&research.id);
+                let cap = hactorio_core::facet_machine::productivity_research_cap(research);
+                let mut level = self.settings.research_level(&research.id).min(cap);
                 let drag = ui.horizontal(|ui| {
-                    let drag = ui.add(
-                        egui::DragValue::new(&mut level)
-                            .range(0..=u32::MAX)
-                            .speed(0.1),
-                    );
+                    let drag = ui.add(egui::DragValue::new(&mut level).range(0..=cap).speed(0.1));
                     ui.strong(label);
                     drag
                 });

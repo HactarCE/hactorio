@@ -93,7 +93,14 @@ pub fn format_machine_stats(
         )
     };
     let productivity = 1.0 + modifiers.productivity;
-    let productivity = if is_zero(modifiers.productivity_effect) {
+    let productivity = if modifiers.productivity_uncapped > modifiers.productivity {
+        format!(
+            "{} ({} → {})",
+            format_plain_number(productivity, settings),
+            format_percent(modifiers.productivity_uncapped, settings),
+            format_percent(modifiers.productivity, settings)
+        )
+    } else if is_zero(modifiers.productivity_effect) {
         format_plain_number(productivity, settings)
     } else {
         format!(
@@ -497,6 +504,7 @@ mod tests {
             count: Some(1.0),
         };
         let stats = format_machine_stats(&clamped, &settings, &registry).unwrap();
+        assert_eq!(stats[1].1, "4 (+350% → +300%)");
         assert!(stats[2].1.contains("(-105% → -80%)"), "{}", stats[2].1);
     }
 

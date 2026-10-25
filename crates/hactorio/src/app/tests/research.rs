@@ -69,7 +69,8 @@ fn productivity_popup_resizes_without_wrapping_when_the_bonus_changes() {
     drag.set_value_accesskit(1_000.0);
     harness.run();
 
-    let percent = (1e30_f64 * 1_000.0 * 100.0 * 1e6).round() / 1e6;
+    // The research cap for 1e30 productivity per level is one level.
+    let percent = (1e30_f64 * 100.0 * 1e6).round() / 1e6;
     let after_text = format!("+{percent}% {glyph} {RECIPE}");
     let after_label = harness.get_by_label(&after_text);
     let after = after_label.rect();
