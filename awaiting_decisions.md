@@ -1,4 +1,0 @@
-
-## Post-implementation questions
-
-None.
