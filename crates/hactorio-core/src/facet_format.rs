@@ -194,21 +194,26 @@ fn repeated_glyph(count: u32, id: EntryId, registry: &Registry) -> String {
 }
 
 pub fn format_rate(rate: &RateFacet, settings: &Settings, _registry: &Registry) -> String {
+    let scale = settings.time_unit.seconds();
+    let unit = settings.time_unit.short_name();
     match rate {
-        RateFacet::Fluid(value) => format!("{}/s", format_plain_number(*value, settings)),
+        RateFacet::Fluid(value) => format!(
+            "{}/{unit}",
+            format_plain_number(*value * scale, settings)
+        ),
         RateFacet::Items(terms) => {
             let terms: Vec<String> = ordered_terms(terms)
                 .into_iter()
                 .map(|(cap, amount)| {
                     format!(
-                        "{}{}/s",
-                        format_plain_number(*amount, settings),
+                        "{}{}/{unit}",
+                        format_plain_number(*amount * scale, settings),
                         format_cap(*cap)
                     )
                 })
                 .collect();
             if terms.is_empty() {
-                "0/s".to_string()
+                format!("0/{unit}")
             } else {
                 terms.join(" + ")
             }
@@ -397,6 +402,7 @@ pub fn item_value(item: &Monomial) -> Value {
 mod tests {
     use super::*;
     use crate::facets::{ConfigFacet, Extent, MachineSpec, ModuleCount, ProcessFacet};
+    use crate::settings::TimeUnit;
     use hactorio_data::{Locale, postprocess};
     use std::collections::BTreeMap;
 
@@ -579,6 +585,36 @@ mod tests {
         assert_eq!(
             format_process_machine_lines(&machine_seconds, &settings, &registry),
             vec![format!("2 {machine_glyph}*s")]
+        );
+    }
+
+    #[test]
+    fn rate_follows_time_unit() {
+        let registry = hactorio_data::postprocess("{}", &hactorio_data::Locale::empty()).unwrap();
+        let settings = Settings {
+            time_unit: TimeUnit::Minute,
+            ..Settings::default()
+        };
+        let items = RateFacet::Items(BTreeMap::from([
+            (Cap::Full, 1.0),
+            (Cap::Limit(1), 0.5),
+        ]));
+        assert_eq!(
+            format_rate(&items, &settings, &registry),
+            format!("60{STACK_SIZE_GLYPH}/m + 30/m")
+        );
+        assert_eq!(
+            format_rate(&RateFacet::Fluid(2.0), &settings, &registry),
+            "120/m"
+        );
+
+        let settings = Settings {
+            time_unit: TimeUnit::Hour,
+            ..settings
+        };
+        assert_eq!(
+            format_rate(&RateFacet::Fluid(2.0), &settings, &registry),
+            "7200/h"
         );
     }
 

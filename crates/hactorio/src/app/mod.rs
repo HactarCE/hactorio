@@ -601,7 +601,12 @@ impl HactorioApp {
             }
             DisplaySetting::ItemRates => {
                 ui.label("Item rates");
-                ui.selectable_value(&mut self.settings.item_rate_belt, None, "item/s");
+                let unit = self.settings.time_unit.short_name();
+                ui.selectable_value(
+                    &mut self.settings.item_rate_belt,
+                    None,
+                    format!("item/{unit}"),
+                );
                 for (tier, glyph) in belt_glyphs {
                     let label: egui::WidgetText = match glyph {
                         Some(glyph) => RichText::new(glyph.to_string()).size(GLYPH_SIZE).into(),
