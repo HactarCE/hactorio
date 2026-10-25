@@ -2,7 +2,7 @@ mod app;
 mod document;
 mod evaluator;
 mod fonts;
-mod icons;
+mod glyphs;
 
 use eframe::egui;
 

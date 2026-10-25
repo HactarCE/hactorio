@@ -1,4 +1,4 @@
-//! Icon glyphs: one PUA codepoint per namespace entry, rasterized from PNGs.
+//! Glyphs: one PUA codepoint per namespace entry, rasterized from icon PNGs.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -15,35 +15,36 @@ const VARIABLE_ICON: &str = "__base__/graphics/icons/signal/signal-item-paramete
 /// Glyph for a variable in the completion popup.
 pub use hactorio_data::VARIABLE_GLYPH as VARIABLE;
 
-/// Installs a highest-priority rasterizer that draws namespace glyphs as icons.
+/// Installs a highest-priority rasterizer that renders namespace glyphs from
+/// icon PNGs.
 ///
 /// Replacing the rasterizer list drops every cached glyph, which is what a
 /// game-data reload needs.
 pub fn install(ctx: &egui::Context, registry: Arc<Registry>, source: &IconSource) {
-    let mut icons: HashMap<char, IconImage> = HashMap::new();
+    let mut images: HashMap<char, IconImage> = HashMap::new();
     for entry in registry.entries() {
         let Some(path) = &entry.icon else {
             continue;
         };
         if let Some(image) = source.read_rgba(path) {
-            icons.insert(entry.glyph, image);
+            images.insert(entry.glyph, image);
         }
     }
     for signal in &SIGNALS {
         if let Some(image) = source.read_rgba(signal.icon) {
-            icons.insert(signal.glyph, image);
+            images.insert(signal.glyph, image);
         }
     }
     if let Some(image) = source.read_rgba(VARIABLE_ICON) {
-        icons.insert(VARIABLE, image);
+        images.insert(VARIABLE, image);
     }
-    icons.insert(EMPTY_GLYPH, empty_icon());
-    let icons = Arc::new(icons);
+    images.insert(EMPTY_GLYPH, empty_image());
+    let images = Arc::new(images);
     type ScaleCache = Arc<Mutex<HashMap<(char, u32), Arc<ColorImage>>>>;
     let scaled: ScaleCache = Arc::new(Mutex::new(HashMap::new()));
 
     let rasterizer = GlyphRasterizer::new(
-        "hactorio::icons",
+        "hactorio::glyphs",
         move |request: &GlyphRasterizerRequest<'_>| {
             // Highest priority means this is asked about every cluster: reject fast.
             let mut chars = request.cluster.chars();
@@ -51,7 +52,7 @@ pub fn install(ctx: &egui::Context, registry: Arc<Registry>, source: &IconSource
             if chars.next().is_some() {
                 return None;
             }
-            let source = icons.get(&glyph)?;
+            let source = images.get(&glyph)?;
 
             let size = (request.font_size_px.round() as u32).clamp(1, 256);
             let image = {
@@ -79,7 +80,7 @@ pub fn install(ctx: &egui::Context, registry: Arc<Registry>, source: &IconSource
     ctx.set_glyph_rasterizers(vec![rasterizer]);
 }
 
-fn empty_icon() -> IconImage {
+fn empty_image() -> IconImage {
     IconImage {
         width: 64,
         height: 64,

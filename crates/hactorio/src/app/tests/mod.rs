@@ -4,18 +4,18 @@
 //! feature into submodules.
 
 use crate::app::completion::*;
-use crate::app::detail::*;
+use crate::app::results::*;
 use crate::app::*;
 use crate::document::{Cursor, Document};
 use egui_kittest::Harness;
 
 mod completion;
+mod hover;
 mod layout;
 mod persistence;
 mod reload;
 mod research;
 mod snapshots;
-mod tooltips;
 
 fn sample_document() -> Document {
     let text = "# Main\n\

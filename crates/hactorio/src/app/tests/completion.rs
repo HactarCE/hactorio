@@ -389,7 +389,7 @@ fn exact_matches_rank_first() {
 }
 
 #[test]
-fn property_completions_use_dotted_names_and_icons() {
+fn property_completions_use_dotted_names_and_glyphs() {
     let registry = fixture_registry();
     let text = "x.";
     let cursor = text.chars().count();
@@ -401,7 +401,7 @@ fn property_completions_use_dotted_names_and_icons() {
     let time = items
         .iter()
         .find(|item| item.insert != "time" && item.label == ".time");
-    assert!(time.is_some(), "expected a .time icon entry");
+    assert!(time.is_some(), "expected a .time glyph entry");
     assert!(!items.iter().any(|item| item.insert == "time"));
     assert!(!items.iter().any(|item| item.insert == "electric"));
     assert!(!items.iter().any(|item| item.insert == "slots"));
@@ -447,15 +447,15 @@ fn variable_rows_use_the_variable_signal() {
         .find(|item| item.insert == "rate")
         .expect("variable row");
 
-    assert_eq!(item.glyph, crate::icons::VARIABLE);
+    assert_eq!(item.glyph, crate::glyphs::VARIABLE);
     let font_id = egui::FontId::monospace(13.0);
     let job = completion_layout_job(item, 13, false, &font_id, &egui::Visuals::dark());
-    let icon = &job.sections[0];
+    let glyph_section = &job.sections[0];
     assert_eq!(
-        &job.text[icon.byte_range.start.0..icon.byte_range.end.0],
-        format!("{} ", crate::icons::VARIABLE)
+        &job.text[glyph_section.byte_range.start.0..glyph_section.byte_range.end.0],
+        format!("{} ", crate::glyphs::VARIABLE)
     );
-    assert_eq!(icon.format.extra_letter_spacing, 0.0);
+    assert_eq!(glyph_section.format.extra_letter_spacing, 0.0);
 }
 
 #[test]

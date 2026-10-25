@@ -6,14 +6,14 @@ use hactorio_core::facet_eval::{LineOutput, StatementOutput, line_hash};
 use hactorio_data::Registry;
 
 use super::completion::{self, CompletionState, completion_items, completion_word};
-use super::detail::{HoverTarget, hovered_icon, hovered_identifier, output_text};
+use super::results::{Token, glyph_at, identifier_at, single_line_result};
 use crate::document::Tab;
 
-/// Whether a popup is covering `pointer`, so editors below it do not react.
-fn pointer_over_popup(ctx: &Context, active: usize, pointer: egui::Pos2) -> bool {
+/// Whether a floating surface is covering `pointer`, so editors below it do not react.
+fn pointer_over_floating(ctx: &Context, active_tab: usize, pointer: egui::Pos2) -> bool {
     [
-        egui::Id::unique("line_detail"),
-        egui::Id::unique(("completion", active)),
+        egui::Id::unique("multiline_result"),
+        egui::Id::unique(("completion", active_tab)),
     ]
     .into_iter()
     .any(|id| {
@@ -28,7 +28,7 @@ fn pointer_over_popup(ctx: &Context, active: usize, pointer: egui::Pos2) -> bool
 }
 
 pub(super) struct EditorState<'a> {
-    active: usize,
+    active_tab: usize,
     outputs: &'a [StatementOutput],
     settings: &'a Settings,
     registry: &'a Registry,
@@ -39,7 +39,7 @@ pub(super) struct EditorState<'a> {
 
 impl<'a> EditorState<'a> {
     pub(super) fn new(
-        active: usize,
+        active_tab: usize,
         outputs: &'a [StatementOutput],
         settings: &'a Settings,
         registry: &'a Registry,
@@ -48,7 +48,7 @@ impl<'a> EditorState<'a> {
         results_width: &'a mut f32,
     ) -> Self {
         EditorState {
-            active,
+            active_tab,
             outputs,
             settings,
             registry,
@@ -59,21 +59,22 @@ impl<'a> EditorState<'a> {
     }
 }
 
-pub(super) struct EditorResult {
+pub(super) struct EditorEvents {
     pub(super) changed: bool,
-    pub(super) resized: bool,
+    /// The results column was resized.
+    pub(super) results_resized: bool,
     /// The line the caret is on, while the editor has focus.
-    focused: Option<usize>,
-    /// Where to place the full-results panel for the focused line, and its width.
-    pub(super) detail: Option<(usize, egui::Pos2, f32)>,
-    /// The icon or variable the pointer is over.
-    pub(super) hover: Option<HoverTarget>,
+    focused_line: Option<usize>,
+    /// Where to place the multiline result panel, the line it describes, and its width.
+    pub(super) multiline_result: Option<(usize, egui::Pos2, f32)>,
+    /// The token the pointer is over.
+    pub(super) hover_token: Option<Token>,
 }
 
 /// Renders the tab as one multiline editor, with line numbers and outputs
 /// painted at the galley's row positions so they stay aligned.
-pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorResult {
-    let active = state.active;
+pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>) -> EditorEvents {
+    let active_tab = state.active_tab;
     let outputs = state.outputs;
     let settings = state.settings;
     let registry = state.registry;
@@ -81,12 +82,12 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
     let completion: &mut CompletionState = state.completion;
     let results_width: &mut f32 = state.results_width;
 
-    let mut result = EditorResult {
+    let mut events = EditorEvents {
         changed: false,
-        resized: false,
-        focused: None,
-        detail: None,
-        hover: None,
+        results_resized: false,
+        focused_line: None,
+        multiline_result: None,
+        hover_token: None,
     };
 
     let font_id = TextStyle::Monospace.resolve(ui.style());
@@ -100,13 +101,14 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
         .map(|line| line.chars().count())
         .max()
         .unwrap_or(0);
-    let number_width = 44.0;
-    let divider_width = 7.0;
+    let line_numbers_width = 44.0;
+    let results_divider_width = 7.0;
     let central_width = ui.available_width();
-    let max_results = (central_width - number_width - 220.0).max(120.0);
-    let requested_results = (*results_width).clamp(120.0, max_results);
+    let max_results_width = (central_width - line_numbers_width - 220.0).max(120.0);
+    let requested_results_width = (*results_width).clamp(120.0, max_results_width);
     let editor_width =
-        (central_width - number_width - requested_results - divider_width).max(160.0);
+        (central_width - line_numbers_width - requested_results_width - results_divider_width)
+            .max(160.0);
     let editor_content_width = (longest as f32 * char_width + 24.0).max(editor_width);
 
     let mut layouter = |ui: &Ui, buffer: &dyn egui::TextBuffer, _wrap_width: f32| {
@@ -121,11 +123,11 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
     };
 
     let scroll = ScrollArea::vertical()
-        .id_salt(("editor", active))
+        .id_salt(("editor", active_tab))
         .vertical_scroll_offset(tab.scroll)
         .show(ui, |ui| {
             ui.horizontal_top(|ui| {
-                ui.add_space(number_width);
+                ui.add_space(line_numbers_width);
                 let popup_open = completion.is_open();
                 let keys = if popup_open {
                     completion::popup_keys(ui)
@@ -133,10 +135,10 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                     completion::PopupKeys::default()
                 };
 
-                let text_id = ui.make_persistent_id(("text", active));
+                let text_id = ui.make_persistent_id(("text", active_tab));
                 // Clicking the popup must not surrender the editor's focus, or the
                 // popup would be cleared before the click reaches its row.
-                let popup_id = egui::Id::unique(("completion", active));
+                let popup_id = egui::Id::unique(("completion", active_tab));
                 let pointer_on_popup = popup_open
                     && ui.ctx().pointer_interact_pos().is_some_and(|pos| {
                         ui.ctx()
@@ -152,7 +154,7 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                     });
                 }
                 let hscroll = ScrollArea::horizontal()
-                    .id_salt(("text_scroll", active))
+                    .id_salt(("text_scroll", active_tab))
                     .max_width(editor_width)
                     .show(ui, |ui| {
                         TextEdit::multiline(&mut tab.text)
@@ -174,20 +176,20 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                     options.input_options.surrender_focus_on = surrender_focus_on;
                 });
                 let text_edit = hscroll.inner;
-                result.changed |= text_edit.response.changed();
+                events.changed |= text_edit.response.changed();
 
                 if let Some(pointer) = ui.ctx().pointer_hover_pos()
                     && text_edit.response.rect.contains(pointer)
-                    && !pointer_over_popup(ui.ctx(), active, pointer)
+                    && !pointer_over_floating(ui.ctx(), active_tab, pointer)
                 {
                     if let Some((_, glyph, rect)) =
-                        hovered_icon(registry, &text_edit.galley, text_edit.galley_pos, pointer)
+                        glyph_at(registry, &text_edit.galley, text_edit.galley_pos, pointer)
                     {
-                        result.hover = Some(HoverTarget::Entry { glyph, rect });
+                        events.hover_token = Some(Token::Prototype { glyph, rect });
                     } else if let Some((line, name, rect)) =
-                        hovered_identifier(&text_edit.galley, text_edit.galley_pos, pointer)
+                        identifier_at(&text_edit.galley, text_edit.galley_pos, pointer)
                     {
-                        result.hover = Some(HoverTarget::Variable { line, name, rect });
+                        events.hover_token = Some(Token::Variable { line, name, rect });
                     }
                 }
 
@@ -227,7 +229,7 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                         .count();
                     tab.cursor_line = line;
                     if text_edit.response.has_focus() {
-                        result.focused = Some(line);
+                        events.focused_line = Some(line);
                     }
                 }
 
@@ -266,10 +268,10 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                         .pos_from_cursor(egui::text::CCursor::new(cursor_char));
                     let anchor =
                         text_edit.galley_pos + caret.left_bottom().to_vec2() + egui::vec2(0.0, 2.0);
-                    result.changed |= completion::popup(
+                    events.changed |= completion::popup(
                         ui,
                         completion::PopupRequest {
-                            active,
+                            active_tab,
                             text_id,
                             text: &mut tab.text,
                             completion,
@@ -285,30 +287,32 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                 let galley = &text_edit.galley;
                 let editor_height = text_edit.response.rect.height().max(galley.size().y + 8.0);
 
-                let (divider_rect, divider) =
-                    ui.allocate_exact_size(egui::vec2(divider_width, editor_height), Sense::drag());
-                if divider.hovered() || divider.dragged() {
+                let (results_divider_rect, results_divider) = ui.allocate_exact_size(
+                    egui::vec2(results_divider_width, editor_height),
+                    Sense::drag(),
+                );
+                if results_divider.hovered() || results_divider.dragged() {
                     ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
                 }
-                if divider.dragged() {
-                    *results_width =
-                        (*results_width - divider.drag_delta().x).clamp(120.0, max_results);
-                    result.resized = true;
+                if results_divider.dragged() {
+                    *results_width = (*results_width - results_divider.drag_delta().x)
+                        .clamp(120.0, max_results_width);
+                    events.results_resized = true;
                 }
-                let shown_results = (*results_width).clamp(120.0, max_results);
+                let shown_results_width = (*results_width).clamp(120.0, max_results_width);
                 ui.painter().vline(
-                    divider_rect.center().x,
-                    divider_rect.y_range(),
+                    results_divider_rect.center().x,
+                    results_divider_rect.y_range(),
                     ui.visuals().widgets.noninteractive.bg_stroke,
                 );
                 let results_rect = Rect::from_min_size(
-                    egui::pos2(divider_rect.right(), divider_rect.top()),
-                    egui::vec2(shown_results, editor_height),
+                    egui::pos2(results_divider_rect.right(), results_divider_rect.top()),
+                    egui::vec2(shown_results_width, editor_height),
                 );
-                ui.allocate_space(egui::vec2(shown_results, editor_height));
+                ui.allocate_space(egui::vec2(shown_results_width, editor_height));
 
-                let gutter_x = results_rect.left() + 8.0;
-                let gutter_room = (shown_results - 16.0).max(60.0);
+                let single_line_x = results_rect.left() + 8.0;
+                let single_line_width = (shown_results_width - 16.0).max(60.0);
                 let weak = ui.visuals().weak_text_color();
                 let error_color = Color32::from_rgb(220, 90, 90);
                 let painter = ui.painter();
@@ -332,11 +336,12 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                     if statement.source_hash != line_hash(line) {
                         continue;
                     }
-                    let Some(text) = output_text(statement, settings, registry) else {
+                    let Some(text) = single_line_result(statement, settings, registry) else {
                         continue;
                     };
-                    if result.focused == Some(index) {
-                        result.detail = Some((index, egui::pos2(gutter_x, y), gutter_room));
+                    if events.focused_line == Some(index) {
+                        events.multiline_result =
+                            Some((index, egui::pos2(single_line_x, y), single_line_width));
                         continue;
                     }
                     let color = if matches!(statement.output, LineOutput::Error(_)) {
@@ -344,23 +349,22 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                     } else {
                         weak
                     };
-                    let text = truncate_text(painter, &text, &font_id, gutter_room);
-                    let pos = egui::pos2(gutter_x, y);
+                    let text = truncate_text(painter, &text, &font_id, single_line_width);
+                    let pos = egui::pos2(single_line_x, y);
                     let galley = painter.layout_no_wrap(text, font_id.clone(), color);
                     painter.galley(pos, galley.clone(), color);
                     if let Some(pointer) = ui.ctx().pointer_hover_pos()
-                        && !pointer_over_popup(ui.ctx(), active, pointer)
-                        && let Some((_, glyph, rect)) =
-                            hovered_icon(registry, &galley, pos, pointer)
+                        && !pointer_over_floating(ui.ctx(), active_tab, pointer)
+                        && let Some((_, glyph, rect)) = glyph_at(registry, &galley, pos, pointer)
                     {
-                        result.hover = Some(HoverTarget::Entry { glyph, rect });
+                        events.hover_token = Some(Token::Prototype { glyph, rect });
                     }
                 }
             });
         });
     tab.scroll = scroll.state.clamped_offset().y;
 
-    result
+    events
 }
 
 fn truncate_text(

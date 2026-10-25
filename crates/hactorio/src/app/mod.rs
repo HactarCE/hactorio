@@ -1,4 +1,4 @@
-//! The document window: tabs, line editor with outputs, settings, details.
+//! The document window: tabs, line editor with results, settings, and tokens.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -17,21 +17,21 @@ use crate::document::{
 };
 use crate::evaluator::Evaluator;
 use crate::fonts;
-use crate::icons;
+use crate::glyphs;
 
 mod completion;
-mod detail;
 mod editor;
+mod results;
 
 use completion::CompletionState;
 use editor::{EditorState, editor_ui};
 
 const SAVE_INTERVAL: Duration = Duration::from_secs(5);
 
-/// Font size of icon glyphs, such as belt tiers.
-const ICON_SIZE: f32 = 18.0;
+/// Font size of glyphs, such as belt tiers.
+const GLYPH_SIZE: f32 = 18.0;
 
-/// Sets the monospace text size globally, so the editor, gutter outputs, and popups agree.
+/// Sets the monospace text size globally, so the editor, results column, and popups agree.
 fn set_font_size(ctx: &Context, size: f32) {
     ctx.all_styles_mut(|style| {
         style
@@ -62,9 +62,9 @@ pub fn data_dir() -> PathBuf {
     PathBuf::from(".hactorio")
 }
 
-/// Height of a button whose text is an icon glyph.
-fn icon_button_height(ui: &Ui) -> f32 {
-    let font = egui::FontId::proportional(ICON_SIZE);
+/// Height of a button whose text is a glyph.
+fn glyph_button_height(ui: &Ui) -> f32 {
+    let font = egui::FontId::proportional(GLYPH_SIZE);
     let text_height = ui.fonts_mut(|fonts| fonts.row_height(&font));
     ui.spacing()
         .interact_size
@@ -98,7 +98,7 @@ enum DisplaySetting {
     TimeUnit,
     ItemRates,
     Decimals,
-    Metrics,
+    MetricPrefixes,
 }
 
 const DISPLAY_SETTINGS: [DisplaySetting; 5] = [
@@ -106,7 +106,7 @@ const DISPLAY_SETTINGS: [DisplaySetting; 5] = [
     DisplaySetting::TimeUnit,
     DisplaySetting::ItemRates,
     DisplaySetting::Decimals,
-    DisplaySetting::Metrics,
+    DisplaySetting::MetricPrefixes,
 ];
 
 #[derive(Clone, Copy)]
@@ -218,14 +218,14 @@ fn settings_bar<T: Copy>(
                         ui.add(egui::Separator::default().spacing(separator));
                     }
                     let _row_response = ui.horizontal(|ui| {
-                        ui.set_min_height(icon_button_height(ui));
+                        ui.set_min_height(glyph_button_height(ui));
                         egui::ScrollArea::horizontal()
                             .id_salt(("settings_row", label, row_index))
                             .scroll_bar_visibility(
                                 egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded,
                             )
                             .show(ui, |ui| {
-                                ui.set_min_height(icon_button_height(ui));
+                                ui.set_min_height(glyph_button_height(ui));
                                 ui.with_layout(egui::Layout::left_to_right(Align::Center), |ui| {
                                     for index in start..end {
                                         if index > start {
@@ -274,7 +274,7 @@ fn belt_tier_glyph(registry: &Registry, tier: BeltTier) -> Option<char> {
 
 pub struct HactorioApp {
     tabs: Vec<Tab>,
-    active: usize,
+    active_tab: usize,
     settings: Settings,
     evaluator: Evaluator,
     registry: Option<Arc<Registry>>,
@@ -320,7 +320,7 @@ impl HactorioApp {
                 .map(|text| Tab::from_text(text))
                 .collect()
         };
-        let active = document.active_tab.min(tabs.len() - 1);
+        let active_tab = document.active_tab.min(tabs.len() - 1);
         for (tab, cursor) in tabs.iter_mut().zip(document.cursors.iter()) {
             tab.cursor_line = cursor
                 .line
@@ -346,7 +346,7 @@ impl HactorioApp {
 
         let install = locate();
         if let (Some(registry), Some(install)) = (&registry, &install) {
-            icons::install(ctx, Arc::clone(registry), &install.icon_source());
+            glyphs::install(ctx, Arc::clone(registry), &install.icon_source());
         }
 
         let font = document
@@ -361,7 +361,7 @@ impl HactorioApp {
 
         HactorioApp {
             tabs,
-            active,
+            active_tab,
             settings: document.settings,
             evaluator: Evaluator::new(),
             registry,
@@ -383,7 +383,7 @@ impl HactorioApp {
             font,
             pending_focus: document
                 .cursors
-                .get(active)
+                .get(active_tab)
                 .map(|cursor| (cursor.line, cursor.column)),
             applied: 0,
             completion: CompletionState::default(),
@@ -392,7 +392,7 @@ impl HactorioApp {
 
     fn current_text(&self) -> String {
         self.tabs
-            .get(self.active)
+            .get(self.active_tab)
             .map(|tab| tab.text.clone())
             .unwrap_or_default()
     }
@@ -481,7 +481,7 @@ impl HactorioApp {
             Ok(()) => self.status = format!("{} prototypes", registry.entries().len()),
             Err(error) => self.status = format!("Could not cache game data: {error}"),
         }
-        icons::install(ctx, Arc::clone(&registry), &install.icon_source());
+        glyphs::install(ctx, Arc::clone(&registry), &install.icon_source());
         self.registry = Some(registry);
         self.install = Some(install);
         self.evaluator = Evaluator::new();
@@ -496,7 +496,7 @@ impl HactorioApp {
         ui.horizontal_wrapped(|ui| {
             for (index, tab) in self.tabs.iter().enumerate() {
                 if ui
-                    .selectable_label(index == self.active, tab.title())
+                    .selectable_label(index == self.active_tab, tab.title())
                     .clicked()
                 {
                     activate = Some(index);
@@ -507,7 +507,7 @@ impl HactorioApp {
             }
             if ui.button("+").clicked() {
                 self.tabs.push(Tab::from_text("# Untitled\n"));
-                self.active = self.tabs.len() - 1;
+                self.active_tab = self.tabs.len() - 1;
                 self.dirty = true;
                 self.last_request = None;
             }
@@ -525,16 +525,16 @@ impl HactorioApp {
         });
 
         if let Some(index) = activate
-            && index != self.active
+            && index != self.active_tab
         {
-            self.active = index;
+            self.active_tab = index;
             self.outputs.clear();
             self.last_request = None;
         }
         if let Some(index) = close {
             self.tabs.remove(index);
-            if self.active >= self.tabs.len() {
-                self.active = self.tabs.len() - 1;
+            if self.active_tab >= self.tabs.len() {
+                self.active_tab = self.tabs.len() - 1;
             }
             self.dirty = true;
             self.last_request = None;
@@ -543,7 +543,7 @@ impl HactorioApp {
 
     fn display_bar(&mut self, ui: &mut Ui, registry: &Registry, label_width: f32) {
         let before = self.settings.clone();
-        let belt_icons = BeltTier::ALL.map(|tier| (tier, belt_tier_glyph(registry, tier)));
+        let belt_glyphs = BeltTier::ALL.map(|tier| (tier, belt_tier_glyph(registry, tier)));
 
         settings_bar(
             ui,
@@ -551,7 +551,7 @@ impl HactorioApp {
             label_width,
             &DISPLAY_SETTINGS,
             |ui, setting| {
-                self.display_setting_ui(ui, setting, &belt_icons);
+                self.display_setting_ui(ui, setting, &belt_glyphs);
             },
         );
 
@@ -562,7 +562,7 @@ impl HactorioApp {
         &mut self,
         ui: &mut Ui,
         setting: DisplaySetting,
-        belt_icons: &[(BeltTier, Option<char>)],
+        belt_glyphs: &[(BeltTier, Option<char>)],
     ) {
         match setting {
             DisplaySetting::Font => {
@@ -601,9 +601,9 @@ impl HactorioApp {
             DisplaySetting::ItemRates => {
                 ui.label("Item rates");
                 ui.selectable_value(&mut self.settings.item_rate_belt, None, "item/s");
-                for (tier, glyph) in belt_icons {
+                for (tier, glyph) in belt_glyphs {
                     let label: egui::WidgetText = match glyph {
-                        Some(glyph) => RichText::new(glyph.to_string()).size(ICON_SIZE).into(),
+                        Some(glyph) => RichText::new(glyph.to_string()).size(GLYPH_SIZE).into(),
                         None => tier.token().to_string().into(),
                     };
                     ui.selectable_value(&mut self.settings.item_rate_belt, Some(*tier), label)
@@ -611,7 +611,7 @@ impl HactorioApp {
                 }
                 ui.add_enabled_ui(self.settings.item_rate_belt.is_some(), |ui| {
                     let stack_label =
-                        RichText::new(hactorio_data::STACK_SIZE_GLYPH.to_string()).size(ICON_SIZE);
+                        RichText::new(hactorio_data::STACK_SIZE_GLYPH.to_string()).size(GLYPH_SIZE);
                     ui.toggle_value(&mut self.settings.stacked_belts, stack_label)
                         .on_hover_text("Show item rates as stacks on stacked belts");
                 });
@@ -620,7 +620,7 @@ impl HactorioApp {
                 ui.label("Decimals");
                 ui.add(egui::Slider::new(&mut self.settings.max_decimals, 0..=6));
             }
-            DisplaySetting::Metrics => {
+            DisplaySetting::MetricPrefixes => {
                 ui.checkbox(&mut self.settings.metric_prefixes, "Metric prefixes");
             }
         }
@@ -760,7 +760,7 @@ impl HactorioApp {
                     None => tab.text.clone(),
                 })
                 .collect(),
-            active_tab: self.active,
+            active_tab: self.active_tab,
             cursors: self
                 .tabs
                 .iter()
@@ -844,7 +844,7 @@ impl HactorioApp {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(&self.status).small().weak());
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let lines = self.tabs[self.active].text.split('\n').count();
+                        let lines = self.tabs[self.active_tab].text.split('\n').count();
                         ui.label(RichText::new(format!("{lines} lines")).small().weak());
                     });
                 });
@@ -872,9 +872,9 @@ impl HactorioApp {
                 return;
             };
             let registry = registry.as_ref();
-            let active = self.active;
+            let active_tab = self.active_tab;
             let mut state = EditorState::new(
-                active,
+                active_tab,
                 &self.outputs,
                 &self.settings,
                 registry,
@@ -882,28 +882,28 @@ impl HactorioApp {
                 &mut self.completion,
                 &mut self.results_width,
             );
-            let result = editor_ui(ui, &mut self.tabs[active], &mut state);
-            if result.changed {
+            let events = editor_ui(ui, &mut self.tabs[active_tab], &mut state);
+            if events.changed {
                 self.dirty = true;
                 self.last_request = None;
             }
-            if result.resized {
+            if events.results_resized {
                 self.dirty = true;
             }
-            let detail = detail::DetailContext {
+            let results = results::ResultsContext {
                 tabs: &self.tabs,
-                active,
+                active_tab,
                 outputs: &self.outputs,
                 settings: &self.settings,
                 registry,
             };
-            if let Some((line, anchor, width)) = result.detail
+            if let Some((line, anchor, width)) = events.multiline_result
                 && self.completion.items.is_empty()
             {
-                detail.detail_panel(&ctx, anchor, line, width);
+                results.show_multiline_result(&ctx, anchor, line, width);
             }
-            if let Some(target) = result.hover {
-                detail.details_popup(&ctx, target);
+            if let Some(token) = events.hover_token {
+                results.show_token_tip(&ctx, token);
             }
         });
 

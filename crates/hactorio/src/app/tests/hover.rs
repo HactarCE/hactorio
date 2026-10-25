@@ -1,10 +1,10 @@
 use super::*;
-use crate::app::detail::{DetailContext, HoverTarget};
+use crate::app::results::{ResultsContext, Token};
 use crate::document::Tab;
 use egui_kittest::kittest::Queryable;
 use hactorio_core::facet_eval::evaluate;
 
-fn tooltip_is_open(harness: &Harness<'_, Option<HactorioApp>>) -> bool {
+fn token_tip_is_open(harness: &Harness<'_, Option<HactorioApp>>) -> bool {
     harness.ctx.memory(|memory| {
         memory
             .layer_ids()
@@ -13,7 +13,7 @@ fn tooltip_is_open(harness: &Harness<'_, Option<HactorioApp>>) -> bool {
 }
 
 #[test]
-fn hovering_an_editor_icon_opens_the_details() {
+fn hovering_an_editor_glyph_opens_the_token_tip() {
     let document = editor_document("# Main\n3 :iron-plate:\n", 1, 0);
     let (mut harness, dir) = completion_harness("hover", document);
     harness.run();
@@ -32,22 +32,22 @@ fn hovering_an_editor_icon_opens_the_details() {
         for x in (left..=left + 100).step_by(2) {
             harness.hover_at(egui::pos2(x as f32, y as f32));
             harness.run();
-            if tooltip_is_open(&harness) {
+            if token_tip_is_open(&harness) {
                 shown = true;
                 break 'search;
             }
         }
     }
-    assert!(shown, "no details tooltip appeared");
+    assert!(shown, "no token tip appeared");
     if std::env::var_os("HACTORIO_UI_SNAPSHOT").is_some() {
-        harness.snapshot("details");
+        harness.snapshot("token_tip");
     }
 
     std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
-fn hovering_an_output_icon_opens_the_details() {
+fn hovering_a_single_line_result_glyph_opens_the_token_tip() {
     let document = editor_document("# Main\n3 :iron-plate:\n", 0, 0);
     let (mut harness, dir) = completion_harness("output-hover", document);
     harness.run();
@@ -65,27 +65,27 @@ fn hovering_an_output_icon_opens_the_details() {
         for x in (left..=left + 300).step_by(4) {
             harness.hover_at(egui::pos2(x as f32, y as f32));
             harness.run();
-            if tooltip_is_open(&harness) {
+            if token_tip_is_open(&harness) {
                 shown = true;
                 break 'search;
             }
         }
     }
-    assert!(shown, "no details tooltip appeared");
+    assert!(shown, "no token tip appeared");
 
     std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
-fn hovering_a_detail_popup_icon_opens_the_details() {
+fn hovering_a_multiline_result_glyph_opens_the_token_tip() {
     let document = editor_document("# Main\n3 :iron-plate:\n", 1, 0);
-    let (mut harness, dir) = completion_harness("detail-hover", document);
+    let (mut harness, dir) = completion_harness("multiline-hover", document);
     harness.run();
 
     let area = harness
         .ctx
-        .memory(|memory| memory.area_rect(egui::Id::unique("line_detail")))
-        .expect("detail popup");
+        .memory(|memory| memory.area_rect(egui::Id::unique("multiline_result")))
+        .expect("multiline result");
     let left = area.left() as i32;
     let top = area.top() as i32;
     let mut shown = false;
@@ -93,41 +93,41 @@ fn hovering_a_detail_popup_icon_opens_the_details() {
         for x in (left..=left + 120).step_by(3) {
             harness.hover_at(egui::pos2(x as f32, y as f32));
             harness.run();
-            if tooltip_is_open(&harness) {
+            if token_tip_is_open(&harness) {
                 shown = true;
                 break 'search;
             }
         }
     }
-    assert!(shown, "no details tooltip appeared");
+    assert!(shown, "no token tip appeared");
 
     std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
-fn detail_popup_content_starts_at_the_anchor() {
+fn multiline_result_content_starts_at_the_anchor() {
     let style = egui::Style::default();
     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0));
     let anchor = egui::pos2(400.0, 300.0);
-    let pos = detail_popup_pos(&style, anchor, screen, 300.0);
-    let content = pos + detail_popup_inset(&style);
+    let pos = multiline_result_pos(&style, anchor, screen, 300.0);
+    let content = pos + multiline_result_inset(&style);
     assert!((content.x - anchor.x).abs() < 0.01, "{content:?}");
     assert!((content.y - anchor.y).abs() < 0.01, "{content:?}");
-    assert!(detail_popup_inset(&style).x > 0.0);
+    assert!(multiline_result_inset(&style).x > 0.0);
 }
 
 #[test]
-fn detail_popup_does_not_wrap_long_results() {
+fn multiline_result_does_not_wrap_long_results() {
     let unknown = "x".repeat(100);
     let text = format!("# Main\n:{unknown}:\n");
     let document = editor_document(&text, 1, 0);
-    let (mut harness, dir) = completion_harness("detail-wide", document);
+    let (mut harness, dir) = completion_harness("multiline-wide", document);
     harness.run();
 
     let area = harness
         .ctx
-        .memory(|memory| memory.area_rect(egui::Id::unique("line_detail")))
-        .expect("detail popup");
+        .memory(|memory| memory.area_rect(egui::Id::unique("multiline_result")))
+        .expect("multiline result");
     assert!(area.width() > 420.0, "popup stayed narrow: {area:?}");
     assert!(area.height() < 60.0, "popup wrapped: {area:?}");
 
@@ -135,7 +135,7 @@ fn detail_popup_does_not_wrap_long_results() {
 }
 
 #[test]
-fn detail_columns_do_not_wrap_at_large_font() {
+fn multiline_result_columns_do_not_wrap_at_large_font() {
     const FIXTURE: &str = r#"{
   "item": {
     "iron-plate": {"type": "item", "name": "iron-plate", "stack_size": 100},
@@ -165,20 +165,20 @@ fn detail_columns_do_not_wrap_at_large_font() {
     let mut document = editor_document(&format!("# prod test\n{text}\n"), 1, 0);
     document.font_size = 24.0;
     document.settings.item_rate_belt = Some(hactorio_core::BeltTier::Yellow);
-    let (mut harness, dir) = completion_harness_with("detail-columns", document, FIXTURE);
+    let (mut harness, dir) = completion_harness_with("multiline-columns", document, FIXTURE);
     harness.run();
 
     let area = harness
         .ctx
-        .memory(|memory| memory.area_rect(egui::Id::unique("line_detail")))
-        .expect("detail popup");
-    assert!(area.height() < 200.0, "detail columns wrapped: {area:?}");
+        .memory(|memory| memory.area_rect(egui::Id::unique("multiline_result")))
+        .expect("multiline result");
+    assert!(area.height() < 200.0, "multiline columns wrapped: {area:?}");
 
     std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
-fn details_for_a_prototype_list_its_information() {
+fn token_tip_for_a_prototype_lists_its_information() {
     let registry = fixture_registry();
     let settings = Settings::default();
     let glyph = registry.entry("iron-plate").unwrap().glyph;
@@ -187,16 +187,16 @@ fn details_for_a_prototype_list_its_information() {
         .with_accessibility_check(false)
         .allow_missing_glyphs()
         .build_ui(move |ui| {
-            let details = DetailContext {
+            let results = ResultsContext {
                 tabs: &[],
-                active: 0,
+                active_tab: 0,
                 outputs: &[],
                 settings: &settings,
                 registry: &registry,
             };
-            details.details_ui(
+            results.token_tip_ui(
                 ui,
-                &HoverTarget::Entry {
+                &Token::Prototype {
                     glyph,
                     rect: egui::Rect::NOTHING,
                 },
@@ -219,7 +219,7 @@ fn details_for_a_prototype_list_its_information() {
 }
 
 #[test]
-fn details_for_a_variable_show_its_value() {
+fn token_tip_for_a_variable_shows_its_value() {
     let registry = fixture_registry();
     let settings = Settings::default();
     let text = "# Main\nrate = 3 :iron-plate: / second\n";
@@ -230,16 +230,16 @@ fn details_for_a_variable_show_its_value() {
         .with_accessibility_check(false)
         .allow_missing_glyphs()
         .build_ui(move |ui| {
-            let details = DetailContext {
+            let results = ResultsContext {
                 tabs: &tabs,
-                active: 0,
+                active_tab: 0,
                 outputs: &outputs,
                 settings: &settings,
                 registry: &registry,
             };
-            details.details_ui(
+            results.token_tip_ui(
                 ui,
-                &HoverTarget::Variable {
+                &Token::Variable {
                     line: 2,
                     name: "rate".to_string(),
                     rect: egui::Rect::NOTHING,
@@ -252,9 +252,9 @@ fn details_for_a_variable_show_its_value() {
 }
 
 #[test]
-fn error_details_show_error_heading_and_message() {
+fn multiline_result_shows_error_heading_and_message() {
     let document = editor_document("# Main\n3 :iron-plate: + 3 :copper-cable:\n", 1, 0);
-    let (mut harness, dir) = completion_harness("error-details", document);
+    let (mut harness, dir) = completion_harness("multiline-error", document);
     harness.run();
     assert!(harness.query_by_label("error").is_some());
     assert!(
@@ -262,5 +262,81 @@ fn error_details_show_error_heading_and_message() {
             .query_by_label_contains("`+` dropped every facet")
             .is_some()
     );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// The editor's text area, from the focused text field's response.
+fn editor_rect(harness: &Harness<'_, Option<HactorioApp>>) -> egui::Rect {
+    harness
+        .ctx
+        .memory(|memory| memory.focused())
+        .and_then(|id| harness.ctx.read_response(id))
+        .map(|response| response.rect)
+        .expect("focused editor")
+}
+
+/// Sweeps `rect` until a token tip opens, returning whether one did.
+fn hover_until_token_tip(harness: &mut Harness<'_, Option<HactorioApp>>, rect: egui::Rect) -> bool {
+    for y in (rect.top() as i32..rect.bottom() as i32).step_by(3) {
+        for x in (rect.left() as i32..rect.right() as i32).step_by(2) {
+            harness.hover_at(egui::pos2(x as f32, y as f32));
+            harness.run();
+            if token_tip_is_open(harness) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn multiline_result_rect(harness: &Harness<'_, Option<HactorioApp>>) -> egui::Rect {
+    harness
+        .ctx
+        .memory(|memory| memory.area_rect(egui::Id::unique("multiline_result")))
+        .expect("multiline result")
+}
+
+#[test]
+fn hovering_a_variable_opens_the_token_tip() {
+    let document = editor_document("# Main\nrate = 3 :iron-plate:\nrate * 2\n", 2, 0);
+    let (mut harness, dir) = completion_harness("variable-hover", document);
+    harness.run();
+    let rect = editor_rect(&harness);
+    assert!(hover_until_token_tip(&mut harness, rect));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn hovering_a_keyword_opens_no_token_tip() {
+    let document = editor_document("# Main\nwith\n", 1, 0);
+    let (mut harness, dir) = completion_harness("keyword-hover", document);
+    harness.run();
+    let rect = editor_rect(&harness);
+    assert!(
+        !hover_until_token_tip(&mut harness, rect),
+        "a keyword opened a token tip"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn hovering_a_glyph_in_the_multiline_result_keeps_every_line() {
+    let document = editor_document("# Main\n2 :assembling-machine-3:\n", 1, 0);
+    let (mut harness, dir) = completion_harness("multiline-lines", document);
+    harness.run();
+
+    let baseline = multiline_result_rect(&harness).height();
+    assert!(baseline > 0.0);
+    let rect = multiline_result_rect(&harness);
+    assert!(
+        hover_until_token_tip(&mut harness, rect),
+        "no glyph in the multiline result"
+    );
+    let after = multiline_result_rect(&harness).height();
+    assert!(
+        (after - baseline).abs() < 1.0,
+        "panel lost lines while a glyph was hovered: {baseline} -> {after}"
+    );
+
     std::fs::remove_dir_all(dir).unwrap();
 }

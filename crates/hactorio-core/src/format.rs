@@ -13,7 +13,7 @@ enum NumberStyle {
     Metric,
 }
 
-/// Formats a value for the output gutter.
+/// Formats a value for a single-line result.
 ///
 /// Prototype units are rendered as their private-use glyph, so the app's glyph
 /// rasterizer draws the icon. Time follows the global time unit, item

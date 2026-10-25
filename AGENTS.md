@@ -11,6 +11,31 @@ Before starting a unit of work, run `jj status`.
 
 After completing a unit of work, run `jj describe` and describe the whole set of changes, including the existing work on the commit (if any) and the new work you just did.
 
+## UI vocabulary
+
+A floating surface is named by what it describes and how it presents. Keep
+these names in code, comments, and docs:
+
+| Name | Meaning |
+| --- | --- |
+| results column | the fixed column of per-line results right of the editor |
+| single-line result | the lossy, one-line projection painted in a results-column row |
+| multiline result panel | the floating panel with a line's full result; follows the caret |
+| token tip | the tooltip for the prototype or variable under the pointer; follows the pointer |
+| hint | stock `on_hover_text` text on a control |
+
+`tip` always means an `egui::Tooltip`; `panel` always means a floating
+`egui::Area`. "Popup" means the completion dropdown only. Do not call the
+results column a gutter or a panel: line numbers are the left strip, results are
+the results column.
+
+A private-use character is a **glyph**; the PNG it renders into is an **icon**.
+So `:iron-plate:` is a glyph, its entry's `icon` path points at an icon, and
+`GLYPH_SIZE` is how large the character is drawn.
+
+A tip only opens when it has something to describe: hovering a keyword, a typo,
+or a variable that does not resolve shows nothing.
+
 ## egui
 
 Rows inside content-sized panels use `ui.horizontal`; `ui.horizontal_top` allocates the remaining height and causes a growth feedback loop.

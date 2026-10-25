@@ -33,7 +33,7 @@ pub(super) struct CompletionState {
 #[derive(Clone)]
 pub(super) struct CompletionItem {
     pub(super) insert: String,
-    /// Icon glyph; variables use [`crate::icons::VARIABLE`].
+    /// Glyph; variables use [`crate::glyphs::VARIABLE`].
     pub(super) glyph: char,
     /// The name or alias that matched best, as shown in the popup.
     pub(super) label: String,
@@ -487,7 +487,7 @@ pub(super) fn completion_items(
                 score as f64 + COMPLETION_VARIABLE_BONUS,
                 CompletionItem {
                     insert: name.clone(),
-                    glyph: crate::icons::VARIABLE,
+                    glyph: crate::glyphs::VARIABLE,
                     label: name,
                     matched,
                     name: None,
@@ -579,8 +579,8 @@ fn completion_padding(item: &CompletionItem, label_width: usize) -> usize {
     }
 }
 
-/// Appends the icon column: the row's glyph and its separating space.
-fn append_icon_column(
+/// Appends the glyph column: the row's glyph and its separating space.
+fn append_glyph_column(
     job: &mut egui::text::LayoutJob,
     item: &CompletionItem,
     normal: &egui::TextFormat,
@@ -660,7 +660,7 @@ pub(super) fn completion_layout_job(
     };
 
     let mut job = egui::text::LayoutJob::default();
-    append_icon_column(&mut job, item, &normal);
+    append_glyph_column(&mut job, item, &normal);
     append_matched_text(&mut job, &item.label, &item.matched, &normal, &highlighted);
     if let Some(name) = &item.name {
         job.append(
@@ -718,7 +718,7 @@ impl CompletionState {
 
 /// What the editor hands to the popup for one frame.
 pub(super) struct PopupRequest<'a> {
-    pub active: usize,
+    pub active_tab: usize,
     pub text_id: egui::Id,
     pub text: &'a mut String,
     pub completion: &'a mut CompletionState,
@@ -733,7 +733,7 @@ pub(super) struct PopupRequest<'a> {
 /// changed and the editor must be saved.
 pub(super) fn popup(ui: &mut Ui, request: PopupRequest<'_>) -> bool {
     let PopupRequest {
-        active,
+        active_tab,
         text_id,
         text,
         completion,
@@ -780,7 +780,7 @@ pub(super) fn popup(ui: &mut Ui, request: PopupRequest<'_>) -> bool {
             .max(screen.top() + 8.0),
     );
     let mut clicked = None;
-    egui::Area::new(egui::Id::unique(("completion", active)))
+    egui::Area::new(egui::Id::unique(("completion", active_tab)))
         .order(egui::Order::Foreground)
         .fixed_pos(pos)
         .show(ui.ctx(), |ui| {
@@ -821,7 +821,7 @@ pub(super) fn popup(ui: &mut Ui, request: PopupRequest<'_>) -> bool {
                 ui.set_min_width(content_width);
                 ui.set_max_width(content_width);
                 egui::ScrollArea::vertical()
-                    .id_salt(("completion_scroll", active))
+                    .id_salt(("completion_scroll", active_tab))
                     .max_height(COMPLETION_MAX_HEIGHT)
                     .show(ui, |ui| {
                         for (index, item) in completion.items.iter().enumerate() {

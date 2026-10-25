@@ -388,7 +388,7 @@ pub fn format_process_energy(process: &ProcessFacet, settings: &Settings) -> Opt
     }
 }
 
-/// A convenience for the detail pane: the item facet as a display value.
+/// A convenience for the multiline result panel: the item facet as a display value.
 pub fn item_value(item: &Monomial) -> Value {
     to_value(item)
 }
