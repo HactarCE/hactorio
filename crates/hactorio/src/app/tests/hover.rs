@@ -216,6 +216,39 @@ fn token_tip_for_a_variable_shows_its_value() {
 }
 
 #[test]
+fn token_tip_for_a_variable_shows_the_latest_definition() {
+    let registry = fixture_registry();
+    let settings = Settings::default();
+    let text = "# Main\nrate = 3 :iron-plate: / second\nrate = 5 :iron-plate: / second\n";
+    let tabs = vec![Tab::from_text(text)];
+    let outputs = evaluate(text, &settings, &registry);
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(500.0, 400.0))
+        .with_accessibility_check(false)
+        .allow_missing_glyphs()
+        .build_ui(move |ui| {
+            let results = ResultsContext {
+                tabs: &tabs,
+                active_tab: 0,
+                outputs: &outputs,
+                settings: &settings,
+                registry: &registry,
+            };
+            results.token_tip_ui(
+                ui,
+                &Token::Variable {
+                    line: 3,
+                    name: "rate".to_string(),
+                    rect: egui::Rect::NOTHING,
+                },
+            );
+        });
+    harness.run();
+
+    assert!(harness.query_by_label_contains("rate = 5").is_some());
+}
+
+#[test]
 fn multiline_result_shows_error_heading_and_message() {
     let document = editor_document("# Main\n3 :iron-plate: + 3 :copper-cable:\n", 1, 0);
     let (mut harness, dir) = completion_harness("multiline-error", document);

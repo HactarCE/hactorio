@@ -241,11 +241,10 @@ impl ResultsContext<'_> {
 
     fn definition_line(&self, line: usize, name: &str) -> Option<usize> {
         let tab = self.tabs.get(self.active_tab)?;
-        tab.text
-            .split('\n')
-            .enumerate()
-            .take(line)
-            .find_map(|(index, text)| (definition_name(text) == Some(name)).then_some(index))
+        let lines: Vec<&str> = tab.text.split('\n').take(line).collect();
+        lines
+            .iter()
+            .rposition(|text| definition_name(text) == Some(name))
     }
 
     fn value_tip_ui(&self, ui: &mut Ui, value: &FacetValue) {

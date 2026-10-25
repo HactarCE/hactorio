@@ -6,13 +6,15 @@ use hactorio_data::{EntryId, Registry};
 use thiserror::Error;
 
 use crate::facet_machine;
-use crate::facet_parser::{Expr, ExprKind, Property, Selector, Signal, Statement, StatementKind};
+use crate::facet_parser::{
+    DefinitionOp, Expr, ExprKind, Property, Selector, Signal, Statement, StatementKind,
+};
 use crate::facet_token::token_value;
 use crate::facets::{
     Cap, CapacityFacet, Extent, FacetError, FacetValue, Monomial, ProcessFacet, RateFacet,
 };
 use crate::settings::Settings;
-use crate::syntax::Span;
+use crate::syntax::{BinaryOp, Span};
 use crate::value::{BaseUnit, is_nonzero, is_zero};
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -63,11 +65,7 @@ pub fn eval_expr(
             *value,
             [(BaseUnit::Craft, 1)],
         ))),
-        ExprKind::Variable(name) => match variables.get(name) {
-            Some(Ok(value)) => Ok(value.clone()),
-            Some(Err(error)) => Err(error.clone()),
-            None => Err(EvalError::new(span, format!("unknown variable `{name}`"))),
-        },
+        ExprKind::Variable(name) => variable_value(variables, name, span),
         ExprKind::Neg(inner) => {
             let value = eval_expr(inner, variables, registry, settings)?;
             map_unary(value.neg(), span, &value)
@@ -75,21 +73,7 @@ pub fn eval_expr(
         ExprKind::Binary { op, lhs, rhs } => {
             let lhs = eval_expr(lhs, variables, registry, settings)?;
             let rhs = eval_expr(rhs, variables, registry, settings)?;
-            let result = match op {
-                crate::syntax::BinaryOp::Add => lhs.add(&rhs),
-                crate::syntax::BinaryOp::Sub => lhs.sub(&rhs),
-                crate::syntax::BinaryOp::Mul => lhs.mul(&rhs),
-                crate::syntax::BinaryOp::Div => lhs.div(&rhs),
-                crate::syntax::BinaryOp::Pow => lhs.pow(&rhs),
-            };
-            let name = match op {
-                crate::syntax::BinaryOp::Add => "+",
-                crate::syntax::BinaryOp::Sub => "-",
-                crate::syntax::BinaryOp::Mul => "*",
-                crate::syntax::BinaryOp::Div => "/",
-                crate::syntax::BinaryOp::Pow => "^",
-            };
-            map_binary(result, span, name, &lhs, &rhs)
+            apply_binary(*op, &lhs, &rhs, span)
         }
         ExprKind::Juxtapose { lhs, rhs } => {
             let lhs = eval_expr(lhs, variables, registry, settings)?;
@@ -143,17 +127,26 @@ pub fn eval_statement(
     match &statement.kind {
         StatementKind::Blank | StatementKind::Comment => None,
         StatementKind::Expression(expr) => Some(eval_expr(expr, variables, registry, settings)),
-        StatementKind::Definition { name, value } => {
-            if variables.contains_key(name) {
-                return Some(Err(EvalError::new(
-                    statement.span,
-                    format!("`{name}` is already defined"),
-                )));
-            }
-            let result = eval_expr(value, variables, registry, settings);
+        StatementKind::Definition { name, op, value } => {
+            let result = match op {
+                DefinitionOp::Assign => eval_expr(value, variables, registry, settings),
+                DefinitionOp::Compound(binary) => variable_value(variables, name, statement.span)
+                    .and_then(|current| {
+                        let value = eval_expr(value, variables, registry, settings)?;
+                        apply_binary(*binary, &current, &value, statement.span)
+                    }),
+            };
             variables.insert(name.clone(), result.clone());
             Some(result)
         }
+    }
+}
+
+fn variable_value(variables: &Variables, name: &str, span: Span) -> Result<FacetValue, EvalError> {
+    match variables.get(name) {
+        Some(Ok(value)) => Ok(value.clone()),
+        Some(Err(error)) => Err(error.clone()),
+        None => Err(EvalError::new(span, format!("unknown variable `{name}`"))),
     }
 }
 
@@ -297,6 +290,22 @@ fn explain_unary(value: &FacetValue, error: FacetError) -> String {
         facet_names(value),
         reasons.join("; ")
     )
+}
+
+fn apply_binary(
+    op: BinaryOp,
+    lhs: &FacetValue,
+    rhs: &FacetValue,
+    span: Span,
+) -> Result<FacetValue, EvalError> {
+    let (result, name) = match op {
+        BinaryOp::Add => (lhs.add(rhs), "+"),
+        BinaryOp::Sub => (lhs.sub(rhs), "-"),
+        BinaryOp::Mul => (lhs.mul(rhs), "*"),
+        BinaryOp::Div => (lhs.div(rhs), "/"),
+        BinaryOp::Pow => (lhs.pow(rhs), "^"),
+    };
+    map_binary(result, span, name, lhs, rhs)
 }
 
 fn map_binary(
@@ -1001,8 +1010,9 @@ pub fn line_hash(line: &str) -> u64 {
     hasher.finish()
 }
 
-/// Evaluates every line in order. Parse failures do not bind names; evaluation
-/// failures bind a poisoned value that later references propagate.
+/// Evaluates every line in order. Parse failures do not bind names. A definition
+/// replaces any earlier binding of the same name. Evaluation failures bind a
+/// poisoned value that later references propagate until the name is defined again.
 pub fn evaluate(text: &str, settings: &Settings, registry: &Registry) -> Vec<StatementOutput> {
     let mut variables = Variables::new();
     let mut outputs = Vec::new();

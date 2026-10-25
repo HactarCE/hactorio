@@ -531,6 +531,16 @@ fn variables_are_suggested_after_their_definition() {
 }
 
 #[test]
+fn variables_are_suggested_after_a_compound_definition() {
+    let registry = fixture_registry();
+    let inserts = suggested_ids(
+        &registry,
+        "rate = 3 :iron-plate: / second\nrate += 1 :iron-plate: / second\nra",
+    );
+    assert!(inserts.contains(&"rate".to_string()), "{inserts:?}");
+}
+
+#[test]
 fn variables_outrank_similar_prototype_matches() {
     let registry = fixture_registry();
     let inserts = suggested_ids(&registry, "cir = 3\nci");

@@ -129,7 +129,20 @@ pub enum StatementKind {
     Blank,
     Comment,
     Expression(Expr),
-    Definition { name: String, value: Expr },
+    Definition {
+        name: String,
+        op: DefinitionOp,
+        value: Expr,
+    },
+}
+
+/// How a definition combines the right-hand side with the name's current binding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefinitionOp {
+    /// `=`: replace the binding.
+    Assign,
+    /// `+=`, `-=`, `*=`, `/=`.
+    Compound(BinaryOp),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,6 +186,10 @@ enum TokenKind {
     Slash,
     Caret,
     Equals,
+    PlusEq,
+    MinusEq,
+    StarEq,
+    SlashEq,
     LParen,
     RParen,
     Dot,
@@ -198,6 +215,10 @@ impl TokenKind {
             TokenKind::Slash => "`/`".into(),
             TokenKind::Caret => "`^`".into(),
             TokenKind::Equals => "`=`".into(),
+            TokenKind::PlusEq => "`+=`".into(),
+            TokenKind::MinusEq => "`-=`".into(),
+            TokenKind::StarEq => "`*=`".into(),
+            TokenKind::SlashEq => "`/=`".into(),
             TokenKind::LParen => "`(`".into(),
             TokenKind::RParen => "`)`".into(),
             TokenKind::Dot => "`.`".into(),
@@ -267,11 +288,11 @@ const BP_JUMP: u8 = 6;
 impl Parser<'_> {
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
         let first = self.tokens[0].span;
-        if self
+        let definition_op = self
             .tokens
             .get(1)
-            .is_some_and(|token| token.kind == TokenKind::Equals)
-        {
+            .and_then(|token| definition_op(&token.kind));
+        if let Some(op) = definition_op {
             let name = match &self.tokens[0].kind {
                 TokenKind::Ident(name) => name.clone(),
                 other => {
@@ -298,7 +319,7 @@ impl Parser<'_> {
             let span = Span::new(first.start, self.last_end());
             self.expect_end()?;
             return Ok(Statement {
-                kind: StatementKind::Definition { name, value },
+                kind: StatementKind::Definition { name, op, value },
                 span,
             });
         }
@@ -680,6 +701,17 @@ fn is_valid_identifier(name: &str) -> bool {
         && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
+fn definition_op(kind: &TokenKind) -> Option<DefinitionOp> {
+    Some(match kind {
+        TokenKind::Equals => DefinitionOp::Assign,
+        TokenKind::PlusEq => DefinitionOp::Compound(BinaryOp::Add),
+        TokenKind::MinusEq => DefinitionOp::Compound(BinaryOp::Sub),
+        TokenKind::StarEq => DefinitionOp::Compound(BinaryOp::Mul),
+        TokenKind::SlashEq => DefinitionOp::Compound(BinaryOp::Div),
+        _ => return None,
+    })
+}
+
 fn property(name: &str) -> Option<Property> {
     Property::from_name(name)
 }
@@ -712,10 +744,34 @@ fn lex(line: &str, registry: &Registry) -> Result<Vec<Token>, ParseError> {
         match ch {
             ' ' | '\t' | '\r' => index += 1,
             '#' => break,
-            '+' => push(&mut tokens, TokenKind::Plus, &mut index),
-            '-' => push(&mut tokens, TokenKind::Minus, &mut index),
-            '*' => push(&mut tokens, TokenKind::Star, &mut index),
-            '/' => push(&mut tokens, TokenKind::Slash, &mut index),
+            '+' => push_operator(
+                &mut tokens,
+                line,
+                &mut index,
+                TokenKind::Plus,
+                TokenKind::PlusEq,
+            ),
+            '-' => push_operator(
+                &mut tokens,
+                line,
+                &mut index,
+                TokenKind::Minus,
+                TokenKind::MinusEq,
+            ),
+            '*' => push_operator(
+                &mut tokens,
+                line,
+                &mut index,
+                TokenKind::Star,
+                TokenKind::StarEq,
+            ),
+            '/' => push_operator(
+                &mut tokens,
+                line,
+                &mut index,
+                TokenKind::Slash,
+                TokenKind::SlashEq,
+            ),
             '^' => push(&mut tokens, TokenKind::Caret, &mut index),
             '=' => push(&mut tokens, TokenKind::Equals, &mut index),
             '(' => push(&mut tokens, TokenKind::LParen, &mut index),
@@ -861,6 +917,28 @@ fn signal(id: &str) -> Option<Signal> {
 fn push(tokens: &mut Vec<Token>, kind: TokenKind, index: &mut usize) {
     let start = *index;
     *index += 1;
+    tokens.push(Token {
+        kind,
+        span: Span::new(start as u32, *index as u32),
+    });
+}
+
+/// Pushes `plain`, or `compound` when the operator is immediately followed by `=`.
+fn push_operator(
+    tokens: &mut Vec<Token>,
+    line: &str,
+    index: &mut usize,
+    plain: TokenKind,
+    compound: TokenKind,
+) {
+    let start = *index;
+    *index += 1;
+    let kind = if line[*index..].starts_with('=') {
+        *index += 1;
+        compound
+    } else {
+        plain
+    };
     tokens.push(Token {
         kind,
         span: Span::new(start as u32, *index as u32),
@@ -1173,5 +1251,44 @@ mod tests {
             parse("x = 3 :iron-plate:").kind,
             StatementKind::Definition { .. }
         ));
+    }
+
+    #[test]
+    fn parses_compound_definitions() {
+        assert!(matches!(
+            parse("x = 3").kind,
+            StatementKind::Definition {
+                op: DefinitionOp::Assign,
+                ..
+            }
+        ));
+        for (line, op) in [
+            ("x += 3", BinaryOp::Add),
+            ("x -= 3", BinaryOp::Sub),
+            ("x *= 3", BinaryOp::Mul),
+            ("x /= 3", BinaryOp::Div),
+        ] {
+            assert!(
+                matches!(
+                    parse(line).kind,
+                    StatementKind::Definition {
+                        op: DefinitionOp::Compound(found),
+                        ..
+                    } if found == op
+                ),
+                "{line}"
+            );
+        }
+        assert!(matches!(
+            parse("x+=3").kind,
+            StatementKind::Definition {
+                op: DefinitionOp::Compound(BinaryOp::Add),
+                ..
+            }
+        ));
+        // The operator characters must be adjacent.
+        assert!(parse_line("x + = 3", &registry()).is_err());
+        // Compound assignment is statements-only.
+        assert!(parse_line("y = x += 1", &registry()).is_err());
     }
 }

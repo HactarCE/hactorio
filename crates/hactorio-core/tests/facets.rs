@@ -121,3 +121,79 @@ fn old_syntax_and_explicit_multiplication_rules() {
     assert!(matches!(outputs[2].output, LineOutput::Error(_)));
     assert!(matches!(outputs[3].output, LineOutput::Error(_)));
 }
+
+#[test]
+fn definitions_shadow_earlier_bindings() {
+    let registry = registry();
+    let settings = Settings::default();
+    let outputs = evaluate("x = 3\nx = 5\nx", &settings, &registry);
+    assert_eq!(outputs.len(), 3);
+    for output in &outputs {
+        assert!(
+            matches!(output.output, LineOutput::Value(_)),
+            "{:?}",
+            output.output
+        );
+    }
+    let value = outputs[2].value.as_ref().unwrap();
+    assert_eq!(value.item.as_ref().unwrap().coef(), 5.0);
+}
+
+#[test]
+fn compound_assignments_compose() {
+    let registry = registry();
+    let settings = Settings::default();
+    let outputs = evaluate(
+        "x = 3\nx += 2\nx *= 4\nx -= 1\nx /= 5\nx = x + 1\nx",
+        &settings,
+        &registry,
+    );
+    assert_eq!(outputs.len(), 7);
+    for output in &outputs {
+        assert!(
+            matches!(output.output, LineOutput::Value(_)),
+            "{:?}",
+            output.output
+        );
+    }
+    let value = outputs[6].value.as_ref().unwrap();
+    let coef = value.item.as_ref().unwrap().coef();
+    assert!((coef - 4.8).abs() < 1e-9, "{coef}");
+}
+
+#[test]
+fn compound_assignments_respect_facets_and_diagnostics() {
+    let registry = registry();
+    let settings = Settings::default();
+
+    let outputs = evaluate(
+        "rate = 3 :iron-plate: / second\nrate += 1 :iron-plate: / second\nrate",
+        &settings,
+        &registry,
+    );
+    assert_eq!(outputs.len(), 3);
+    let value = outputs[2].value.as_ref().unwrap();
+    let item = value.item.as_ref().unwrap();
+    assert_eq!(item.coef(), 4.0);
+    assert_eq!(item.exponent(BaseUnit::Second), -1);
+
+    let outputs = evaluate("x += 1", &settings, &registry);
+    let LineOutput::Error(error) = &outputs[0].output else {
+        panic!("expected error, got {:?}", outputs[0].output);
+    };
+    assert_eq!(error.message, "unknown variable `x`");
+
+    let outputs = evaluate(
+        "x = 3 :iron-plate:\nx += 3 :copper-plate:",
+        &settings,
+        &registry,
+    );
+    let LineOutput::Error(error) = &outputs[1].output else {
+        panic!("expected error, got {:?}", outputs[1].output);
+    };
+    assert!(
+        error.message.contains("incompatible values"),
+        "{}",
+        error.message
+    );
+}

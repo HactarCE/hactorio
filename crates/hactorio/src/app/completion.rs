@@ -390,7 +390,10 @@ pub(super) fn definition_name(line: &str) -> Option<&str> {
         }
     }
     let rest = line[end..].trim_start();
-    let after_equals = rest.strip_prefix('=')?;
+    let after_equals = ["+=", "-=", "*=", "/="]
+        .iter()
+        .find_map(|op| rest.strip_prefix(op))
+        .or_else(|| rest.strip_prefix('='))?;
     if after_equals.starts_with('=') {
         return None;
     }
