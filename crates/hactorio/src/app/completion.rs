@@ -179,7 +179,7 @@ const ALIASES: &[(&str, &[&str])] = &[
     ("fast-splitter", &["red-splitter"]),
     ("express-splitter", &["blue-splitter"]),
     ("turbo-splitter", &["green-splitter"]),
-    ("atomic-bomb", &["nuclear-bomb"]),
+    ("atomic-bomb", &["nuclear-bomb", "nuke"]),
     ("lubricant", &["lube"]),
     ("speed-module", &["speed-mod-1"]),
     ("speed-module-2", &["speed-mod-2"]),
