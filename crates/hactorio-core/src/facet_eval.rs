@@ -197,6 +197,11 @@ fn facet_names(value: &FacetValue) -> String {
 fn drop_reason(op: &str, facet: &str, lhs: &FacetValue, rhs: &FacetValue) -> &'static str {
     let left = facet_present(lhs, facet);
     let right = facet_present(rhs, facet);
+    let missing_counterpart = if left {
+        "missing counterpart on right"
+    } else {
+        "missing counterpart on left"
+    };
     match facet {
         "recipe" => "unsupported operation",
         "item" => {
@@ -209,14 +214,14 @@ fn drop_reason(op: &str, facet: &str, lhs: &FacetValue, rhs: &FacetValue) -> &'s
                     "unsupported operation"
                 }
             } else {
-                "missing counterpart"
+                missing_counterpart
             }
         }
         "machine" => {
             if (left && right) || matches!(op, "*" | "/") {
                 "incompatible values"
             } else {
-                "missing counterpart"
+                missing_counterpart
             }
         }
         "config" => {
@@ -225,14 +230,14 @@ fn drop_reason(op: &str, facet: &str, lhs: &FacetValue, rhs: &FacetValue) -> &'s
             } else if matches!(op, "*" | "juxtaposition") {
                 "incompatible values"
             } else {
-                "missing counterpart"
+                missing_counterpart
             }
         }
         "belt" | "rate" | "capacity" | "process" => {
             if left && right {
                 "incompatible values"
             } else {
-                "missing counterpart"
+                missing_counterpart
             }
         }
         _ => "unsupported operation",
@@ -259,10 +264,10 @@ fn explain_failure(op: &str, lhs: &FacetValue, rhs: &FacetValue, error: FacetErr
         .map(|facet| format!("{facet}: {}", drop_reason(op, facet, lhs, rhs)))
         .collect();
     format!(
-        "`{op}` dropped every facet (left: [{}], right: [{}]); {}",
+        "`{op}` dropped every facet (left: [{}], right: [{}])\n{}",
         facet_names(lhs),
         facet_names(rhs),
-        reasons.join("; ")
+        reasons.join("\n")
     )
 }
 
