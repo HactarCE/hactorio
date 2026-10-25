@@ -1,8 +1,5 @@
 # Facet operator table
 
-Source: `2026-10-22_design_doc_2.md` (§3, §3.1–§3.8, §4.1–§4.8, §10). Property
-accessors (`.` and every named/signal selector) are intentionally excluded.
-
 ## Legend and reachability
 
 Facets: `I` item, `R` recipe, `M` machine, `P` process, `C` config, `B` belt,

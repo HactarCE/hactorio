@@ -1,8 +1,4 @@
 //! Facet-based value model.
-//!
-//! This module is the new value representation described by
-//! `2026-10-22_design_doc_2.md`. The old single-monomial [`crate::value::Value`]
-//! remains in place while the parser and evaluator are migrated.
 
 use std::collections::BTreeMap;
 
