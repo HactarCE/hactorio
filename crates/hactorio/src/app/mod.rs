@@ -96,6 +96,7 @@ fn research_effect_label(
 
 #[derive(Clone, Copy)]
 enum DisplaySetting {
+    Theme,
     Font,
     TimeUnit,
     ItemRates,
@@ -103,7 +104,8 @@ enum DisplaySetting {
     MetricPrefixes,
 }
 
-const DISPLAY_SETTINGS: [DisplaySetting; 5] = [
+const DISPLAY_SETTINGS: [DisplaySetting; 6] = [
+    DisplaySetting::Theme,
     DisplaySetting::Font,
     DisplaySetting::TimeUnit,
     DisplaySetting::ItemRates,
@@ -567,6 +569,9 @@ impl HactorioApp {
         belt_glyphs: &[(BeltTier, Option<char>)],
     ) {
         match setting {
+            DisplaySetting::Theme => {
+                egui::global_theme_preference_buttons(ui);
+            }
             DisplaySetting::Font => {
                 ui.label("Font");
                 let mut font = self.font.clone();
