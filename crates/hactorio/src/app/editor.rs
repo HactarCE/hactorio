@@ -1,6 +1,8 @@
 //! The tab editor: one multiline text field with outputs painted alongside it.
 
-use egui::{Color32, Context, CursorIcon, Rect, ScrollArea, Sense, TextEdit, TextStyle, Ui};
+use egui::{
+    Color32, Context, CursorIcon, Rect, ScrollArea, Sense, TextEdit, TextStyle, Ui,
+};
 use hactorio_core::Settings;
 use hactorio_core::facet_eval::{LineOutput, StatementOutput, line_hash};
 use hactorio_data::Registry;
@@ -69,6 +71,60 @@ pub(super) struct EditorEvents {
     pub(super) multiline_result: Option<(usize, egui::Pos2, f32)>,
     /// The token the pointer is over.
     pub(super) hover_token: Option<Token>,
+}
+
+/// Wraps the editor's selection in parentheses when `(` is typed, instead of
+/// letting the character replace the selection.
+///
+/// The selection stays on the wrapped text so that another bracket typed
+/// immediately wraps it again. Returns whether the text changed.
+fn wrap_selection_in_parens(ctx: &Context, text_id: egui::Id, text: &mut String) -> bool {
+    if !ctx.memory(|memory| memory.has_focus(text_id)) {
+        return false;
+    }
+    let Some(mut state) = egui::text_edit::TextEditState::load(ctx, text_id) else {
+        return false;
+    };
+    let Some(range) = state.cursor.char_range().filter(|range| !range.is_empty()) else {
+        return false;
+    };
+    // Only take the `(` when it is actually being typed; otherwise leave it for the
+    // text edit.
+    let mut typed = false;
+    ctx.input_mut(|input| {
+        input.events.retain(|event| match event {
+            egui::Event::Text(text) if text == "(" => {
+                typed = true;
+                false
+            }
+            _ => true,
+        });
+    });
+    if !typed {
+        return false;
+    }
+
+    let range = range.as_sorted_char_range();
+    let start = range.start.0;
+    let end = range.end.0;
+    let start_byte = text
+        .char_indices()
+        .nth(start)
+        .map_or(text.len(), |(index, _)| index);
+    let end_byte = text
+        .char_indices()
+        .nth(end)
+        .map_or(text.len(), |(index, _)| index);
+    text.insert(end_byte, ')');
+    text.insert(start_byte, '(');
+    state
+        .cursor
+        .set_char_range(Some(egui::text::CCursorRange::two(
+            egui::text::CCursor::new(start + 1),
+            egui::text::CCursor::new(end + 1),
+        )));
+    state.store(ctx, text_id);
+    true
 }
 
 /// Renders the tab as one multiline editor, with line numbers and outputs
@@ -153,10 +209,12 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                         options.input_options.surrender_focus_on = egui::SurrenderFocusOn::Never;
                     });
                 }
+                let mut wrapped = false;
                 let hscroll = ScrollArea::horizontal()
                     .id_salt(("text_scroll", active_tab))
                     .max_width(editor_width)
                     .show(ui, |ui| {
+                        wrapped = wrap_selection_in_parens(ui.ctx(), text_id, &mut tab.text);
                         TextEdit::multiline(&mut tab.text)
                             .code_editor()
                             .event_filter(egui::EventFilter {
@@ -176,7 +234,7 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                     options.input_options.surrender_focus_on = surrender_focus_on;
                 });
                 let text_edit = hscroll.inner;
-                events.changed |= text_edit.response.changed();
+                events.changed |= wrapped || text_edit.response.changed();
 
                 if let Some(pointer) = ui.ctx().pointer_hover_pos()
                     && text_edit.response.rect.contains(pointer)

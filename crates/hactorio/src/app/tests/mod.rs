@@ -11,6 +11,7 @@ use egui_kittest::Harness;
 
 mod completion;
 mod hover;
+mod keybinds;
 mod layout;
 mod persistence;
 mod reload;
