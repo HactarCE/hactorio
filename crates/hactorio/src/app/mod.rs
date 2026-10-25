@@ -663,9 +663,10 @@ impl HactorioApp {
             }
             ResearchSetting::InserterCapacity => {
                 ui.label("Inserter capacity");
-                ui.add(
-                    egui::DragValue::new(&mut self.settings.inserter_capacity).range(0..=u32::MAX),
-                );
+                ui.add(egui::Slider::new(
+                    &mut self.settings.inserter_capacity,
+                    0..=7,
+                ));
             }
             ResearchSetting::Productivity => {
                 ui.add_enabled_ui(!researches.is_empty(), |ui| {
