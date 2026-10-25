@@ -46,9 +46,20 @@ converts back when saving.
 
 A private-use character is a **glyph**; the PNG it renders into is an **icon**.
 So the `:iron-plate:` token is the plaintext spelling of a glyph, its entry's
-`icon` path points at an icon, and `GLYPH_SIZE` is how large the character is
-drawn. A PUA glyph is not necessarily the same width as other characters in the
-monospace font, so do not rely on column alignment between glyphs and text.
+`icon` path points at an icon.
+
+A glyph is square and exactly one font size wide. When the icon file is a mip
+strip (wider than tall) only its left full-size square is kept, and that square
+is scaled to `round(font_size × pixels_per_point)` pixels. The advance is
+`font_size` points: the rasterizer returns `advance_px = font_size_px` and epaint
+divides that by `pixels_per_point`, so the icon's size never affects layout.
+`GLYPH_SIZE` is the glyph font size in the display-settings buttons; the editor,
+results column, completion popup, and tips draw glyphs at the monospace font
+size.
+
+A monospace character is narrower than the font size, so a glyph is not one text
+column wide and glyphs and text do not share column alignment. Do not align
+columns across them; size a glyph column as `count × font_size` points.
 
 ## egui
 
