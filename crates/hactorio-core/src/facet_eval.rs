@@ -419,13 +419,15 @@ fn making(
             Some(modifiers.power_w * count),
         ),
     };
+    let mut process = ProcessFacet {
+        extent,
+        net,
+        power_w,
+        energy_j: None,
+    };
+    process.canonicalize();
     Ok(FacetValue {
-        process: Some(ProcessFacet {
-            extent,
-            net,
-            power_w,
-            energy_j: None,
-        }),
+        process: Some(process),
         ..FacetValue::empty()
     })
 }
@@ -569,13 +571,15 @@ fn in_expression(
             None,
         )
     };
+    let mut process = ProcessFacet {
+        extent,
+        net,
+        power_w,
+        energy_j,
+    };
+    process.canonicalize();
     Ok(FacetValue {
-        process: Some(ProcessFacet {
-            extent,
-            net,
-            power_w,
-            energy_j,
-        }),
+        process: Some(process),
         ..FacetValue::empty()
     })
 }
@@ -1262,6 +1266,12 @@ mod tests {
         let process = value.process.unwrap();
         assert!(process.extent.is_unsolved());
         assert_eq!(process.net[&BaseUnit::Craft], 2.0);
+    }
+
+    #[test]
+    fn abs_is_not_defined_for_processes() {
+        assert!(eval("(:iron-plate: in :assembling-machine-3:).abs").is_err());
+        assert!(eval("2 :iron-plate:.abs").is_ok());
     }
 
     #[test]

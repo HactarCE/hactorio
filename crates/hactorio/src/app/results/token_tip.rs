@@ -310,7 +310,7 @@ impl ResultsContext<'_> {
 
     fn process_tip_ui(&self, ui: &mut Ui, process: &hactorio_core::facets::ProcessFacet) {
         let mut header = format_process_machine_lines(process, self.settings, self.registry);
-        header.push(format_process_craft(process, self.settings));
+        header.extend(format_process_craft(process, self.settings));
         self.process_lines(ui, header);
         let mut inputs = format_process_inputs(process, self.settings, self.registry);
         if let Some(energy) = format_process_energy(process, self.settings) {

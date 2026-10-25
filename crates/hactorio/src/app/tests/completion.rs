@@ -1329,6 +1329,19 @@ fn completion_after_dot_offers_only_units_in_the_value() {
 }
 
 #[test]
+fn completion_after_dot_hides_abs_for_a_process() {
+    let registry = fixture_registry();
+    let process = completion_labels(&registry, "(:iron-plate: in :assembling-machine-3:).");
+    assert!(
+        process.iter().any(|label| label == ".crafts"),
+        "{process:?}"
+    );
+    assert!(!process.iter().any(|label| label == ".abs"), "{process:?}");
+    let item = completion_labels(&registry, "2 :iron-plate:.");
+    assert!(item.iter().any(|label| label == ".abs"), "{item:?}");
+}
+
+#[test]
 fn completion_after_dot_hides_properties_the_value_lacks() {
     let registry = fixture_registry();
     let labels = completion_labels(&registry, "2 :assembling-machine-3:.");

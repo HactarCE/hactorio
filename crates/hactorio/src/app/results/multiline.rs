@@ -132,7 +132,7 @@ fn multiline_result_ui(
 
             if let Some(process) = &value.process {
                 let mut header = format_process_machine_lines(process, settings, registry);
-                header.push(format_process_craft(process, settings));
+                header.extend(format_process_craft(process, settings));
                 for line in header {
                     token = token.or(value_line(ui, &line, registry));
                 }

@@ -48,6 +48,8 @@ pub enum FacetError {
     NoFacetSurvives,
     #[error("process extents must both be solved and of the same kind")]
     ProcessExtentMismatch,
+    #[error("`.abs` is not defined for a process")]
+    AbsOnProcess,
     #[error("process power/energy fields do not match the extent")]
     ProcessFieldMismatch,
     #[error("config count overflow")]
@@ -460,17 +462,6 @@ impl Extent {
         }
     }
 
-    fn absolute(&self) -> Self {
-        Extent {
-            kind: self.kind,
-            machines: self
-                .machines
-                .iter()
-                .map(|(spec, count)| (spec.clone(), count.abs()))
-                .collect(),
-        }
-    }
-
     fn combined(&self, other: &Extent, subtract: bool) -> Result<Self, FacetError> {
         if self.kind == ExtentKind::Unsolved
             || other.kind == ExtentKind::Unsolved
@@ -502,6 +493,17 @@ pub struct ProcessFacet {
     pub net: BTreeMap<BaseUnit, f64>,
     pub power_w: Option<f64>,
     pub energy_j: Option<f64>,
+}
+
+impl ProcessFacet {
+    /// Canonical form: drop approximate-zero net rows, and drop the total craft
+    /// row once the extent holds more than one machine spec.
+    pub fn canonicalize(&mut self) {
+        self.net.retain(|_, amount| is_nonzero(*amount));
+        if self.extent.machines.len() != 1 {
+            self.net.remove(&BaseUnit::Craft);
+        }
+    }
 }
 
 /// A facet value with independent optional facets.
@@ -563,6 +565,9 @@ impl FacetValue {
     }
 
     pub fn abs(&self) -> Result<Self, FacetError> {
+        if self.process.is_some() {
+            return Err(FacetError::AbsOnProcess);
+        }
         let mut out = FacetValue::empty();
         out.item = self.item.as_ref().map(|item| {
             Monomial::new(
@@ -576,16 +581,6 @@ impl FacetValue {
             machine: machine.machine,
             config: machine.config.clone(),
             count: machine.count.map(f64::abs),
-        });
-        out.process = self.process.as_ref().map(|process| ProcessFacet {
-            extent: process.extent.absolute(),
-            net: process
-                .net
-                .iter()
-                .map(|(unit, amount)| (*unit, amount.abs()))
-                .collect(),
-            power_w: process.power_w.map(f64::abs),
-            energy_j: process.energy_j.map(f64::abs),
         });
         out.config = self.config.clone();
         out.belt = self.belt.map(|belt| BeltFacet {
@@ -686,11 +681,15 @@ impl FacetValue {
             config: machine.config.clone(),
             count: Some(-machine.count.unwrap_or(1.0)),
         });
-        out.process = self.process.as_ref().map(|process| ProcessFacet {
-            extent: process.extent.negated(),
-            net: negate_map(&process.net),
-            power_w: process.power_w.map(|value| -value),
-            energy_j: process.energy_j.map(|value| -value),
+        out.process = self.process.as_ref().map(|process| {
+            let mut process = ProcessFacet {
+                extent: process.extent.negated(),
+                net: negate_map(&process.net),
+                power_w: process.power_w.map(|value| -value),
+                energy_j: process.energy_j.map(|value| -value),
+            };
+            process.canonicalize();
+            process
         });
         out.belt = self.belt.map(|belt| BeltFacet {
             count: -belt.count,
@@ -923,15 +922,19 @@ impl FacetValue {
             config: machine.config.clone(),
             count: Some(machine.count.unwrap_or(1.0) * factor),
         });
-        out.process = self.process.as_ref().map(|process| ProcessFacet {
-            extent: process.extent.scaled(factor),
-            net: process
-                .net
-                .iter()
-                .map(|(unit, amount)| (*unit, *amount * factor))
-                .collect(),
-            power_w: process.power_w.map(|value| value * factor),
-            energy_j: process.energy_j.map(|value| value * factor),
+        out.process = self.process.as_ref().map(|process| {
+            let mut process = ProcessFacet {
+                extent: process.extent.scaled(factor),
+                net: process
+                    .net
+                    .iter()
+                    .map(|(unit, amount)| (*unit, *amount * factor))
+                    .collect(),
+                power_w: process.power_w.map(|value| value * factor),
+                energy_j: process.energy_j.map(|value| value * factor),
+            };
+            process.canonicalize();
+            process
         });
         out.config = match (&self.config, is_nonnegative_integer(factor)) {
             (Some(config), true) => {
@@ -1237,13 +1240,15 @@ fn scale_process_time(process: &ProcessFacet, time: f64) -> Result<FacetValue, F
         machines: process.extent.map_counts(time),
     };
     let energy_j = process.power_w.map(|power| power * time);
+    let mut process = ProcessFacet {
+        extent,
+        net,
+        power_w: None,
+        energy_j,
+    };
+    process.canonicalize();
     Ok(FacetValue {
-        process: Some(ProcessFacet {
-            extent,
-            net,
-            power_w: None,
-            energy_j,
-        }),
+        process: Some(process),
         ..FacetValue::empty()
     })
 }
@@ -1258,16 +1263,18 @@ fn divide_process_time(process: &ProcessFacet, time: f64) -> Result<FacetValue, 
         .map(|(unit, amount)| (*unit, *amount / time))
         .collect();
     let power_w = process.energy_j.map(|energy| energy / time);
+    let mut process = ProcessFacet {
+        extent: Extent {
+            kind: ExtentKind::Machines,
+            machines: process.extent.map_counts(1.0 / time),
+        },
+        net,
+        power_w,
+        energy_j: None,
+    };
+    process.canonicalize();
     Ok(FacetValue {
-        process: Some(ProcessFacet {
-            extent: Extent {
-                kind: ExtentKind::Machines,
-                machines: process.extent.map_counts(1.0 / time),
-            },
-            net,
-            power_w,
-            energy_j: None,
-        }),
+        process: Some(process),
         ..FacetValue::empty()
     })
 }
@@ -1279,12 +1286,14 @@ fn combine_process(
 ) -> Result<ProcessFacet, FacetError> {
     let extent = a.extent.combined(&b.extent, subtract)?;
 
-    Ok(ProcessFacet {
+    let mut out = ProcessFacet {
         extent,
         net: combine_amounts(&a.net, &b.net, subtract),
         power_w: combine_option(a.power_w, b.power_w, subtract)?,
         energy_j: combine_option(a.energy_j, b.energy_j, subtract)?,
-    })
+    };
+    out.canonicalize();
+    Ok(out)
 }
 
 fn combine_option(
@@ -1313,7 +1322,6 @@ fn combine_amounts(
             *entry += amount;
         }
     }
-    out.retain(|_, amount| is_nonzero(*amount));
     out
 }
 
@@ -1460,6 +1468,40 @@ mod tests {
         assert!(value.validate().is_ok());
         value.item = Some(Monomial::scalar(1.0));
         assert_eq!(value.validate(), Err(FacetError::ProcessExclusive));
+    }
+
+    #[test]
+    fn process_canonicalize_drops_zero_rows_and_multi_machine_craft() {
+        let item = EntryId::from_index(0);
+        let mut process = ProcessFacet {
+            extent: Extent::machines(spec(0), 1.0),
+            net: BTreeMap::from([
+                (BaseUnit::Craft, 1.0),
+                (BaseUnit::Item(item), 1e-12),
+                (BaseUnit::Second, -1.0),
+            ]),
+            power_w: None,
+            energy_j: None,
+        };
+        process.extent.machines.insert(spec(1), 1.0);
+        process.canonicalize();
+        assert!(
+            !process.net.contains_key(&BaseUnit::Craft),
+            "{:?}",
+            process.net
+        );
+        assert!(
+            !process.net.contains_key(&BaseUnit::Item(item)),
+            "{:?}",
+            process.net
+        );
+        assert_eq!(process.net[&BaseUnit::Second], -1.0);
+        assert_eq!(process.net.len(), 1);
+
+        process.extent.machines.remove(&spec(1));
+        process.net.insert(BaseUnit::Craft, 1.0);
+        process.canonicalize();
+        assert_eq!(process.net[&BaseUnit::Craft], 1.0);
     }
 
     #[test]

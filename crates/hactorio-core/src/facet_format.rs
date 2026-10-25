@@ -197,10 +197,9 @@ pub fn format_rate(rate: &RateFacet, settings: &Settings, _registry: &Registry) 
     let scale = settings.time_unit.seconds();
     let unit = settings.time_unit.short_name();
     match rate {
-        RateFacet::Fluid(value) => format!(
-            "{}/{unit}",
-            format_plain_number(*value * scale, settings)
-        ),
+        RateFacet::Fluid(value) => {
+            format!("{}/{unit}", format_plain_number(*value * scale, settings))
+        }
         RateFacet::Items(terms) => {
             let terms: Vec<String> = ordered_terms(terms)
                 .into_iter()
@@ -373,15 +372,15 @@ pub fn format_process_machine_lines(
         .collect()
 }
 
-/// Total craft for the multi-line process header.
-pub fn format_process_craft(process: &ProcessFacet, settings: &Settings) -> String {
+/// Total craft for the multi-line process header, when the `net` still holds one.
+pub fn format_process_craft(process: &ProcessFacet, settings: &Settings) -> Option<String> {
     let rate = !process.extent.is_machine_seconds();
-    let craft = process.net.get(&BaseUnit::Craft).copied().unwrap_or(0.0);
-    if rate {
+    let craft = *process.net.get(&BaseUnit::Craft)?;
+    Some(if rate {
         format!("{} craft/s", format_plain_number(craft, settings))
     } else {
         format!("{} craft", format_plain_number(craft, settings))
-    }
+    })
 }
 
 /// Total energy or power for the bottom of the inputs section.
@@ -546,7 +545,6 @@ mod tests {
                     BaseUnit::Item(registry.entry_id("iron-plate").unwrap()),
                     -2.0,
                 ),
-                (BaseUnit::Craft, 1.0),
             ]),
             power_w: Some(300_000.0),
             energy_j: None,
@@ -572,19 +570,33 @@ mod tests {
             machines,
             vec![machine_glyph.clone(), format!("2 {machine_glyph}{suffix}")]
         );
-        assert_eq!(format_process_craft(&process, &settings), "1 craft/s");
+        assert_eq!(format_process_craft(&process, &settings), None);
         assert_eq!(
             format_process_energy(&process, &settings).as_deref(),
             Some("300 kW")
         );
 
+        let single_spec = ProcessFacet {
+            extent: Extent::machines(empty.clone(), 2.0),
+            net: BTreeMap::from([(BaseUnit::Craft, 1.0)]),
+            ..process.clone()
+        };
+        assert_eq!(
+            format_process_craft(&single_spec, &settings).as_deref(),
+            Some("1 craft/s")
+        );
+
         let machine_seconds = ProcessFacet {
             extent: Extent::machine_seconds(empty, 2.0),
-            ..process.clone()
+            ..single_spec
         };
         assert_eq!(
             format_process_machine_lines(&machine_seconds, &settings, &registry),
             vec![format!("2 {machine_glyph}*s")]
+        );
+        assert_eq!(
+            format_process_craft(&machine_seconds, &settings).as_deref(),
+            Some("1 craft")
         );
     }
 
@@ -595,10 +607,7 @@ mod tests {
             time_unit: TimeUnit::Minute,
             ..Settings::default()
         };
-        let items = RateFacet::Items(BTreeMap::from([
-            (Cap::Full, 1.0),
-            (Cap::Limit(1), 0.5),
-        ]));
+        let items = RateFacet::Items(BTreeMap::from([(Cap::Full, 1.0), (Cap::Limit(1), 0.5)]));
         assert_eq!(
             format_rate(&items, &settings, &registry),
             format!("60{STACK_SIZE_GLYPH}/m + 30/m")
