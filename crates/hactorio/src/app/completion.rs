@@ -531,9 +531,9 @@ pub(super) fn completion_items(
         None
     };
     let needle = word.trim_start_matches(':').trim_end_matches(':');
-    if (needle.is_empty() && context != CompletionContext::Property)
-        || needle.chars().next().is_some_and(|ch| ch.is_ascii_digit())
-    {
+    // An empty needle lists everything the context allows; the editor only asks
+    // for it when the popup is opened explicitly (Ctrl+Space) or after a dot.
+    if needle.chars().next().is_some_and(|ch| ch.is_ascii_digit()) {
         return Vec::new();
     }
 
@@ -593,8 +593,13 @@ pub(super) fn completion_items(
             if registry.entry(&name).is_some() {
                 continue;
             }
-            let Some((score, matched)) = fuzzy_match(&name, needle) else {
-                continue;
+            let (score, matched) = if needle.is_empty() {
+                (0, Vec::new())
+            } else {
+                let Some(matched) = fuzzy_match(&name, needle) else {
+                    continue;
+                };
+                matched
             };
             items.push((
                 exact_rank(&name, &name, needle),
@@ -695,14 +700,29 @@ pub(super) fn completion_items(
         }
     }
 
+    // An empty needle scores every name the same, so falling back to the
+    // shortest label would just list short names in a meaningless order. List
+    // them alphabetically instead.
     items.sort_by(|(a_exact, a_rank, a), (b_exact, b_rank, b)| {
         b_exact
             .cmp(a_exact)
             .then_with(|| b_rank.total_cmp(a_rank))
-            .then_with(|| a.label.len().cmp(&b.label.len()))
-            .then_with(|| a.label.cmp(&b.label))
+            .then_with(|| {
+                if needle.is_empty() {
+                    a.label.cmp(&b.label)
+                } else {
+                    a.label
+                        .len()
+                        .cmp(&b.label.len())
+                        .then_with(|| a.label.cmp(&b.label))
+                }
+            })
     });
-    items.truncate(40);
+    // Typed queries only keep the best-scoring rows; an explicit empty listing
+    // is meant to show everything the context allows.
+    if !needle.is_empty() {
+        items.truncate(40);
+    }
     items.into_iter().map(|(_, _, item)| item).collect()
 }
 

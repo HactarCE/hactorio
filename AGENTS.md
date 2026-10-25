@@ -33,14 +33,22 @@ these names in code, comments, and docs:
 results column a gutter or a panel: line numbers are the left strip, results are
 the results column.
 
-A private-use character is a **glyph**; the PNG it renders into is an **icon**.
-So `:iron-plate:` is a glyph, its entry's `icon` path points at an icon, and
-`GLYPH_SIZE` is how large the character is drawn. A PUA glyph is not
-necessarily the same width as other characters in the monospace font, so do not
-rely on column alignment between glyphs and text.
-
 A tip only opens when it has something to describe: hovering a keyword, a typo,
 or a variable that does not resolve shows nothing.
+
+## Text format
+
+Documents store game icons as plaintext ASCII tokens delimited by colons —
+`:iron-plate:`, `:time:` — so saved text never depends on the codepoint table.
+In the UI, `from_plaintext` substitutes each known token with a private-use
+codepoint and the rasterizer draws it from the entry's icon; `to_plaintext`
+converts back when saving.
+
+A private-use character is a **glyph**; the PNG it renders into is an **icon**.
+So the `:iron-plate:` token is the plaintext spelling of a glyph, its entry's
+`icon` path points at an icon, and `GLYPH_SIZE` is how large the character is
+drawn. A PUA glyph is not necessarily the same width as other characters in the
+monospace font, so do not rely on column alignment between glyphs and text.
 
 ## egui
 

@@ -1,7 +1,7 @@
 //! The tab editor: one multiline text field with outputs painted alongside it.
 
 use egui::{
-    Color32, Context, CursorIcon, Rect, ScrollArea, Sense, TextEdit, TextStyle, Ui,
+    Color32, Context, CursorIcon, Key, Modifiers, Rect, ScrollArea, Sense, TextEdit, TextStyle, Ui,
 };
 use hactorio_core::Settings;
 use hactorio_core::facet_eval::{LineOutput, StatementOutput, line_hash};
@@ -192,6 +192,11 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                 };
 
                 let text_id = ui.make_persistent_id(("text", active_tab));
+                // Ctrl+Space opens the popup for the word at the caret, even with
+                // no word typed yet. While the popup is open it does nothing.
+                let open_completion = ui.memory(|memory| memory.has_focus(text_id))
+                    && ui.input_mut(|input| input.consume_key(Modifiers::CTRL, Key::Space))
+                    && !popup_open;
                 // Clicking the popup must not surrender the editor's focus, or the
                 // popup would be cleared before the click reaches its row.
                 let popup_id = egui::Id::unique(("completion", active_tab));
@@ -317,6 +322,14 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                     if completion.dismissed.as_deref() != Some(word.as_str()) {
                         completion.dismissed = None;
                     }
+                }
+                if open_completion {
+                    completion.word = word.clone();
+                    completion.selected = 0;
+                    completion.needs_scroll = true;
+                    completion.dismissed = None;
+                    completion.items =
+                        completion_items(registry, settings, &tab.text, word_start, &word);
                 }
                 completion.cursor = cursor_char;
 

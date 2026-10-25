@@ -311,6 +311,51 @@ fn completion_shows_the_prototype_name_after_the_matched_alias() {
 }
 
 #[test]
+fn an_empty_query_lists_everything_the_context_allows() {
+    let registry = fixture_registry();
+    let iron = registry.entry("iron-plate").unwrap().glyph.to_string();
+    let circuit = registry
+        .entry("electronic-circuit")
+        .unwrap()
+        .glyph
+        .to_string();
+    let water = registry.entry("water").unwrap().glyph.to_string();
+
+    let inserts = suggested_ids(&registry, "");
+    assert!(inserts.contains(&iron), "{inserts:?}");
+    assert!(inserts.contains(&water), "{inserts:?}");
+    assert!(inserts.contains(&"making".to_string()), "{inserts:?}");
+
+    let inserts = suggested_ids(&registry, "making ");
+    assert!(inserts.contains(&circuit), "{inserts:?}");
+    assert!(!inserts.contains(&water), "{inserts:?}");
+
+    let inserts = suggested_ids(&registry, "speed = 3\n");
+    assert!(inserts.contains(&"speed".to_string()), "{inserts:?}");
+}
+
+#[test]
+fn an_empty_query_is_not_cut_to_the_typed_query_limit() {
+    let items: Vec<String> = (0..60)
+        .map(|index| {
+            format!(
+                r#""test-item-{index:02}": {{"type": "item", "name": "test-item-{index:02}", "stack_size": 1}}"#
+            )
+        })
+        .collect();
+    let fixture = format!(r#"{{"item": {{{}}}}}"#, items.join(","));
+    let registry = hactorio_data::postprocess(&fixture, &hactorio_data::Locale::empty()).unwrap();
+
+    let (start, word) = completion_word("", 0);
+    let labels: Vec<String> = completion_items(&registry, &Settings::default(), "", start, &word)
+        .into_iter()
+        .map(|item| item.label)
+        .collect();
+    assert!(labels.len() > 40, "{}", labels.len());
+    assert!(labels.contains(&"test-item-59".to_string()), "{labels:?}");
+}
+
+#[test]
 fn keywords_are_suggested_in_normal_context() {
     let registry = fixture_registry();
     let inserts = suggested_ids(&registry, "ma");
