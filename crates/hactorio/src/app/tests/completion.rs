@@ -311,6 +311,65 @@ fn completion_shows_the_prototype_name_after_the_matched_alias() {
 }
 
 #[test]
+fn a_display_name_that_adds_words_is_still_matched() {
+    let dir = std::env::temp_dir().join(format!("hactorio-display-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("item-locale.json"),
+        r#"{"names": {
+            "copper-cable": "Personal wire",
+            "iron-plate": "Iron plate"
+        }}"#,
+    )
+    .unwrap();
+    let registry = hactorio_data::postprocess(FIXTURE, &hactorio_data::Locale::load(&dir)).unwrap();
+
+    let (start, word) = completion_word("personal", "personal".chars().count());
+    let items = completion_items(&registry, &Settings::default(), "personal", start, &word);
+    let item = items
+        .iter()
+        .find(|item| item.label == "copper-cable")
+        .unwrap_or_else(|| {
+            panic!(
+                "{:?}",
+                items.iter().map(|item| &item.label).collect::<Vec<_>>()
+            )
+        });
+    assert_eq!(item.name.as_deref(), Some("Personal wire"));
+    assert_eq!(item.name_matched, (0..8).collect::<Vec<_>>());
+
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_display_name_that_only_reformats_the_id_is_not_matched_again() {
+    let dir = std::env::temp_dir().join(format!("hactorio-reformat-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("item-locale.json"),
+        r#"{"names": {"iron-plate": "Iron plate"}}"#,
+    )
+    .unwrap();
+    let registry = hactorio_data::postprocess(FIXTURE, &hactorio_data::Locale::load(&dir)).unwrap();
+
+    // Matching `Iron plate` case-sensitively would score above the ID, but the
+    // name is only the ID reformatted, so the ID is highlighted instead.
+    let (start, word) = completion_word("Iron", "Iron".chars().count());
+    let items = completion_items(&registry, &Settings::default(), "Iron", start, &word);
+    let item = items
+        .iter()
+        .find(|item| item.label == "iron-plate")
+        .expect("iron-plate row");
+    assert_eq!(item.name.as_deref(), Some("Iron plate"));
+    assert_eq!(item.matched, (0..4).collect::<Vec<_>>());
+    assert!(item.name_matched.is_empty());
+
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn an_empty_query_lists_everything_the_context_allows() {
     let registry = fixture_registry();
     let iron = registry.entry("iron-plate").unwrap().glyph.to_string();
@@ -1029,8 +1088,7 @@ fn exact_names_outrank_near_miss_fuzzy_matches() {
     let exact = entry("pm2", None);
     let fuzzy_score = best_name_match(&fuzzy, "pm2").unwrap().0;
     let exact_score = best_name_match(&exact, "pm2").unwrap().0;
-    // 152 from the fuzzy match, plus the first-character bonus.
-    assert_eq!(fuzzy_score, 182);
+    // `Power armor MK2` only reformats its ID, so it is not searched again.
     assert!(exact_score > fuzzy_score, "{exact_score} <= {fuzzy_score}");
 }
 

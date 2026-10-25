@@ -316,13 +316,33 @@ fn fuzzy_match(name: &str, needle: &str) -> Option<(isize, Vec<usize>)> {
     Some((found.score(), matched))
 }
 
+/// Whether `name` is `id` with different separators or capitalization.
+///
+/// Most display names are their prototype ID with `-` replaced by spaces and
+/// each word capitalized, and a completion word can never contain a space.
+/// Matching such a name a second time can only reach letters the ID already
+/// has, so it doubles the fuzzy searches without finding a different row.
+fn reforms_id(id: &str, name: &str) -> bool {
+    fn letters(text: &str) -> impl Iterator<Item = char> + '_ {
+        text.chars()
+            .filter(|ch| ch.is_ascii_alphanumeric())
+            .map(|ch| ch.to_ascii_lowercase())
+    }
+    letters(id).eq(letters(name))
+}
+
 /// The name of `entry` that best matches `needle`, with the matched char indices
 /// and whether the localized display name was the best match.
 pub(super) fn best_name_match<'a>(
     entry: &'a hactorio_data::Entry,
     needle: &str,
 ) -> Option<(isize, &'a str, Vec<usize>, bool)> {
-    let display_name = entry.display_name.as_deref();
+    // A localized or modded display name can add words the ID lacks; a mere
+    // reformatting of the ID cannot.
+    let display_name = entry
+        .display_name
+        .as_deref()
+        .filter(|name| !reforms_id(&entry.id, name));
     std::iter::once(entry.id.as_ref())
         .chain(display_name)
         .chain(aliases_for(&entry.id).iter().copied())
