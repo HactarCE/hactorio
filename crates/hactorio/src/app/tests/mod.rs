@@ -83,6 +83,9 @@ fn completion_harness_with(
 
 /// Builds a harness over an app directory that holds `fixture` as its cache.
 ///
+/// The directory name is `name` plus the process id, so tests need unique
+/// names; parallel tests that share one delete each other's directory.
+///
 /// `None` leaves the directory empty, as when game data has never been loaded.
 fn harness_with(
     name: &str,
