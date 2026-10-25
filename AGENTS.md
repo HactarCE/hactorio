@@ -9,7 +9,11 @@ Before starting a unit of work, run `jj status`.
 - If the working copy is already empty and has no description, use it; do not run `jj new` again.
 - To amend an earlier commit, run `jj edit <change>`; descendants rebase automatically.
 
-After completing a unit of work, run `jj describe` and describe the whole set of changes, including the existing work on the commit (if any) and the new work you just did.
+After completing a unit of work, run `jj describe` and describe the whole set of changes, including the existing work on the commit (if any) and the new work you just did. Run `jj new` before the next unrelated unit: `jj describe` does not close the commit, so later edits amend it.
+
+## README
+
+`README.md` is the user's. Do not edit it — report proposed wording instead.
 
 ## UI vocabulary
 
