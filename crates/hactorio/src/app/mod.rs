@@ -11,6 +11,7 @@ use hactorio_core::facet_eval::StatementOutput;
 use hactorio_core::{BeltTier, Settings, TimeUnit, from_plaintext, to_plaintext};
 use hactorio_data::{GameInstall, Registry, locate};
 
+use crate::clipboard;
 use crate::document::{
     Cursor, DOCUMENT_VERSION, Document, MAX_FONT_SIZE, MAX_ZOOM, MIN_FONT_SIZE, MIN_ZOOM, Tab,
     Window,
@@ -803,6 +804,9 @@ impl HactorioApp {
     /// One frame of the whole app.
     pub fn ui(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
+        if let Some(registry) = &self.registry {
+            ctx.input_mut(|input| clipboard::translate_input(input, registry));
+        }
         self.sync_zoom(&ctx);
         if !self.sized {
             if let Some(size) = self.initial_size {
@@ -909,6 +913,11 @@ impl HactorioApp {
 
         if self.dirty && self.last_save.elapsed() >= SAVE_INTERVAL {
             self.save();
+        }
+
+        // Last, so the commands cover every widget drawn this frame.
+        if let Some(registry) = &self.registry {
+            ctx.output_mut(|output| clipboard::translate_output(output, registry));
         }
     }
 }

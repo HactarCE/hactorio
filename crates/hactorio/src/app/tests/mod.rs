@@ -9,6 +9,7 @@ use crate::app::*;
 use crate::document::{Cursor, Document};
 use egui_kittest::Harness;
 
+mod clipboard;
 mod completion;
 mod hover;
 mod keybinds;

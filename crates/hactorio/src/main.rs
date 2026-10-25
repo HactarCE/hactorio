@@ -1,4 +1,5 @@
 mod app;
+mod clipboard;
 mod document;
 mod evaluator;
 mod fonts;
