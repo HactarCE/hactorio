@@ -10,6 +10,7 @@ use hactorio_data::Registry;
 use super::completion::{self, CompletionState, completion_items, completion_word};
 use super::highlight;
 use super::results::{Token, glyph_at, identifier_at, single_line_result};
+use super::theme;
 use crate::document::Tab;
 
 /// Whether a floating surface is covering `pointer`, so editors below it do not react.
@@ -169,7 +170,7 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
     let editor_content_width = (longest as f32 * char_width + 24.0).max(editor_width);
 
     let mut layouter = |ui: &Ui, buffer: &dyn egui::TextBuffer, _wrap_width: f32| {
-        let job = highlight::layout_job(buffer.as_str(), &font_id, ui.visuals());
+        let job = highlight::layout_job(buffer.as_str(), &font_id, theme::palette(ui.visuals()));
         ui.fonts_mut(|fonts| fonts.layout_job(job))
     };
 
@@ -226,6 +227,7 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                             .desired_width(editor_content_width)
                             .desired_rows(line_count.max(6))
                             .margin(egui::Margin::symmetric(4, 4))
+                            .background_color(theme::palette(ui.visuals()).background)
                             .layouter(&mut layouter)
                             .id(text_id)
                             .show(ui)

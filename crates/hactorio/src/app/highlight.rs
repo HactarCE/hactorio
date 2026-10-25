@@ -1,15 +1,18 @@
 //! Syntax highlighting: the editor's layout job, colored by token category.
 
 use egui::text::LayoutJob;
-use egui::{Color32, FontId, TextFormat, Visuals};
-use hactorio_core::{Highlight, highlights};
+use egui::{FontId, TextFormat};
+use hactorio_core::highlights;
+
+use super::theme::Palette;
 
 /// Layouts `text` with one section per plain run and per highlighted range.
 ///
-/// Plain runs use the theme's text color; highlighted runs use [`color`].
-pub(super) fn layout_job(text: &str, font_id: &FontId, visuals: &Visuals) -> LayoutJob {
+/// Plain runs use the palette's text color; highlighted runs use
+/// [`Palette::color`].
+pub(super) fn layout_job(text: &str, font_id: &FontId, palette: Palette) -> LayoutJob {
     let mut job = LayoutJob::default();
-    let plain = text_format(font_id, visuals.text_color());
+    let plain = text_format(font_id, palette.plain);
     let mut cursor = 0;
     for (span, highlight) in highlights(text) {
         let start = span.start as usize;
@@ -20,7 +23,7 @@ pub(super) fn layout_job(text: &str, font_id: &FontId, visuals: &Visuals) -> Lay
         job.append(
             &text[start..end],
             0.0,
-            text_format(font_id, color(highlight, visuals.dark_mode)),
+            text_format(font_id, palette.color(highlight)),
         );
         cursor = end;
     }
@@ -31,7 +34,7 @@ pub(super) fn layout_job(text: &str, font_id: &FontId, visuals: &Visuals) -> Lay
     job
 }
 
-fn text_format(font_id: &FontId, color: Color32) -> TextFormat {
+fn text_format(font_id: &FontId, color: egui::Color32) -> TextFormat {
     TextFormat {
         font_id: font_id.clone(),
         color,
@@ -39,30 +42,18 @@ fn text_format(font_id: &FontId, color: Color32) -> TextFormat {
     }
 }
 
-/// The hard-coded color of `highlight` on a dark or light background.
-fn color(highlight: Highlight, dark: bool) -> Color32 {
-    match (highlight, dark) {
-        (Highlight::OperatorKeyword, true) => Color32::from_rgb(198, 146, 234),
-        (Highlight::OperatorKeyword, false) => Color32::from_rgb(136, 20, 160),
-        (Highlight::UnitKeyword, true) => Color32::from_rgb(226, 192, 110),
-        (Highlight::UnitKeyword, false) => Color32::from_rgb(150, 90, 0),
-        (Highlight::Number, true) => Color32::from_rgb(160, 214, 150),
-        (Highlight::Number, false) => Color32::from_rgb(0, 120, 70),
-        (Highlight::Comment, true) => Color32::from_rgb(128, 138, 128),
-        (Highlight::Comment, false) => Color32::from_rgb(110, 120, 110),
-        (Highlight::Icon, true) => Color32::from_rgb(120, 186, 240),
-        (Highlight::Icon, false) => Color32::from_rgb(20, 86, 170),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use egui::{Color32, Visuals};
+    use hactorio_core::Highlight;
 
-    fn color_of(job: &LayoutJob, token: &str) -> Option<Color32> {
+    use super::*;
+    use crate::app::theme::palette;
+
+    fn color_at(job: &LayoutJob, byte: usize) -> Option<Color32> {
         job.sections.iter().find_map(|section| {
-            let range = section.byte_range.clone();
-            (token == &job.text[range.start.0..range.end.0]).then_some(section.format.color)
+            let range = &section.byte_range;
+            (range.start.0 <= byte && byte < range.end.0).then_some(section.format.color)
         })
     }
 
@@ -81,46 +72,60 @@ mod tests {
     fn sections_cover_the_whole_text() {
         let font_id = FontId::monospace(13.0);
         for text in ["", "plain text", "1 in :x: 2s # c"] {
-            let job = layout_job(text, &font_id, &Visuals::dark());
+            let job = layout_job(text, &font_id, palette(&Visuals::dark()));
             assert_eq!(job.text, text);
             assert!(sections_cover_text(&job), "{text:?}: {job:?}");
         }
     }
 
     #[test]
-    fn each_category_has_its_own_color() {
+    fn each_category_uses_its_palette_color() {
         let font_id = FontId::monospace(13.0);
-        let job = layout_job("1 in :x: 2s # c", &font_id, &Visuals::dark());
-        assert_eq!(color_of(&job, "1"), Some(color(Highlight::Number, true)));
-        assert_eq!(
-            color_of(&job, "in"),
-            Some(color(Highlight::OperatorKeyword, true))
-        );
-        assert_eq!(color_of(&job, ":x:"), Some(color(Highlight::Icon, true)));
-        assert_eq!(color_of(&job, "2"), Some(color(Highlight::Number, true)));
-        assert_eq!(
-            color_of(&job, "s"),
-            Some(color(Highlight::UnitKeyword, true))
-        );
-        assert_eq!(color_of(&job, "# c"), Some(color(Highlight::Comment, true)));
-        assert_eq!(color_of(&job, " "), Some(Visuals::dark().text_color()));
+        let palette = palette(&Visuals::dark());
+        let text = "1 in :x: 2s # c";
+        let job = layout_job(text, &font_id, palette);
+        for (span, highlight) in super::highlights(text) {
+            let start = span.start as usize;
+            let end = span.end as usize;
+            // Adjacent spans of the same color share one section.
+            assert!(
+                job.sections.iter().any(|section| {
+                    section.byte_range.start.0 <= start
+                        && end <= section.byte_range.end.0
+                        && section.format.color == palette.color(highlight)
+                }),
+                "{:?} at {start}..{end}",
+                highlight
+            );
+        }
+        assert_eq!(color_at(&job, 1), Some(palette.plain));
     }
 
     #[test]
     fn light_and_dark_use_different_colors() {
         let font_id = FontId::monospace(13.0);
         let text = "1 in :x: 2s # c";
-        let dark = layout_job(text, &font_id, &Visuals::dark());
-        let light = layout_job(text, &font_id, &Visuals::light());
-        for (token, highlight) in [
-            ("1", Highlight::Number),
-            ("in", Highlight::OperatorKeyword),
-            (":x:", Highlight::Icon),
-            ("s", Highlight::UnitKeyword),
-            ("# c", Highlight::Comment),
+        let dark = palette(&Visuals::dark());
+        let light = palette(&Visuals::light());
+        let dark_job = layout_job(text, &font_id, dark);
+        let light_job = layout_job(text, &font_id, light);
+        for (byte, highlight) in [
+            (0, Highlight::Number),
+            (2, Highlight::OperatorKeyword),
+            (5, Highlight::Icon),
+            (10, Highlight::UnitKeyword),
+            (12, Highlight::Comment),
         ] {
-            assert_eq!(color_of(&light, token), Some(color(highlight, false)));
-            assert_ne!(color_of(&dark, token), color_of(&light, token));
+            assert_eq!(
+                color_at(&light_job, byte),
+                Some(light.color(highlight)),
+                "{highlight:?}"
+            );
+            assert_ne!(
+                color_at(&dark_job, byte),
+                color_at(&light_job, byte),
+                "{highlight:?}"
+            );
         }
     }
 }

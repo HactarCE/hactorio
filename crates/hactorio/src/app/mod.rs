@@ -24,6 +24,7 @@ mod completion;
 mod editor;
 mod highlight;
 mod results;
+mod theme;
 
 use completion::CompletionState;
 use editor::{EditorState, editor_ui};
