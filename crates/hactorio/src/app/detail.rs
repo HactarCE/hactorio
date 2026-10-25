@@ -410,7 +410,10 @@ impl DetailContext<'_> {
                 "machine".to_string(),
                 format_machine(machine, self.settings, self.registry),
             ));
-            rows.extend(format_machine_stats(machine, self.settings, self.registry));
+            match format_machine_stats(machine, self.settings, self.registry) {
+                Ok(stats) => rows.extend(stats),
+                Err(error) => rows.push(("error".to_string(), error)),
+            }
         }
         if !rows.is_empty() {
             self.section_grid(ui, "value", rows);
@@ -633,7 +636,9 @@ fn detail_ui(
                 hovered = icon_label(ui, &formatted, registry);
             }
             if let Some(machine) = &value.machine {
-                for (label, value) in format_machine_stats(machine, settings, registry) {
+                let stats = format_machine_stats(machine, settings, registry)
+                    .unwrap_or_else(|error| vec![("error".to_string(), error)]);
+                for (label, value) in stats {
                     let line = format!("{label}: {value}");
                     if hovered.is_none() {
                         hovered = icon_label(ui, &line, registry);

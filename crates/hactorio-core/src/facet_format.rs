@@ -79,9 +79,9 @@ pub fn format_machine_stats(
     machine: &MachineFacet,
     settings: &Settings,
     registry: &Registry,
-) -> Vec<(String, String)> {
+) -> Result<Vec<(String, String)>, String> {
     let modifiers =
-        facet_machine::modifiers(registry, machine.machine, &machine.config, None, settings);
+        facet_machine::modifiers(registry, machine.machine, &machine.config, None, settings)?;
     let count = machine.count.unwrap_or(1.0);
     let speed = if is_zero(modifiers.speed_effect) {
         format_plain_number(modifiers.speed, settings)
@@ -108,12 +108,12 @@ pub fn format_machine_stats(
         "{}/m",
         format_plain_number(modifiers.pollution_per_minute * count, settings)
     );
-    vec![
+    Ok(vec![
         ("speed".to_string(), speed),
         ("prod".to_string(), productivity),
         ("power".to_string(), power),
         ("pollution".to_string(), pollution),
-    ]
+    ])
 }
 
 fn format_percent(fraction: f64, settings: &Settings) -> String {
@@ -478,7 +478,7 @@ mod tests {
                 format_config_suffix(&facet.config, &settings, &registry)
             )
         );
-        let stats: Vec<(String, String)> = format_machine_stats(&facet, &settings, &registry);
+        let stats = format_machine_stats(&facet, &settings, &registry).unwrap();
         assert_eq!(stats[0].0, "speed");
         assert_eq!(stats[0].1, "2.333");
         assert_eq!(stats[1].0, "prod");
@@ -496,7 +496,7 @@ mod tests {
             },
             count: Some(1.0),
         };
-        let stats = format_machine_stats(&clamped, &settings, &registry);
+        let stats = format_machine_stats(&clamped, &settings, &registry).unwrap();
         assert!(stats[2].1.contains("(-105% → -80%)"), "{}", stats[2].1);
     }
 

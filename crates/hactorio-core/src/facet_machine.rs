@@ -140,9 +140,9 @@ pub fn modifiers(
     config: &ConfigFacet,
     recipe: Option<&Recipe>,
     settings: &Settings,
-) -> Modifiers {
+) -> Result<Modifiers, String> {
     let Some(data) = registry.entry_by_index(machine).machine() else {
-        return Modifiers {
+        return Ok(Modifiers {
             speed: 0.0,
             productivity: 0.0,
             power_w: 0.0,
@@ -150,7 +150,7 @@ pub fn modifiers(
             consumption_multiplier: 1.0,
             speed_effect: 0.0,
             productivity_effect: 0.0,
-        };
+        });
     };
     let allowed = data.allowed_effects;
 
@@ -205,22 +205,22 @@ pub fn modifiers(
                 }
             }
         }
-        let profile = if beacon_data_profile_empty(registry, config) {
-            1.0
-        } else {
-            let index = (beacon_count as usize).saturating_sub(1);
-            let profile = config
-                .beacons
-                .first()
-                .and_then(|group| registry.entry_by_index(group.beacon).beacon.as_ref())
-                .map(|beacon| beacon.profile.as_slice())
-                .unwrap_or(&[]);
-            profile
-                .get(index)
-                .or_else(|| profile.last())
-                .copied()
-                .unwrap_or(1.0)
-        };
+        let first_beacon = config
+            .beacons
+            .first()
+            .map(|group| registry.entry_by_index(group.beacon));
+        let profile = first_beacon
+            .and_then(|entry| entry.beacon.as_ref())
+            .map(|beacon| beacon.profile.as_slice())
+            .unwrap_or(&[]);
+        let index = (beacon_count as usize) - 1;
+        let profile = profile.get(index).copied().ok_or_else(|| {
+            let name = first_beacon.map_or("beacon", |entry| entry.id.as_ref());
+            format!(
+                "{beacon_count} beacons exceed the `{name}` distribution profile length ({})",
+                profile.len()
+            )
+        })?;
         // Machine allowed effects filter beacon-transmitted effects.
         if allowed.speed {
             speed_sum += beacon_speed * profile;
@@ -261,17 +261,7 @@ pub fn modifiers(
     modifiers.power_w = data.energy_usage_w * clamped_consumption;
     modifiers.pollution_per_minute =
         data.pollution_per_minute * clamped_consumption * (1.0 + pollution_sum);
-    modifiers
-}
-
-fn beacon_data_profile_empty(registry: &Registry, config: &ConfigFacet) -> bool {
-    config.beacons.iter().all(|group| {
-        registry
-            .entry_by_index(group.beacon)
-            .beacon
-            .as_ref()
-            .is_none_or(|beacon| beacon.profile.is_empty())
-    })
+    Ok(modifiers)
 }
 
 fn module_effect<'a>(
@@ -319,7 +309,7 @@ pub fn coefficients(
     recipe: &Recipe,
     settings: &Settings,
 ) -> Result<BTreeMap<BaseUnit, f64>, String> {
-    let modifiers = modifiers(registry, machine, config, Some(recipe), settings);
+    let modifiers = modifiers(registry, machine, config, Some(recipe), settings)?;
     let crafts_per_second = modifiers.speed / recipe.craft_time;
 
     let mut net: BTreeMap<BaseUnit, f64> = BTreeMap::new();
@@ -472,7 +462,7 @@ mod tests {
             modules: vec![ModuleCount { module, count: 1 }],
             beacons: Vec::new(),
         };
-        let modifiers = modifiers(&registry, machine, &config, None, &Settings::default());
+        let modifiers = modifiers(&registry, machine, &config, None, &Settings::default()).unwrap();
         assert_eq!(modifiers.consumption_multiplier, 0.0);
         assert_eq!(modifiers.clamped_consumption_multiplier(), 0.2);
         assert_eq!(modifiers.power_w, 20_000.0);

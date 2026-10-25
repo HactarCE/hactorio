@@ -392,7 +392,8 @@ fn making(
         &machine.config,
         Some(recipe_data),
         settings,
-    );
+    )
+    .map_err(|error| EvalError::new(span, error))?;
     let spec = machine.spec();
     let (extent, net, power_w) = match machine.count {
         None => (Extent::unsolved(spec), net, Some(modifiers.power_w)),
@@ -509,7 +510,8 @@ fn in_expression(
             &machine_facet.config,
             Some(recipe_data),
             settings,
-        );
+        )
+        .map_err(|error| EvalError::new(span, error))?;
         (net, modifiers.power_w, machine_facet.spec())
     } else {
         return Err(EvalError::new(
@@ -729,7 +731,8 @@ fn power_property(
 ) -> Result<FacetValue, EvalError> {
     if let Some(machine) = &value.machine {
         let modifiers =
-            facet_machine::modifiers(registry, machine.machine, &machine.config, None, settings);
+            facet_machine::modifiers(registry, machine.machine, &machine.config, None, settings)
+                .map_err(|error| EvalError::new(span, error))?;
         let count = machine.count.unwrap_or(1.0);
         return Ok(watts(modifiers.power_w * count));
     }
@@ -907,7 +910,8 @@ fn machine_scalar(
         .machine()
         .ok_or_else(|| EvalError::new(span, "not a machine"))?;
     let modifiers =
-        facet_machine::modifiers(registry, machine.machine, &machine.config, None, settings);
+        facet_machine::modifiers(registry, machine.machine, &machine.config, None, settings)
+            .map_err(|error| EvalError::new(span, error))?;
     Ok(FacetValue::scalar(match property {
         Property::Speed => modifiers.speed,
         Property::Productivity | Property::Prod => modifiers.productivity,
@@ -1226,6 +1230,17 @@ mod tests {
         let process = value.process.unwrap();
         assert!(process.extent.is_unsolved());
         assert_eq!(process.net[&BaseUnit::Craft], 2.0);
+    }
+
+    #[test]
+    fn rejects_beacon_count_beyond_the_distribution_profile() {
+        assert!(eval(":assembling-machine-3: with :beacon: making :iron-gear-wheel:").is_ok());
+        let error =
+            eval(":assembling-machine-3: with 2 :beacon: making :iron-gear-wheel:").unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "2 beacons exceed the `beacon` distribution profile length (1)"
+        );
     }
 
     #[test]
