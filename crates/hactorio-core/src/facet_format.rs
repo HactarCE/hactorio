@@ -275,7 +275,7 @@ pub fn format_process(process: &ProcessFacet, settings: &Settings, registry: &Re
     if !machines.is_empty() {
         parts.push(machines);
     }
-    let rate = !process.extent.is_machine_seconds();
+    let rate = !process.is_machine_seconds();
     for (unit, amount) in &process.net {
         if *unit == BaseUnit::Craft {
             continue;
@@ -294,9 +294,9 @@ fn format_process_machines_inline(
     settings: &Settings,
     registry: &Registry,
 ) -> String {
-    let machine_seconds = process.extent.is_machine_seconds();
+    let machine_seconds = process.is_machine_seconds();
     let mut parts = Vec::new();
-    for (spec, count) in &process.extent.machines {
+    for (spec, count) in &process.machines {
         let mut text = String::new();
         if is_nonzero(*count - 1.0) {
             text.push_str(&format_plain_number(*count, settings));
@@ -335,7 +335,7 @@ fn format_process_rows(
     registry: &Registry,
     keep: impl Fn(f64) -> bool,
 ) -> Vec<String> {
-    let rate = !process.extent.is_machine_seconds();
+    let rate = !process.is_machine_seconds();
     process
         .net
         .iter()
@@ -351,9 +351,8 @@ pub fn format_process_machine_lines(
     settings: &Settings,
     registry: &Registry,
 ) -> Vec<String> {
-    let machine_seconds = process.extent.is_machine_seconds();
+    let machine_seconds = process.is_machine_seconds();
     process
-        .extent
         .machines
         .iter()
         .map(|(spec, count)| {
@@ -374,7 +373,7 @@ pub fn format_process_machine_lines(
 
 /// Total craft for the multi-line process header, when the `net` still holds one.
 pub fn format_process_craft(process: &ProcessFacet, settings: &Settings) -> Option<String> {
-    let rate = !process.extent.is_machine_seconds();
+    let rate = !process.is_machine_seconds();
     let craft = *process.net.get(&BaseUnit::Craft)?;
     Some(if rate {
         format!("{} craft/s", format_plain_number(craft, settings))
@@ -384,11 +383,11 @@ pub fn format_process_craft(process: &ProcessFacet, settings: &Settings) -> Opti
 }
 
 /// Total energy or power for the bottom of the inputs section.
-pub fn format_process_energy(process: &ProcessFacet, settings: &Settings) -> Option<String> {
-    if let Some(energy) = process.energy_j {
-        Some(format_energy(energy, settings))
+pub fn format_process_energy(process: &ProcessFacet, settings: &Settings) -> String {
+    if process.is_machine_seconds() {
+        format_energy(process.electric, settings)
     } else {
-        process.power_w.map(|power| format_power(power, settings))
+        format_power(process.electric, settings)
     }
 }
 
@@ -400,7 +399,7 @@ pub fn item_value(item: &Monomial) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::facets::{ConfigFacet, Extent, MachineSpec, ModuleCount, ProcessFacet};
+    use crate::facets::{ConfigFacet, ExtentKind, MachineSpec, ModuleCount, ProcessFacet};
     use crate::settings::TimeUnit;
     use hactorio_data::{Locale, postprocess};
     use std::collections::BTreeMap;
@@ -532,10 +531,11 @@ mod tests {
                 beacons: Vec::new(),
             },
         };
-        let mut extent = Extent::machines(configured.clone(), 2.0);
-        extent.machines.insert(empty.clone(), 1.0);
+        let mut machines = BTreeMap::from([(configured.clone(), 2.0)]);
+        machines.insert(empty.clone(), 1.0);
         let process = ProcessFacet {
-            extent,
+            kind: ExtentKind::Machines,
+            machines,
             net: BTreeMap::from([
                 (
                     BaseUnit::Item(registry.entry_id("iron-gear-wheel").unwrap()),
@@ -546,8 +546,7 @@ mod tests {
                     -2.0,
                 ),
             ]),
-            power_w: Some(300_000.0),
-            energy_j: None,
+            electric: 300_000.0,
         };
         let machine_glyph = glyph(&registry, "assembling-machine");
         let suffix = format_config_suffix(&configured.config, &settings, &registry);
@@ -571,13 +570,11 @@ mod tests {
             vec![machine_glyph.clone(), format!("2 {machine_glyph}{suffix}")]
         );
         assert_eq!(format_process_craft(&process, &settings), None);
-        assert_eq!(
-            format_process_energy(&process, &settings).as_deref(),
-            Some("300 kW")
-        );
+        assert_eq!(format_process_energy(&process, &settings), "300 kW");
 
         let single_spec = ProcessFacet {
-            extent: Extent::machines(empty.clone(), 2.0),
+            kind: ExtentKind::Machines,
+            machines: BTreeMap::from([(empty.clone(), 2.0)]),
             net: BTreeMap::from([(BaseUnit::Craft, 1.0)]),
             ..process.clone()
         };
@@ -587,7 +584,8 @@ mod tests {
         );
 
         let machine_seconds = ProcessFacet {
-            extent: Extent::machine_seconds(empty, 2.0),
+            kind: ExtentKind::MachineSeconds,
+            machines: BTreeMap::from([(empty, 2.0)]),
             ..single_spec
         };
         assert_eq!(
@@ -598,6 +596,7 @@ mod tests {
             format_process_craft(&machine_seconds, &settings).as_deref(),
             Some("1 craft")
         );
+        assert_eq!(format_process_energy(&machine_seconds, &settings), "300 kJ");
     }
 
     #[test]

@@ -46,8 +46,6 @@ pub enum FacetError {
     ProcessExtentMismatch,
     #[error("`.abs` is not defined for a process")]
     AbsOnProcess,
-    #[error("process power/energy fields do not match the extent")]
-    ProcessFieldMismatch,
     #[error("config count overflow")]
     CountOverflow,
     #[error("a config may contain only one type of beacon")]
@@ -374,7 +372,10 @@ pub struct MachineSpec {
     pub config: ConfigFacet,
 }
 
-/// Whether a process extent is unsolved, machine counts, or machine-seconds.
+/// Whether a process holds no solved count, machine counts, or machine-seconds.
+///
+/// It also fixes the unit of [`ProcessFacet::electric`]: watts for
+/// `Unsolved` and `Machines`, joules for `MachineSeconds`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExtentKind {
     Unsolved,
@@ -382,35 +383,18 @@ pub enum ExtentKind {
     MachineSeconds,
 }
 
-/// A process extent: a kind and a count or machine-seconds per machine spec.
+/// A production process. Effects are baked; modules/beacons are not retained.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Extent {
+pub struct ProcessFacet {
     pub kind: ExtentKind,
+    /// Machine count, or machine-seconds, per machine spec.
     pub machines: BTreeMap<MachineSpec, f64>,
+    pub net: BTreeMap<BaseUnit, f64>,
+    /// Power in watts for `Unsolved`/`Machines`; energy in joules for `MachineSeconds`.
+    pub electric: f64,
 }
 
-impl Extent {
-    pub fn unsolved(spec: MachineSpec) -> Self {
-        Extent {
-            kind: ExtentKind::Unsolved,
-            machines: BTreeMap::from([(spec, 1.0)]),
-        }
-    }
-
-    pub fn machines(spec: MachineSpec, count: f64) -> Self {
-        Extent {
-            kind: ExtentKind::Machines,
-            machines: BTreeMap::from([(spec, count)]),
-        }
-    }
-
-    pub fn machine_seconds(spec: MachineSpec, seconds: f64) -> Self {
-        Extent {
-            kind: ExtentKind::MachineSeconds,
-            machines: BTreeMap::from([(spec, seconds)]),
-        }
-    }
-
+impl ProcessFacet {
     pub fn is_unsolved(&self) -> bool {
         self.kind == ExtentKind::Unsolved
     }
@@ -440,29 +424,20 @@ impl Extent {
         } else {
             self.kind
         };
-        Extent {
+        ProcessFacet {
             kind,
             machines: self.map_counts(factor),
+            net: self
+                .net
+                .iter()
+                .map(|(unit, amount)| (*unit, *amount * factor))
+                .collect(),
+            electric: self.electric * factor,
         }
     }
 
-    fn negated(&self) -> Self {
-        let kind = if self.is_unsolved() {
-            ExtentKind::Machines
-        } else {
-            self.kind
-        };
-        Extent {
-            kind,
-            machines: self.map_counts(-1.0),
-        }
-    }
-
-    fn combined(&self, other: &Extent, subtract: bool) -> Result<Self, FacetError> {
-        if self.kind == ExtentKind::Unsolved
-            || other.kind == ExtentKind::Unsolved
-            || self.kind != other.kind
-        {
+    fn combined(&self, other: &ProcessFacet, subtract: bool) -> Result<Self, FacetError> {
+        if self.is_unsolved() || other.is_unsolved() || self.kind != other.kind {
             return Err(FacetError::ProcessExtentMismatch);
         }
         let mut machines = self.machines.clone();
@@ -475,28 +450,25 @@ impl Extent {
             }
         }
         machines.retain(|_, count| is_nonzero(*count));
-        Ok(Extent {
+        let mut out = ProcessFacet {
             kind: self.kind,
             machines,
-        })
+            net: combine_amounts(&self.net, &other.net, subtract),
+            electric: if subtract {
+                self.electric - other.electric
+            } else {
+                self.electric + other.electric
+            },
+        };
+        out.canonicalize();
+        Ok(out)
     }
-}
 
-/// A production process. Effects are baked; modules/beacons are not retained.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ProcessFacet {
-    pub extent: Extent,
-    pub net: BTreeMap<BaseUnit, f64>,
-    pub power_w: Option<f64>,
-    pub energy_j: Option<f64>,
-}
-
-impl ProcessFacet {
     /// Canonical form: drop approximate-zero net rows, and drop the total craft
-    /// row once the extent holds more than one machine spec.
+    /// row once the process holds more than one machine spec.
     pub fn canonicalize(&mut self) {
         self.net.retain(|_, amount| is_nonzero(*amount));
-        if self.extent.machines.len() != 1 {
+        if self.machines.len() != 1 {
             self.net.remove(&BaseUnit::Craft);
         }
     }
@@ -628,7 +600,7 @@ impl FacetValue {
         };
 
         out.process = match (&self.process, &other.process) {
-            (Some(a), Some(b)) => Some(combine_process(a, b, subtract)?),
+            (Some(a), Some(b)) => Some(a.combined(b, subtract)?),
             _ => None,
         };
 
@@ -678,12 +650,7 @@ impl FacetValue {
             count: Some(-machine.count.unwrap_or(1.0)),
         });
         out.process = self.process.as_ref().map(|process| {
-            let mut process = ProcessFacet {
-                extent: process.extent.negated(),
-                net: negate_map(&process.net),
-                power_w: process.power_w.map(|value| -value),
-                energy_j: process.energy_j.map(|value| -value),
-            };
+            let mut process = process.scaled(-1.0);
             process.canonicalize();
             process
         });
@@ -919,16 +886,7 @@ impl FacetValue {
             count: Some(machine.count.unwrap_or(1.0) * factor),
         });
         out.process = self.process.as_ref().map(|process| {
-            let mut process = ProcessFacet {
-                extent: process.extent.scaled(factor),
-                net: process
-                    .net
-                    .iter()
-                    .map(|(unit, amount)| (*unit, *amount * factor))
-                    .collect(),
-                power_w: process.power_w.map(|value| value * factor),
-                energy_j: process.energy_j.map(|value| value * factor),
-            };
+            let mut process = process.scaled(factor);
             process.canonicalize();
             process
         });
@@ -1005,10 +963,6 @@ fn abs_capacity(capacity: &CapacityFacet) -> CapacityFacet {
         CapacityFacet::Items(items) => CapacityFacet::Items(abs_terms(items)),
         CapacityFacet::Fluid(value) => CapacityFacet::Fluid(value.abs()),
     }
-}
-
-fn negate_map(map: &BTreeMap<BaseUnit, f64>) -> BTreeMap<BaseUnit, f64> {
-    map.iter().map(|(unit, amount)| (*unit, -*amount)).collect()
 }
 
 fn negate_terms(map: &BTreeMap<Cap, f64>) -> BTreeMap<Cap, f64> {
@@ -1223,24 +1177,18 @@ fn scale_capacity_to_rate(capacity: &CapacityFacet, factor: f64) -> FacetValue {
 }
 
 fn scale_process_time(process: &ProcessFacet, time: f64) -> Result<FacetValue, FacetError> {
-    if process.extent.is_machine_seconds() {
+    if process.is_machine_seconds() {
         return Err(FacetError::ProcessTimeOperand);
     }
-    let net = process
-        .net
-        .iter()
-        .map(|(unit, amount)| (*unit, *amount * time))
-        .collect();
-    let extent = Extent {
-        kind: ExtentKind::MachineSeconds,
-        machines: process.extent.map_counts(time),
-    };
-    let energy_j = process.power_w.map(|power| power * time);
     let mut process = ProcessFacet {
-        extent,
-        net,
-        power_w: None,
-        energy_j,
+        kind: ExtentKind::MachineSeconds,
+        machines: process.map_counts(time),
+        net: process
+            .net
+            .iter()
+            .map(|(unit, amount)| (*unit, *amount * time))
+            .collect(),
+        electric: process.electric * time,
     };
     process.canonicalize();
     Ok(FacetValue {
@@ -1250,58 +1198,24 @@ fn scale_process_time(process: &ProcessFacet, time: f64) -> Result<FacetValue, F
 }
 
 fn divide_process_time(process: &ProcessFacet, time: f64) -> Result<FacetValue, FacetError> {
-    if !process.extent.is_machine_seconds() {
+    if !process.is_machine_seconds() {
         return Err(FacetError::ProcessTimeOperand);
     }
-    let net = process
-        .net
-        .iter()
-        .map(|(unit, amount)| (*unit, *amount / time))
-        .collect();
-    let power_w = process.energy_j.map(|energy| energy / time);
     let mut process = ProcessFacet {
-        extent: Extent {
-            kind: ExtentKind::Machines,
-            machines: process.extent.map_counts(1.0 / time),
-        },
-        net,
-        power_w,
-        energy_j: None,
+        kind: ExtentKind::Machines,
+        machines: process.map_counts(1.0 / time),
+        net: process
+            .net
+            .iter()
+            .map(|(unit, amount)| (*unit, *amount / time))
+            .collect(),
+        electric: process.electric / time,
     };
     process.canonicalize();
     Ok(FacetValue {
         process: Some(process),
         ..FacetValue::empty()
     })
-}
-
-fn combine_process(
-    a: &ProcessFacet,
-    b: &ProcessFacet,
-    subtract: bool,
-) -> Result<ProcessFacet, FacetError> {
-    let extent = a.extent.combined(&b.extent, subtract)?;
-
-    let mut out = ProcessFacet {
-        extent,
-        net: combine_amounts(&a.net, &b.net, subtract),
-        power_w: combine_option(a.power_w, b.power_w, subtract)?,
-        energy_j: combine_option(a.energy_j, b.energy_j, subtract)?,
-    };
-    out.canonicalize();
-    Ok(out)
-}
-
-fn combine_option(
-    a: Option<f64>,
-    b: Option<f64>,
-    subtract: bool,
-) -> Result<Option<f64>, FacetError> {
-    match (a, b) {
-        (Some(a), Some(b)) => Ok(Some(if subtract { a - b } else { a + b })),
-        (None, None) => Ok(None),
-        _ => Err(FacetError::ProcessFieldMismatch),
-    }
 }
 
 fn combine_amounts(
@@ -1456,10 +1370,10 @@ mod tests {
     fn process_cannot_coexist_with_other_facets() {
         let mut value = FacetValue::empty();
         value.process = Some(ProcessFacet {
-            extent: Extent::unsolved(spec(0)),
+            kind: ExtentKind::Unsolved,
+            machines: BTreeMap::from([(spec(0), 1.0)]),
             net: BTreeMap::new(),
-            power_w: None,
-            energy_j: None,
+            electric: 0.0,
         });
         assert!(value.validate().is_ok());
         value.item = Some(Monomial::scalar(1.0));
@@ -1470,16 +1384,16 @@ mod tests {
     fn process_canonicalize_drops_zero_rows_and_multi_machine_craft() {
         let item = EntryId::from_index(0);
         let mut process = ProcessFacet {
-            extent: Extent::machines(spec(0), 1.0),
+            kind: ExtentKind::Machines,
+            machines: BTreeMap::from([(spec(0), 1.0)]),
             net: BTreeMap::from([
                 (BaseUnit::Craft, 1.0),
                 (BaseUnit::Item(item), 1e-12),
                 (BaseUnit::Second, -1.0),
             ]),
-            power_w: None,
-            energy_j: None,
+            electric: 0.0,
         };
-        process.extent.machines.insert(spec(1), 1.0);
+        process.machines.insert(spec(1), 1.0);
         process.canonicalize();
         assert!(
             !process.net.contains_key(&BaseUnit::Craft),
@@ -1494,7 +1408,7 @@ mod tests {
         assert_eq!(process.net[&BaseUnit::Second], -1.0);
         assert_eq!(process.net.len(), 1);
 
-        process.extent.machines.remove(&spec(1));
+        process.machines.remove(&spec(1));
         process.net.insert(BaseUnit::Craft, 1.0);
         process.canonicalize();
         assert_eq!(process.net[&BaseUnit::Craft], 1.0);
@@ -1582,28 +1496,38 @@ mod tests {
     fn process_addition_combines_solved_extents() {
         let mut a = FacetValue::empty();
         a.process = Some(ProcessFacet {
-            extent: Extent::machines(spec(0), 1.0),
+            kind: ExtentKind::Machines,
+            machines: BTreeMap::from([(spec(0), 1.0)]),
             net: BTreeMap::from([(BaseUnit::Second, -1.0)]),
-            power_w: Some(10.0),
-            energy_j: None,
+            electric: 10.0,
         });
         let mut b = FacetValue::empty();
         b.process = Some(ProcessFacet {
-            extent: Extent::machines(spec(0), 2.0),
+            kind: ExtentKind::Machines,
+            machines: BTreeMap::from([(spec(0), 2.0)]),
             net: BTreeMap::from([(BaseUnit::Second, -2.0)]),
-            power_w: Some(20.0),
-            energy_j: None,
+            electric: 20.0,
         });
         let result = a.add(&b).unwrap().process.unwrap();
-        assert_eq!(result.extent.kind, ExtentKind::Machines);
-        assert_eq!(result.extent.magnitude(), 3.0);
-        assert_eq!(result.power_w, Some(30.0));
+        assert_eq!(result.kind, ExtentKind::Machines);
+        assert_eq!(result.magnitude(), 3.0);
+        assert_eq!(result.electric, 30.0);
     }
 
     #[test]
     fn extents_merge_machine_specs() {
-        let a = Extent::machines(spec(0), 1.0);
-        let b = Extent::machines(spec(1), 2.0);
+        let a = ProcessFacet {
+            kind: ExtentKind::Machines,
+            machines: BTreeMap::from([(spec(0), 1.0)]),
+            net: BTreeMap::new(),
+            electric: 0.0,
+        };
+        let b = ProcessFacet {
+            kind: ExtentKind::Machines,
+            machines: BTreeMap::from([(spec(1), 2.0)]),
+            net: BTreeMap::new(),
+            electric: 0.0,
+        };
         let combined = a.combined(&b, false).unwrap();
         assert_eq!(combined.kind, ExtentKind::Machines);
         assert_eq!(combined.magnitude(), 3.0);
@@ -1617,16 +1541,16 @@ mod tests {
     fn negation_solves_an_unsolved_process() {
         let mut value = FacetValue::empty();
         value.process = Some(ProcessFacet {
-            extent: Extent::unsolved(spec(0)),
+            kind: ExtentKind::Unsolved,
+            machines: BTreeMap::from([(spec(0), 1.0)]),
             net: BTreeMap::from([(BaseUnit::Second, 1.0)]),
-            power_w: Some(5.0),
-            energy_j: None,
+            electric: 5.0,
         });
         let process = value.neg().unwrap().process.unwrap();
-        assert_eq!(process.extent.kind, ExtentKind::Machines);
-        assert_eq!(process.extent.magnitude(), -1.0);
+        assert_eq!(process.kind, ExtentKind::Machines);
+        assert_eq!(process.magnitude(), -1.0);
         assert_eq!(process.net[&BaseUnit::Second], -1.0);
-        assert_eq!(process.power_w, Some(-5.0));
+        assert_eq!(process.electric, -5.0);
     }
 
     #[test]
@@ -1689,34 +1613,33 @@ mod tests {
     fn process_times_time_becomes_machine_seconds() {
         let mut value = FacetValue::empty();
         value.process = Some(ProcessFacet {
-            extent: Extent::machines(spec(0), 2.0),
+            kind: ExtentKind::Machines,
+            machines: BTreeMap::from([(spec(0), 2.0)]),
             net: BTreeMap::from([(BaseUnit::Joule, 4.0)]),
-            power_w: Some(10.0),
-            energy_j: None,
+            electric: 10.0,
         });
         let time = FacetValue::item(Monomial::new(3.0, [(BaseUnit::Second, 1)]));
         let process = value.mul(&time).unwrap().process.unwrap();
-        assert_eq!(process.extent.kind, ExtentKind::MachineSeconds);
-        assert_eq!(process.extent.magnitude(), 6.0);
+        assert_eq!(process.kind, ExtentKind::MachineSeconds);
+        assert_eq!(process.magnitude(), 6.0);
         assert_eq!(process.net[&BaseUnit::Joule], 12.0);
-        assert_eq!(process.energy_j, Some(30.0));
-        assert_eq!(process.power_w, None);
+        assert_eq!(process.electric, 30.0);
     }
 
     #[test]
     fn machine_seconds_over_time_becomes_machines() {
         let mut value = FacetValue::empty();
         value.process = Some(ProcessFacet {
-            extent: Extent::machine_seconds(spec(0), 6.0),
+            kind: ExtentKind::MachineSeconds,
+            machines: BTreeMap::from([(spec(0), 6.0)]),
             net: BTreeMap::from([(BaseUnit::Joule, 12.0)]),
-            power_w: None,
-            energy_j: Some(30.0),
+            electric: 30.0,
         });
         let time = FacetValue::item(Monomial::new(3.0, [(BaseUnit::Second, 1)]));
         let process = value.div(&time).unwrap().process.unwrap();
-        assert_eq!(process.extent.kind, ExtentKind::Machines);
-        assert_eq!(process.extent.magnitude(), 2.0);
-        assert_eq!(process.power_w, Some(10.0));
+        assert_eq!(process.kind, ExtentKind::Machines);
+        assert_eq!(process.magnitude(), 2.0);
+        assert_eq!(process.electric, 10.0);
     }
 
     #[test]

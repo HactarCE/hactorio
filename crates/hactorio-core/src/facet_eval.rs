@@ -12,7 +12,7 @@ use crate::facet_parser::{
 };
 use crate::facet_token::token_value;
 use crate::facets::{
-    Cap, CapacityFacet, Extent, FacetError, FacetValue, Monomial, ProcessFacet, RateFacet,
+    Cap, CapacityFacet, ExtentKind, FacetError, FacetValue, Monomial, ProcessFacet, RateFacet,
 };
 use crate::settings::Settings;
 use crate::syntax::{BinaryOp, Span};
@@ -293,45 +293,42 @@ fn assign_property(
     };
     match selector {
         Selector::Property(Property::Power) => {
-            let old = process
-                .power_w
-                .ok_or_else(|| EvalError::new(span, "`.power` needs a process power"))?;
+            if process.is_machine_seconds() {
+                return Err(EvalError::new(
+                    span,
+                    "`.power` is not defined for machine-seconds",
+                ));
+            }
             let amount = rhs_amount(op, scalar, || {
                 watt_amount(rhs)
                     .ok_or_else(|| EvalError::new(span, "expected a power value such as `100 kW`"))
             })?;
-            process.power_w = Some(combine(op, old, amount));
+            process.electric = combine(op, process.electric, amount);
         }
         Selector::Signal(Signal::Electric) => {
-            if let Some(old) = process.power_w {
-                let amount = rhs_amount(op, scalar, || {
-                    watt_amount(rhs).ok_or_else(|| {
-                        EvalError::new(span, "expected a power value such as `100 kW`")
-                    })
-                })?;
-                process.power_w = Some(combine(op, old, amount));
-            } else if let Some(old) = process.energy_j {
-                let amount = rhs_amount(op, scalar, || {
+            let amount = if process.is_machine_seconds() {
+                rhs_amount(op, scalar, || {
                     joule_amount(rhs).ok_or_else(|| {
                         EvalError::new(span, "expected an energy value such as `100 kJ`")
                     })
-                })?;
-                process.energy_j = Some(combine(op, old, amount));
+                })?
             } else {
-                return Err(EvalError::new(
-                    span,
-                    "`.electric` needs process power or energy",
-                ));
-            }
+                rhs_amount(op, scalar, || {
+                    watt_amount(rhs).ok_or_else(|| {
+                        EvalError::new(span, "expected a power value such as `100 kW`")
+                    })
+                })?
+            };
+            process.electric = combine(op, process.electric, amount);
         }
         Selector::Property(Property::Crafts) => {
-            if process.extent.machines.len() > 1 {
+            if process.machines.len() > 1 {
                 return Err(EvalError::new(
                     span,
                     "`.crafts` cannot be assigned to a process with multiple machine configurations",
                 ));
             }
-            let rate = !process.extent.is_machine_seconds();
+            let rate = !process.is_machine_seconds();
             let amount = rhs_amount(op, scalar, || {
                 net_amount(rhs, BaseUnit::Craft, rate, span, registry)
             })?;
@@ -343,7 +340,7 @@ fn assign_property(
             } else {
                 BaseUnit::Item(*id)
             };
-            let rate = !process.extent.is_machine_seconds();
+            let rate = !process.is_machine_seconds();
             let amount = rhs_amount(op, scalar, || net_amount(rhs, unit, rate, span, registry))?;
             write_net(process, unit, op, amount);
         }
@@ -626,21 +623,27 @@ fn making(
     )
     .map_err(|error| EvalError::new(span, error))?;
     let spec = machine.spec();
-    let (extent, net, power_w) = match machine.count {
-        None => (Extent::unsolved(spec), net, Some(modifiers.power_w)),
+    let (kind, machines, net, electric) = match machine.count {
+        None => (
+            ExtentKind::Unsolved,
+            BTreeMap::from([(spec, 1.0)]),
+            net,
+            modifiers.power_w,
+        ),
         Some(count) => (
-            Extent::machines(spec, count),
+            ExtentKind::Machines,
+            BTreeMap::from([(spec, count)]),
             net.into_iter()
                 .map(|(unit, amount)| (unit, amount * count))
                 .collect(),
-            Some(modifiers.power_w * count),
+            modifiers.power_w * count,
         ),
     };
     let mut process = ProcessFacet {
-        extent,
+        kind,
+        machines,
         net,
-        power_w,
-        energy_j: None,
+        electric,
     };
     process.canonicalize();
     Ok(FacetValue {
@@ -687,19 +690,16 @@ fn in_expression(
 ) -> Result<FacetValue, EvalError> {
     let quantity = in_quantity(&quantity)
         .ok_or_else(|| EvalError::new(span, "`in` needs a pure item/fluid/craft quantity"))?;
-    let (net, power_w, spec) = if let Some(process) = &machine.process {
-        if !process.extent.is_unsolved() {
+    let (net, power, spec) = if let Some(process) = &machine.process {
+        if !process.is_unsolved() {
             return Err(EvalError::new(span, "`in` cannot use a solved process"));
         }
         let net = process.net.clone();
-        let power = process.power_w.unwrap_or(0.0);
-        let spec = process
-            .extent
-            .machines
-            .keys()
-            .next()
-            .cloned()
-            .ok_or_else(|| EvalError::new(span, "`in` needs an unsolved process with a machine"))?;
+        let power = process.electric;
+        let spec =
+            process.machines.keys().next().cloned().ok_or_else(|| {
+                EvalError::new(span, "`in` needs an unsolved process with a machine")
+            })?;
         (net, power, spec)
     } else if let Some(machine_facet) = &machine.machine {
         if machine_facet.count.is_some() {
@@ -769,30 +769,19 @@ fn in_expression(
     } else {
         quantity.coefficient / denominator.abs()
     };
-    let (extent, net, energy_j, power_w) = if quantity.rate {
-        (
-            Extent::machines(spec, magnitude),
-            net.into_iter()
-                .map(|(unit, amount)| (unit, amount * magnitude))
-                .collect(),
-            None,
-            Some(power_w * magnitude),
-        )
+    let kind = if quantity.rate {
+        ExtentKind::Machines
     } else {
-        (
-            Extent::machine_seconds(spec, magnitude),
-            net.into_iter()
-                .map(|(unit, amount)| (unit, amount * magnitude))
-                .collect(),
-            Some(power_w * magnitude),
-            None,
-        )
+        ExtentKind::MachineSeconds
     };
     let mut process = ProcessFacet {
-        extent,
-        net,
-        power_w,
-        energy_j,
+        kind,
+        machines: BTreeMap::from([(spec, magnitude)]),
+        net: net
+            .into_iter()
+            .map(|(unit, amount)| (unit, amount * magnitude))
+            .collect(),
+        electric: power * magnitude,
     };
     process.canonicalize();
     Ok(FacetValue {
@@ -989,19 +978,16 @@ fn power_property(
         return Ok(watts(modifiers.power_w * count));
     }
     if let Some(process) = &value.process {
-        if let Some(power) = process.power_w {
-            return Ok(watts(power));
-        }
-        if let Some(energy) = process.energy_j {
+        if process.is_machine_seconds() {
             if electric {
-                return Ok(joules(energy));
+                return Ok(joules(process.electric));
             }
             return Err(EvalError::new(
                 span,
                 "`.power` is not defined for machine-seconds",
             ));
         }
-        return Err(EvalError::new(span, "process has no power or energy"));
+        return Ok(watts(process.electric));
     }
     if let Some(item) = &value.item {
         let (unit, exponent) = item
@@ -1069,10 +1055,10 @@ fn energy_property(
     registry: &Registry,
 ) -> Result<FacetValue, EvalError> {
     if let Some(process) = &value.process {
-        return process
-            .energy_j
-            .map(joules)
-            .ok_or_else(|| EvalError::new(span, "process has no energy"));
+        if process.is_machine_seconds() {
+            return Ok(joules(process.electric));
+        }
+        return Err(EvalError::new(span, "process has no energy"));
     }
     if let Some(item) = &value.item {
         let (unit, exponent) = item
@@ -1104,13 +1090,13 @@ fn machines_property(value: &FacetValue, span: Span) -> Result<FacetValue, EvalE
         return Ok(FacetValue::scalar(machine.count.unwrap_or(1.0)));
     }
     if let Some(process) = &value.process {
-        if process.extent.is_machine_seconds() {
+        if process.is_machine_seconds() {
             return Err(EvalError::new(
                 span,
                 "`.machines` is not defined for machine-seconds",
             ));
         }
-        return Ok(FacetValue::scalar(process.extent.magnitude()));
+        return Ok(FacetValue::scalar(process.magnitude()));
     }
     Err(EvalError::new(
         span,
@@ -1123,11 +1109,11 @@ fn time_property(value: &FacetValue, span: Span) -> Result<FacetValue, EvalError
         .process
         .as_ref()
         .ok_or_else(|| EvalError::new(span, "`.:time:` needs a process"))?;
-    if !process.extent.is_machine_seconds() {
+    if !process.is_machine_seconds() {
         return Err(EvalError::new(span, "`.:time:` needs machine-seconds"));
     }
     Ok(FacetValue::item(Monomial::new(
-        process.extent.magnitude(),
+        process.magnitude(),
         [(BaseUnit::Second, 1)],
     )))
 }
@@ -1138,7 +1124,7 @@ fn crafts_property(value: &FacetValue, span: Span) -> Result<FacetValue, EvalErr
         .as_ref()
         .ok_or_else(|| EvalError::new(span, "`.crafts` needs a process"))?;
     let amount = process.net.get(&BaseUnit::Craft).copied().unwrap_or(0.0);
-    let units = if process.extent.is_machine_seconds() {
+    let units = if process.is_machine_seconds() {
         vec![(BaseUnit::Craft, 1)]
     } else {
         vec![(BaseUnit::Craft, 1), (BaseUnit::Second, -1)]
@@ -1190,7 +1176,7 @@ fn unit_selector(
     } else {
         BaseUnit::Item(*id)
     };
-    let rate = !process.extent.is_machine_seconds();
+    let rate = !process.is_machine_seconds();
     let units = if rate {
         vec![(unit, 1), (BaseUnit::Second, -1)]
     } else {
@@ -1374,8 +1360,8 @@ mod tests {
     fn accepts_craft_rates_in() {
         let value = eval("1 craft/s in (:assembling-machine-3: making :iron-gear-wheel:)").unwrap();
         let process = value.process.unwrap();
-        assert_eq!(process.extent.kind, ExtentKind::Machines);
-        assert_eq!(process.extent.magnitude(), 1.0);
+        assert_eq!(process.kind, ExtentKind::Machines);
+        assert_eq!(process.magnitude(), 1.0);
     }
 
     #[test]
@@ -1481,7 +1467,7 @@ mod tests {
         let value = eval(":assembling-machine-3: with 2 :speed-module-3: making :iron-gear-wheel:")
             .unwrap();
         let process = value.process.unwrap();
-        assert!(process.extent.is_unsolved());
+        assert!(process.is_unsolved());
         assert_eq!(process.net[&BaseUnit::Craft], 2.0);
     }
 
@@ -1506,18 +1492,18 @@ mod tests {
     fn evaluates_in_and_process_properties() {
         let value = eval(":iron-gear-wheel: in :assembling-machine-3:").unwrap();
         let process = value.process.unwrap();
-        assert_eq!(process.extent.kind, ExtentKind::MachineSeconds);
-        assert_eq!(process.extent.magnitude(), 1.0);
+        assert_eq!(process.kind, ExtentKind::MachineSeconds);
+        assert_eq!(process.magnitude(), 1.0);
 
         let value = eval(":iron-gear-wheel:/s in :assembling-machine-3:").unwrap();
         let process = value.process.unwrap();
-        assert_eq!(process.extent.kind, ExtentKind::Machines);
-        assert_eq!(process.extent.magnitude(), 1.0);
+        assert_eq!(process.kind, ExtentKind::Machines);
+        assert_eq!(process.magnitude(), 1.0);
 
         let value = eval("1 craft in (:assembling-machine-3: making :iron-gear-wheel:)").unwrap();
         let process = value.process.unwrap();
-        assert_eq!(process.extent.kind, ExtentKind::MachineSeconds);
-        assert_eq!(process.extent.magnitude(), 1.0);
+        assert_eq!(process.kind, ExtentKind::MachineSeconds);
+        assert_eq!(process.magnitude(), 1.0);
 
         assert!(eval(":iron-gear-wheel: in (1 :assembling-machine-3:)").is_err());
     }

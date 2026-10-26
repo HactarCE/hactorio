@@ -85,9 +85,9 @@ fn evaluates_machine_process_and_in() {
     let LineOutput::Value(invalue) = &outputs[3].output else {
         panic!("expected in");
     };
-    let extent = &invalue.process.as_ref().unwrap().extent;
-    assert_eq!(extent.kind, hactorio_core::facets::ExtentKind::Machines);
-    assert_eq!(extent.magnitude(), 0.5);
+    let process = invalue.process.as_ref().unwrap();
+    assert_eq!(process.kind, hactorio_core::facets::ExtentKind::Machines);
+    assert_eq!(process.magnitude(), 0.5);
 }
 
 #[test]
@@ -373,7 +373,7 @@ fn process_power_and_energy_assignments() {
             output.output
         );
     }
-    assert_eq!(process_of(&outputs[2]).power_w, Some(100_000.0));
+    assert_eq!(process_of(&outputs[2]).electric, 100_000.0);
     assert_eq!(
         outputs[3]
             .value
@@ -385,9 +385,9 @@ fn process_power_and_energy_assignments() {
             .coef(),
         100_000.0
     );
-    assert_eq!(process_of(&outputs[4]).power_w, Some(101_000.0));
-    assert_eq!(process_of(&outputs[5]).power_w, Some(202_000.0));
-    assert_eq!(process_of(&outputs[9]).energy_j, Some(100_000.0));
+    assert_eq!(process_of(&outputs[4]).electric, 101_000.0);
+    assert_eq!(process_of(&outputs[5]).electric, 202_000.0);
+    assert_eq!(process_of(&outputs[9]).electric, 100_000.0);
     assert_eq!(
         outputs[8]
             .value
@@ -399,8 +399,7 @@ fn process_power_and_energy_assignments() {
             .coef(),
         100_000.0
     );
-    // A zeroed field stays present, unlike a zeroed net row.
-    assert_eq!(process_of(&outputs[11]).power_w, Some(0.0));
+    assert_eq!(process_of(&outputs[11]).electric, 0.0);
 }
 
 #[test]

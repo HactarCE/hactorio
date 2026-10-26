@@ -137,9 +137,7 @@ fn multiline_result_ui(
                     token = token.or(value_line(ui, &line, registry));
                 }
                 let mut inputs = format_process_inputs(process, settings, registry);
-                if let Some(energy) = format_process_energy(process, settings) {
-                    inputs.push(energy);
-                }
+                inputs.push(format_process_energy(process, settings));
                 for (title, lines) in [
                     ("inputs", inputs),
                     (

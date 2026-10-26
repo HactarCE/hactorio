@@ -313,9 +313,7 @@ impl ResultsContext<'_> {
         header.extend(format_process_craft(process, self.settings));
         self.process_lines(ui, header);
         let mut inputs = format_process_inputs(process, self.settings, self.registry);
-        if let Some(energy) = format_process_energy(process, self.settings) {
-            inputs.push(energy);
-        }
+        inputs.push(format_process_energy(process, self.settings));
         self.process_section(ui, "inputs", inputs);
         self.process_section(
             ui,
