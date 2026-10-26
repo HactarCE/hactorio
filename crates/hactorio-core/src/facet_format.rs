@@ -262,11 +262,28 @@ fn format_cap(cap: Cap) -> String {
     match cap {
         Cap::Full => STACK_SIZE_GLYPH.to_string(),
         Cap::Limit(1) => String::new(),
-        Cap::Limit(2) => format!("{STACK_SIZE_GLYPH}₂"),
-        Cap::Limit(3) => format!("{STACK_SIZE_GLYPH}₃"),
-        Cap::Limit(4) => format!("{STACK_SIZE_GLYPH}₄"),
-        Cap::Limit(n) => format!("{STACK_SIZE_GLYPH}_{n}"),
+        Cap::Limit(n) => format!("{STACK_SIZE_GLYPH}{}", subscript_number(n)),
     }
+}
+
+fn subscript_number(n: impl ToString) -> String {
+    n.to_string()
+        .chars()
+        .map(|c| match c {
+            '-' => '₋',
+            '0' => '₀',
+            '1' => '₁',
+            '2' => '₂',
+            '3' => '₃',
+            '4' => '₄',
+            '5' => '₅',
+            '6' => '₆',
+            '7' => '₇',
+            '8' => '₈',
+            '9' => '₉',
+            _ => c,
+        })
+        .collect()
 }
 
 pub fn format_process(process: &ProcessFacet, settings: &Settings, registry: &Registry) -> String {
