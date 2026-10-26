@@ -7,6 +7,8 @@ mod glyphs;
 
 use eframe::egui;
 
+const APP_TITLE: &str = "Hactar's Factorio Calculator";
+
 fn main() -> eframe::Result {
     let app_dir = app::data_dir();
     let _ = std::fs::create_dir_all(&app_dir);
@@ -20,12 +22,12 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size(size)
-            .with_title("hactorio"),
+            .with_title(APP_TITLE),
         ..Default::default()
     };
 
     eframe::run_native(
-        "hactorio",
+        APP_TITLE,
         options,
         Box::new(move |cc| {
             Ok(Box::new(app::HactorioApp::new(

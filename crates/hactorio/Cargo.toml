@@ -1,7 +1,12 @@
 [package]
 name = "hactorio"
+description = "Hactar's Factorio Calculator"
 version.workspace = true
 edition.workspace = true
+authors = ["Andrew Farkas"]
+repository = "https://github.com/HactarCE/hactorio"
+rust-version = "1.99"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 eframe.workspace = true

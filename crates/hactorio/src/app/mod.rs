@@ -11,7 +11,6 @@ use hactorio_core::facet_eval::StatementOutput;
 use hactorio_core::{BeltTier, Settings, TimeUnit, from_plaintext, to_plaintext};
 use hactorio_data::{GameInstall, Registry, locate};
 
-use crate::clipboard;
 use crate::document::{
     Cursor, DOCUMENT_VERSION, Document, MAX_FONT_SIZE, MAX_ZOOM, MIN_FONT_SIZE, MIN_ZOOM, Tab,
     Window,
@@ -19,6 +18,7 @@ use crate::document::{
 use crate::evaluator::Evaluator;
 use crate::fonts;
 use crate::glyphs;
+use crate::{APP_TITLE, clipboard};
 
 mod completion;
 mod editor;
@@ -915,12 +915,21 @@ impl HactorioApp {
             });
 
             egui::Panel::bottom("status").show(ui, |ui| {
+                let sp = std::mem::take(&mut ui.spacing_mut().item_spacing);
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(&self.status).small().weak());
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let lines = self.tabs[self.active_tab].text.split('\n').count();
-                        ui.label(RichText::new(format!("{lines} lines")).small().weak());
-                    });
+                    egui::ScrollArea::horizontal()
+                        .auto_shrink(false)
+                        .show(ui, |ui| {
+                            show_credits(ui);
+                            ui.add_space(sp.x);
+                            ui.separator();
+                            ui.add_space(sp.x);
+                            show_powered_by_egui(ui);
+                            ui.add_space(sp.x);
+                            ui.separator();
+                            ui.add_space(sp.x);
+                            show_source_code_link(ui);
+                        });
                 });
             });
 
@@ -1007,6 +1016,28 @@ impl eframe::App for HactorioApp {
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {
         HactorioApp::save(self);
     }
+}
+
+fn show_credits(ui: &mut egui::Ui) {
+    ui.label(format!("{APP_TITLE} v{} by ", env!("CARGO_PKG_VERSION")));
+    ui.hyperlink_to("Andrew Farkas", "https://ajfarkas.dev/");
+}
+
+fn show_powered_by_egui(ui: &mut egui::Ui) {
+    ui.label("Powered by ");
+    ui.hyperlink_to("egui", "https://github.com/emilk/egui");
+    ui.label(" and ");
+    ui.hyperlink_to(
+        "eframe",
+        "https://github.com/emilk/egui/tree/master/crates/eframe",
+    );
+}
+
+fn show_source_code_link(ui: &mut egui::Ui) {
+    ui.hyperlink_to(
+        egui::RichText::new(" source code").small(),
+        env!("CARGO_PKG_REPOSITORY"),
+    );
 }
 
 #[cfg(test)]
