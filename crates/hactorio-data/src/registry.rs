@@ -1,6 +1,10 @@
 //! The prototype namespace and its runtime registry.
 
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    iter::Sum,
+    ops::{Add, Index},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -170,6 +174,26 @@ pub struct ModuleEffect {
     pub consumption: f64,
     pub pollution: f64,
     pub quality: f64,
+}
+
+impl Add for ModuleEffect {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self {
+            speed: self.speed + rhs.speed,
+            productivity: self.productivity + rhs.productivity,
+            consumption: self.consumption + rhs.consumption,
+            pollution: self.pollution + rhs.pollution,
+            quality: self.quality + rhs.quality,
+        }
+    }
+}
+
+impl Sum for ModuleEffect {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(ModuleEffect::default(), |a, b| a + b)
+    }
 }
 
 /// A module prototype.
@@ -481,6 +505,14 @@ impl Registry {
 
     pub fn recipe_id(&self, id: &str) -> Option<RecipeId> {
         self.recipe_by_id.get(id).copied()
+    }
+}
+
+impl Index<EntryId> for Registry {
+    type Output = Entry;
+
+    fn index(&self, index: EntryId) -> &Self::Output {
+        self.entry_by_index(index)
     }
 }
 

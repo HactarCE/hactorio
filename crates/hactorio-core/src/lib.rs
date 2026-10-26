@@ -2,6 +2,7 @@
 //!
 //! This crate has no dependency on egui and is testable headlessly.
 
+pub mod approx;
 mod belt;
 pub mod facet_eval;
 pub mod facet_format;
@@ -10,6 +11,7 @@ pub mod facet_parser;
 pub mod facet_token;
 pub mod facets;
 mod format;
+pub mod new_eval;
 mod settings;
 mod syntax;
 mod text;
