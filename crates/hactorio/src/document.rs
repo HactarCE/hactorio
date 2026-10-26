@@ -32,16 +32,10 @@ impl Tab {
     }
 
     /// The first comment line, without the `#`, or `Untitled`.
-    pub fn title(&self) -> String {
-        for line in self.text.split('\n') {
-            if let Some(rest) = line.trim_start().strip_prefix('#') {
-                let title = rest.trim();
-                if !title.is_empty() {
-                    return title.to_string();
-                }
-            }
-        }
-        "Untitled".to_string()
+    pub fn title(&self) -> &str {
+        // IIFE to mimic try_block
+        (|| Some(self.text.lines().next()?.strip_prefix('#')?.trim()).filter(|s| !s.is_empty()))()
+            .unwrap_or("Untitled")
     }
 }
 

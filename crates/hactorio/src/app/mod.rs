@@ -495,39 +495,100 @@ impl HactorioApp {
         self.dirty = true;
     }
 
-    fn tabs_bar(&mut self, ui: &mut Ui) {
+    fn tabs_panel(&mut self, ui: &mut Ui) {
         let mut activate = None;
-        let mut close = None;
-        ui.horizontal_wrapped(|ui| {
-            for (index, tab) in self.tabs.iter().enumerate() {
-                if ui
-                    .selectable_label(index == self.active_tab, tab.title())
-                    .clicked()
-                {
-                    activate = Some(index);
-                }
-                if self.tabs.len() > 1 && ui.small_button("×").clicked() {
-                    close = Some(index);
-                }
-            }
-            if ui.button("+").clicked() {
-                self.tabs.push(Tab::from_text("# Untitled\n"));
-                self.active_tab = self.tabs.len() - 1;
-                self.dirty = true;
-                self.last_request = None;
-            }
+        let mut delete = None;
 
-            ui.separator();
-            let loading = self.loading();
-            let label = if loading {
-                "Loading…".to_string()
-            } else {
-                "Reload game data".to_string()
-            };
-            if ui.add_enabled(!loading, egui::Button::new(label)).clicked() {
-                self.start_load();
-            }
-        });
+        egui::Panel::bottom("tabs_actions")
+            .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(8))
+            .show(ui, |ui| {
+                let loading = self.loading();
+                let label = if loading {
+                    "Loading game data…".to_string()
+                } else {
+                    "Reload game data".to_string()
+                };
+                let size = egui::vec2(ui.available_width(), 30.0);
+                ui.vertical_centered(|ui| {
+                    if ui
+                        .add_enabled(!loading, egui::Button::new(label).min_size(size))
+                        .clicked()
+                    {
+                        self.start_load();
+                    }
+                })
+            });
+
+        egui::ScrollArea::vertical()
+            .id_salt("tabs_list")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let h = 40.0;
+
+                egui::Frame::new()
+                    .inner_margin(8)
+                    .show(ui, |ui| ui.heading("Pages"));
+
+                ui.spacing_mut().item_spacing.y = 0.0;
+
+                for (index, tab) in self.tabs.iter().enumerate() {
+                    let selected = index == self.active_tab;
+                    let button_text = egui::RichText::new(tab.title()).size(14.0);
+                    let r = ui.add(
+                        egui::Button::selectable(selected, button_text)
+                            .min_size(egui::vec2(ui.available_width(), h))
+                            .corner_radius(0)
+                            .truncate(),
+                    );
+                    if r.middle_clicked() {
+                        delete = Some(index);
+                    } else if r.clicked() {
+                        activate = Some(index);
+                    }
+                    r.context_menu(|ui| {
+                        if ui.button("🗑️ Delete page").clicked() {
+                            delete = Some(index);
+                        }
+                    });
+                }
+
+                ui.add_space(8.0);
+                ui.vertical_centered(|ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(egui::Atom::paint(
+                                egui::vec2(14.0, 14.0),
+                                |ui, atom_paint_args| {
+                                    let rect = atom_paint_args.rect;
+                                    let color = atom_paint_args.fallback_text_color;
+                                    ui.painter().line_segment(
+                                        [rect.center_top(), rect.center_bottom()],
+                                        (1.0, color),
+                                    );
+                                    ui.painter().line_segment(
+                                        [rect.left_center(), rect.right_center()],
+                                        (1.0, color),
+                                    );
+                                },
+                            ))
+                            .min_size(egui::vec2(32.0, 32.0)),
+                        )
+                        .on_hover_text("New page")
+                        .clicked()
+                        || ui.input_mut(|i| {
+                            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                                egui::Modifiers::COMMAND,
+                                egui::Key::T,
+                            ))
+                        })
+                    {
+                        self.tabs.push(Tab::from_text("# Untitled\n"));
+                        self.active_tab = self.tabs.len() - 1;
+                        self.dirty = true;
+                        self.last_request = None;
+                    }
+                });
+            });
 
         if let Some(index) = activate
             && index != self.active_tab
@@ -536,7 +597,7 @@ impl HactorioApp {
             self.outputs.clear();
             self.last_request = None;
         }
-        if let Some(index) = close {
+        if let Some(index) = delete {
             self.tabs.remove(index);
             if self.active_tab >= self.tabs.len() {
                 self.active_tab = self.tabs.len() - 1;
@@ -845,10 +906,6 @@ impl HactorioApp {
         let loaded = self.registry.clone();
         let label_width = settings_label_width(ui);
         if let Some(registry) = &loaded {
-            egui::Panel::top("tabs").show(ui, |ui| {
-                self.tabs_bar(ui);
-            });
-
             egui::Panel::top("display_settings").show(ui, |ui| {
                 self.display_bar(ui, registry, label_width);
             });
@@ -866,6 +923,13 @@ impl HactorioApp {
                     });
                 });
             });
+
+            egui::Panel::left("tabs")
+                .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(0))
+                .default_size(240.0)
+                .show(ui, |ui| {
+                    self.tabs_panel(ui);
+                });
         }
 
         egui::CentralPanel::default().show(ui, |ui| {
@@ -875,7 +939,7 @@ impl HactorioApp {
                     ui.label("Game data is not loaded yet.");
                     let loading = self.loading();
                     let label = if loading {
-                        "Loading…"
+                        "Loading game data…"
                     } else {
                         "Load game data"
                     };
