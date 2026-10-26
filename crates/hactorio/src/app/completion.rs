@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use egui::{Key, Modifiers, TextStyle, Ui};
 use hactorio_core::facet_eval::{evaluate, property_is_available};
-use hactorio_core::facet_parser::Property;
+use hactorio_core::facet_parser::{Property, StatementKind, parse_line};
 use hactorio_core::facets::FacetValue;
 use hactorio_core::{BaseUnit, BeltTier, Settings};
 use hactorio_data::{EMPTY_GLYPH, Entry, EntryId, Registry, SIGNALS};
@@ -278,8 +278,9 @@ fn completion_rank(score: isize, references: u32) -> f64 {
 /// Bonus for a name that equals the needle, case-insensitively.
 ///
 /// Short exact names such as `pm2` can score below a multi-word name whose
-/// word starts earn more points. Exact matches should win those near-ties.
-const COMPLETION_EXACT_MATCH_BONUS: isize = 50;
+/// word starts earn more points. A dominant bonus keeps an exact match ahead of
+/// every fuzzy near-tie, including the present-unit bonus.
+const COMPLETION_EXACT_MATCH_BONUS: isize = 1000;
 
 /// Bonus for a name whose first character is the needle's first character.
 ///
@@ -415,8 +416,10 @@ fn defined_variables(before: &[char]) -> Vec<String> {
 }
 
 const COMPLETION_KEYWORD_BONUS: f64 = 50.0;
-const COMPLETION_PROPERTY_BONUS: f64 = 100.0;
-const COMPLETION_SIGNAL_BONUS: f64 = 10_000.0;
+/// Properties sort below the units a process already holds.
+const COMPLETION_PROPERTY_BONUS: f64 = 40.0;
+/// A unit already in the process net outranks the same name when it is absent.
+const COMPLETION_PRESENT_ITEM_BONUS: f64 = 50.0;
 
 const KEYWORDS: &[&str] = &[
     "in", "with", "making", "s", "second", "m", "minute", "h", "hour", "joule", "J", "kJ", "MJ",
@@ -501,11 +504,27 @@ fn signal_matches(id: &str, needle: &str) -> bool {
             .starts_with(&needle.to_ascii_lowercase())
 }
 
+/// The right-hand side of `line`, when it is an assignment.
+///
+/// The selector after a dot binds to the operand it follows, so in
+/// `p += p.rate` it reads `p`, not the process `p += p` would bind: the operand
+/// value is the one before the write, and the statement's own value need not
+/// even evaluate.
+fn assignment_rhs<'a>(line: &'a str, registry: &Registry) -> Option<&'a str> {
+    let statement = parse_line(line, registry).ok()?;
+    let StatementKind::Definition { value, .. } = statement.kind else {
+        return None;
+    };
+    line.get(value.span.start as usize..value.span.end as usize)
+}
+
 /// The value the selector after the dot ending at `word_start` applies to.
 ///
 /// The text up to the dot is evaluated as its own document, so variables from
-/// earlier lines and the rest of the current line are in scope. `None` means
-/// the prefix does not evaluate, so nothing is known about the value.
+/// earlier lines and the rest of the current line are in scope. On an assignment
+/// line the dot's operand is the right-hand side, so only that is evaluated.
+/// `None` means the prefix does not evaluate, so nothing is known about the
+/// value.
 fn value_before_dot(
     text: &str,
     word_start: usize,
@@ -514,7 +533,14 @@ fn value_before_dot(
 ) -> Option<FacetValue> {
     let dot = word_start.checked_sub(1)?;
     let prefix: String = text.chars().take(dot).collect();
-    evaluate(&prefix, settings, registry).last()?.value.clone()
+    let mut lines: Vec<&str> = prefix.split('\n').collect();
+    if let Some(rhs) = lines.last().and_then(|line| assignment_rhs(line, registry)) {
+        *lines.last_mut().unwrap() = rhs;
+    }
+    evaluate(&lines.join("\n"), settings, registry)
+        .last()?
+        .value
+        .clone()
 }
 
 /// Whether `entry` is a unit of the process `value` holds.
@@ -568,12 +594,14 @@ pub(super) fn completion_items(
         .entries()
         .iter()
         .enumerate()
-        .filter(|(index, entry)| match context {
+        .filter(|(_, entry)| match context {
             CompletionContext::Machine => entry.machine().is_some(),
             CompletionContext::Recipe => entry.recipe.is_some(),
             CompletionContext::Config => entry.module.is_some() || entry.beacon.is_some(),
             CompletionContext::Property => match &value {
-                Some(value) => unit_in_value(value, EntryId::from_index(*index), entry),
+                // Every item and fluid is a selector after a process dot; an
+                // absent unit reads as zero. Other values have no units.
+                Some(value) => value.process.is_some() && entry.is_item_or_fluid(),
                 None => entry.is_item_or_fluid(),
             },
             CompletionContext::Normal => true,
@@ -596,13 +624,20 @@ pub(super) fn completion_items(
             let references = registry.reference_count(EntryId::from_index(index));
             let insert = entry.glyph.to_string();
             let rank = exact_rank(label, &insert, needle);
+            let present = value
+                .as_ref()
+                .is_some_and(|value| unit_in_value(value, EntryId::from_index(index), entry));
+            let mut score = if needle.is_empty() {
+                score as f64
+            } else {
+                completion_rank(score, references)
+            };
+            if present {
+                score += COMPLETION_PRESENT_ITEM_BONUS;
+            }
             Some((
                 rank,
-                if needle.is_empty() {
-                    score as f64
-                } else {
-                    completion_rank(score, references)
-                },
+                score,
                 CompletionItem {
                     insert,
                     glyphs: entry.glyph.to_string(),
@@ -685,16 +720,16 @@ pub(super) fn completion_items(
             let Some(signal) = SIGNALS.iter().find(|signal| signal.id == id) else {
                 continue;
             };
-            if !signal_matches(signal.id, needle) {
-                continue;
-            }
+            // A typed prefix keeps the signal's dominance; a loose fuzzy match
+            // (`p.ectric`) is discovered but ranks with the properties.
+            let bonus = COMPLETION_PROPERTY_BONUS;
             let label = format!(".{}", signal.id);
             if let Some(item) = word_completion(
                 &label,
                 signal.glyph.to_string(),
                 signal.glyph.to_string(),
                 needle,
-                COMPLETION_SIGNAL_BONUS,
+                bonus,
             ) {
                 items.push(item);
             }
@@ -709,7 +744,7 @@ pub(super) fn completion_items(
                 signal.glyph.to_string(),
                 signal.glyph.to_string(),
                 needle,
-                COMPLETION_SIGNAL_BONUS,
+                COMPLETION_PROPERTY_BONUS,
             ) {
                 items.push(item);
             }

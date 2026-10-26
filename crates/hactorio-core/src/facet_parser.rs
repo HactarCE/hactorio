@@ -130,9 +130,21 @@ pub enum StatementKind {
     Comment,
     Expression(Expr),
     Definition {
-        name: String,
+        target: AssignmentTarget,
         op: DefinitionOp,
         value: Expr,
+    },
+}
+
+/// What an assignment statement writes to.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AssignmentTarget {
+    /// `x = ...`: rebind the variable.
+    Variable(String),
+    /// `p.power = ...`: mutate a facet of the process the variable holds.
+    Property {
+        variable: String,
+        selector: Selector,
     },
 }
 
@@ -288,49 +300,61 @@ const BP_JUMP: u8 = 6;
 impl Parser<'_> {
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
         let first = self.tokens[0].span;
-        let definition_op = self
-            .tokens
-            .get(1)
-            .and_then(|token| definition_op(&token.kind));
-        if let Some(op) = definition_op {
-            let name = match &self.tokens[0].kind {
-                TokenKind::Ident(name) => name.clone(),
-                other => {
-                    return Err(ParseError::new(
-                        first,
-                        format!("expected a variable name, found {}", other.describe()),
-                    ));
-                }
+        // `parse_expr` stops at an assignment operator, so the left-hand side is
+        // the assignment target when one follows.
+        let lhs = self.parse_expr()?;
+        if let Some(op) = self.peek_kind().and_then(definition_op) {
+            let Some(target) = assignment_target(&lhs) else {
+                return Err(ParseError::new(
+                    lhs.span,
+                    "assignment target must be a variable or a process net property",
+                ));
             };
-            if !is_valid_identifier(&name) {
-                return Err(ParseError::new(
-                    first,
-                    format!("`{name}` is not a valid identifier"),
-                ));
-            }
-            if self.registry.entry(&name).is_some() {
-                return Err(ParseError::new(
-                    first,
-                    format!("`{name}` is a prototype id and cannot be a variable"),
-                ));
-            }
-            self.pos = 2;
+            self.validate_target(&target, lhs.span)?;
+            self.pos += 1;
             let value = self.parse_expr()?;
             let span = Span::new(first.start, self.last_end());
             self.expect_end()?;
             return Ok(Statement {
-                kind: StatementKind::Definition { name, op, value },
+                kind: StatementKind::Definition { target, op, value },
                 span,
             });
         }
 
-        let value = self.parse_expr()?;
         let span = Span::new(first.start, self.last_end());
         self.expect_end()?;
         Ok(Statement {
-            kind: StatementKind::Expression(value),
+            kind: StatementKind::Expression(lhs),
             span,
         })
+    }
+
+    fn validate_target(&self, target: &AssignmentTarget, span: Span) -> Result<(), ParseError> {
+        let (variable, selector) = match target {
+            AssignmentTarget::Variable(variable) => (variable, None),
+            AssignmentTarget::Property { variable, selector } => (variable, Some(selector)),
+        };
+        if !is_valid_identifier(variable) {
+            return Err(ParseError::new(
+                span,
+                format!("`{variable}` is not a valid identifier"),
+            ));
+        }
+        if self.registry.entry(variable).is_some() {
+            return Err(ParseError::new(
+                span,
+                format!("`{variable}` is a prototype id and cannot be a variable"),
+            ));
+        }
+        if let Some(selector) = selector
+            && !is_assignable_selector(selector)
+        {
+            return Err(ParseError::new(
+                span,
+                "only `.power`, `.:electric:`, `.crafts`, and item selectors are assignable",
+            ));
+        }
+        Ok(())
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
@@ -701,6 +725,21 @@ fn is_valid_identifier(name: &str) -> bool {
         && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
+/// The assignment target an assignment's left-hand side denotes, if any.
+fn assignment_target(expr: &Expr) -> Option<AssignmentTarget> {
+    match &expr.kind {
+        ExprKind::Variable(name) => Some(AssignmentTarget::Variable(name.clone())),
+        ExprKind::Property { value, selector } => match &value.kind {
+            ExprKind::Variable(name) => Some(AssignmentTarget::Property {
+                variable: name.clone(),
+                selector: selector.clone(),
+            }),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn definition_op(kind: &TokenKind) -> Option<DefinitionOp> {
     Some(match kind {
         TokenKind::Equals => DefinitionOp::Assign,
@@ -714,6 +753,16 @@ fn definition_op(kind: &TokenKind) -> Option<DefinitionOp> {
 
 fn property(name: &str) -> Option<Property> {
     Property::from_name(name)
+}
+
+/// Whether a selector can be the target of an assignment.
+fn is_assignable_selector(selector: &Selector) -> bool {
+    match selector {
+        Selector::Property(Property::Power | Property::Crafts) => true,
+        Selector::Signal(Signal::Electric) => true,
+        Selector::Token(_) => true,
+        Selector::Property(_) | Selector::Signal(_) => false,
+    }
 }
 
 fn keyword(word: &str) -> Option<TokenKind> {
@@ -1235,6 +1284,70 @@ mod tests {
     fn stack_size_rejects_unparenthesized_unary_minus() {
         assert!(parse_line(":stack-size: -b1", &registry()).is_err());
         assert!(parse_line(":stack-size: (-b1)", &registry()).is_ok());
+    }
+
+    #[test]
+    fn parses_property_assignment_targets() {
+        let StatementKind::Definition { target, op, .. } = parse("p.power = 1 W").kind else {
+            panic!("expected definition");
+        };
+        assert_eq!(op, DefinitionOp::Assign);
+        assert_eq!(
+            target,
+            AssignmentTarget::Property {
+                variable: "p".to_string(),
+                selector: Selector::Property(Property::Power),
+            }
+        );
+
+        let StatementKind::Definition { target, op, .. } =
+            parse("p.:iron-plate: += 1 :iron-plate:/s").kind
+        else {
+            panic!("expected definition");
+        };
+        assert_eq!(op, DefinitionOp::Compound(BinaryOp::Add));
+        let AssignmentTarget::Property {
+            variable,
+            selector: Selector::Token(_),
+        } = target
+        else {
+            panic!("expected item selector, got {target:?}");
+        };
+        assert_eq!(variable, "p");
+
+        assert!(matches!(
+            parse("p.crafts = 1/s").kind,
+            StatementKind::Definition {
+                target: AssignmentTarget::Property {
+                    selector: Selector::Property(Property::Crafts),
+                    ..
+                },
+                op: DefinitionOp::Assign,
+                ..
+            }
+        ));
+        assert!(matches!(
+            parse("p.:electric: = 100 kJ").kind,
+            StatementKind::Definition {
+                target: AssignmentTarget::Property {
+                    selector: Selector::Signal(Signal::Electric),
+                    ..
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn rejects_non_assignable_property_targets() {
+        for line in [
+            "p.rate = 1",
+            "(p + q).power = 1",
+            "1 = 2",
+            "p.power.power = 1",
+        ] {
+            assert!(parse_line(line, &registry()).is_err(), "{line}");
+        }
     }
 
     #[test]

@@ -7,7 +7,8 @@ use thiserror::Error;
 
 use crate::facet_machine;
 use crate::facet_parser::{
-    DefinitionOp, Expr, ExprKind, Property, Selector, Signal, Statement, StatementKind,
+    AssignmentTarget, DefinitionOp, Expr, ExprKind, Property, Selector, Signal, Statement,
+    StatementKind,
 };
 use crate::facet_token::token_value;
 use crate::facets::{
@@ -127,14 +128,28 @@ pub fn eval_statement(
     match &statement.kind {
         StatementKind::Blank | StatementKind::Comment => None,
         StatementKind::Expression(expr) => Some(eval_expr(expr, variables, registry, settings)),
-        StatementKind::Definition { name, op, value } => {
-            let result = match op {
-                DefinitionOp::Assign => eval_expr(value, variables, registry, settings),
-                DefinitionOp::Compound(binary) => variable_value(variables, name, statement.span)
-                    .and_then(|current| {
-                        let value = eval_expr(value, variables, registry, settings)?;
-                        apply_binary(*binary, &current, &value, statement.span)
-                    }),
+        StatementKind::Definition { target, op, value } => {
+            let (name, result) = match target {
+                AssignmentTarget::Variable(name) => {
+                    let result = match op {
+                        DefinitionOp::Assign => eval_expr(value, variables, registry, settings),
+                        DefinitionOp::Compound(binary) => {
+                            variable_value(variables, name, statement.span).and_then(|current| {
+                                let value = eval_expr(value, variables, registry, settings)?;
+                                apply_binary(*binary, &current, &value, statement.span)
+                            })
+                        }
+                    };
+                    (name, result)
+                }
+                AssignmentTarget::Property { variable, selector } => {
+                    let result =
+                        variable_value(variables, variable, statement.span).and_then(|current| {
+                            let rhs = eval_expr(value, variables, registry, settings)?;
+                            assign_property(current, selector, *op, &rhs, statement.span, registry)
+                        });
+                    (variable, result)
+                }
             };
             variables.insert(name.clone(), result.clone());
             Some(result)
@@ -148,6 +163,208 @@ fn variable_value(variables: &Variables, name: &str, span: Span) -> Result<Facet
         Some(Err(error)) => Err(error.clone()),
         None => Err(EvalError::new(span, format!("unknown variable `{name}`"))),
     }
+}
+
+/// The coefficient of a value that is exactly the monomial `units`.
+///
+/// Assignment targets take a bare amount, so any other facet means the value is
+/// not an amount at all.
+fn monomial_amount(value: &FacetValue, units: &[(BaseUnit, i64)]) -> Option<f64> {
+    if value.recipe.is_some()
+        || value.machine.is_some()
+        || value.process.is_some()
+        || value.config.is_some()
+        || value.belt.is_some()
+        || value.rate.is_some()
+        || value.capacity.is_some()
+    {
+        return None;
+    }
+    let item = value.item.as_ref()?;
+    if item.units().len() != units.len() {
+        return None;
+    }
+    units
+        .iter()
+        .all(|(unit, exponent)| item.units().get(unit) == Some(exponent))
+        .then(|| item.coef())
+}
+
+/// The scalar of a value usable as the factor of `*=` or `/=`.
+fn dimensionless_amount(value: &FacetValue) -> Option<f64> {
+    monomial_amount(value, &[])
+}
+
+/// How a unit is spelled in an assignment error message.
+fn unit_label(unit: BaseUnit, registry: &Registry) -> String {
+    match unit {
+        BaseUnit::Item(id) | BaseUnit::Fluid(id) => {
+            format!(":{}:", registry.entry_by_index(id).id)
+        }
+        BaseUnit::Craft => "craft".to_string(),
+        BaseUnit::Second => "s".to_string(),
+        BaseUnit::Joule => "J".to_string(),
+    }
+}
+
+/// The coefficient of a process net amount: per second, or per machine-second.
+fn net_amount(
+    value: &FacetValue,
+    unit: BaseUnit,
+    rate: bool,
+    span: Span,
+    registry: &Registry,
+) -> Result<f64, EvalError> {
+    let found = if rate {
+        monomial_amount(value, &[(BaseUnit::Second, -1)])
+            .or_else(|| monomial_amount(value, &[(unit, 1), (BaseUnit::Second, -1)]))
+    } else {
+        monomial_amount(value, &[]).or_else(|| monomial_amount(value, &[(unit, 1)]))
+    };
+    let label = unit_label(unit, registry);
+    found.ok_or_else(|| {
+        EvalError::new(
+            span,
+            if rate {
+                format!("expected `{label}/s` or `/s`")
+            } else {
+                format!("expected `{label}`")
+            },
+        )
+    })
+}
+
+/// The watts a value holds, if it is exactly a power.
+fn watt_amount(value: &FacetValue) -> Option<f64> {
+    monomial_amount(value, &[(BaseUnit::Joule, 1), (BaseUnit::Second, -1)])
+}
+
+/// The joules a value holds, if it is exactly an energy.
+fn joule_amount(value: &FacetValue) -> Option<f64> {
+    monomial_amount(value, &[(BaseUnit::Joule, 1)])
+}
+
+/// The right-hand side of `op`: the scalar for `*=` and `/=`, else `amount`.
+fn rhs_amount(
+    op: DefinitionOp,
+    scalar: Option<f64>,
+    amount: impl FnOnce() -> Result<f64, EvalError>,
+) -> Result<f64, EvalError> {
+    match (op, scalar) {
+        (DefinitionOp::Compound(BinaryOp::Mul | BinaryOp::Div), Some(scalar)) => Ok(scalar),
+        _ => amount(),
+    }
+}
+
+/// Combines a stored amount with the right-hand side, per operator.
+fn combine(op: DefinitionOp, old: f64, amount: f64) -> f64 {
+    match op {
+        DefinitionOp::Assign => amount,
+        DefinitionOp::Compound(BinaryOp::Add) => old + amount,
+        DefinitionOp::Compound(BinaryOp::Sub) => old - amount,
+        DefinitionOp::Compound(BinaryOp::Mul) => old * amount,
+        DefinitionOp::Compound(BinaryOp::Div) => old / amount,
+        DefinitionOp::Compound(BinaryOp::Pow) => unreachable!("`^=` is not a definition operator"),
+    }
+}
+
+/// Writes `rhs` into the process facet `selector` names, per `op`.
+///
+/// The write mirrors the read rules: two machine-seconds fields and the net
+/// coefficient keep their units, and zero keeps the field present.
+fn assign_property(
+    mut value: FacetValue,
+    selector: &Selector,
+    op: DefinitionOp,
+    rhs: &FacetValue,
+    span: Span,
+    registry: &Registry,
+) -> Result<FacetValue, EvalError> {
+    let process = value
+        .process
+        .as_mut()
+        .ok_or_else(|| EvalError::new(span, "process net assignment needs a process"))?;
+    let scalar = match op {
+        DefinitionOp::Compound(BinaryOp::Mul | BinaryOp::Div) => Some(
+            dimensionless_amount(rhs)
+                .ok_or_else(|| EvalError::new(span, "`*=` and `/=` need a dimensionless number"))?,
+        ),
+        _ => None,
+    };
+    match selector {
+        Selector::Property(Property::Power) => {
+            let old = process
+                .power_w
+                .ok_or_else(|| EvalError::new(span, "`.power` needs a process power"))?;
+            let amount = rhs_amount(op, scalar, || {
+                watt_amount(rhs)
+                    .ok_or_else(|| EvalError::new(span, "expected a power value such as `100 kW`"))
+            })?;
+            process.power_w = Some(combine(op, old, amount));
+        }
+        Selector::Signal(Signal::Electric) => {
+            if let Some(old) = process.power_w {
+                let amount = rhs_amount(op, scalar, || {
+                    watt_amount(rhs).ok_or_else(|| {
+                        EvalError::new(span, "expected a power value such as `100 kW`")
+                    })
+                })?;
+                process.power_w = Some(combine(op, old, amount));
+            } else if let Some(old) = process.energy_j {
+                let amount = rhs_amount(op, scalar, || {
+                    joule_amount(rhs).ok_or_else(|| {
+                        EvalError::new(span, "expected an energy value such as `100 kJ`")
+                    })
+                })?;
+                process.energy_j = Some(combine(op, old, amount));
+            } else {
+                return Err(EvalError::new(
+                    span,
+                    "`.electric` needs process power or energy",
+                ));
+            }
+        }
+        Selector::Property(Property::Crafts) => {
+            if process.extent.machines.len() > 1 {
+                return Err(EvalError::new(
+                    span,
+                    "`.crafts` cannot be assigned to a process with multiple machine configurations",
+                ));
+            }
+            let rate = !process.extent.is_machine_seconds();
+            let amount = rhs_amount(op, scalar, || {
+                net_amount(rhs, BaseUnit::Craft, rate, span, registry)
+            })?;
+            write_net(process, BaseUnit::Craft, op, amount);
+        }
+        Selector::Token(id) => {
+            let unit = if registry.entry_by_index(*id).fluid {
+                BaseUnit::Fluid(*id)
+            } else {
+                BaseUnit::Item(*id)
+            };
+            let rate = !process.extent.is_machine_seconds();
+            let amount = rhs_amount(op, scalar, || net_amount(rhs, unit, rate, span, registry))?;
+            write_net(process, unit, op, amount);
+        }
+        Selector::Property(_) | Selector::Signal(_) => {
+            unreachable!("parser rejects non-assignable selectors")
+        }
+    }
+    Ok(value)
+}
+
+/// Writes `amount` into the process net row `unit`, per `op`.
+///
+/// `*=` and `/=` leave an absent row absent, so an empty net never gains a row
+/// from a factor alone.
+fn write_net(process: &mut ProcessFacet, unit: BaseUnit, op: DefinitionOp, amount: f64) {
+    let old = process.net.get(&unit).copied().unwrap_or(0.0);
+    if matches!(op, DefinitionOp::Compound(BinaryOp::Mul | BinaryOp::Div)) && is_zero(old) {
+        return;
+    }
+    process.net.insert(unit, combine(op, old, amount));
+    process.canonicalize();
 }
 
 fn token(

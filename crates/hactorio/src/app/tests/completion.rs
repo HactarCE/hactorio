@@ -1310,22 +1310,57 @@ fn module_abbreviations_pick_their_module() {
 }
 
 #[test]
-fn completion_after_dot_offers_only_units_in_the_value() {
+fn completion_after_dot_offers_every_unit() {
     let registry = fixture_registry();
     let text = ":assembling-machine-3: making :electronic-circuit:.";
     let labels = completion_labels(&registry, text);
+    // Absent units read as zero, so they stay available.
+    for label in ["iron-plate", "copper-cable", "iron-gear-wheel"] {
+        assert!(
+            labels.iter().any(|item| item == label),
+            "{label}: {labels:?}"
+        );
+    }
+    assert!(!labels.iter().any(|label| label == "electronic-circuit"));
+    // Signals that only work as prefixes are not selectors.
     assert!(
-        labels.iter().any(|label| label == "iron-plate"),
+        !labels.iter().any(|label| label == "stack-size"),
         "{labels:?}"
     );
     assert!(
-        !labels.iter().any(|label| label == "electronic-circuit"),
+        !labels.iter().any(|label| label == "stacked-belt"),
         "{labels:?}"
     );
-    assert!(
-        !labels.iter().any(|label| label == "copper-cable"),
-        "{labels:?}"
+}
+
+#[test]
+fn completion_after_dot_ranks_present_units_above_absent_ones() {
+    let registry = fixture_registry();
+    let labels = completion_labels(
+        &registry,
+        ":assembling-machine-3: making :electronic-circuit:.ir",
     );
+    let present = labels.iter().position(|label| label == "iron-plate");
+    let absent = labels.iter().position(|label| label == "iron-gear-wheel");
+    let (Some(present), Some(absent)) = (present, absent) else {
+        panic!("expected both iron rows, got {labels:?}");
+    };
+    assert!(present < absent, "{labels:?}");
+}
+
+#[test]
+fn completion_after_dot_ranks_properties_above_units() {
+    let registry = fixture_registry();
+    let labels = completion_labels(
+        &registry,
+        ":assembling-machine-3: making :electronic-circuit:.",
+    );
+    let crafts = labels.iter().position(|label| label == ".crafts");
+    let iron = labels.iter().position(|label| label == "iron-plate");
+    let (Some(crafts), Some(iron)) = (crafts, iron) else {
+        panic!("expected both rows, got {labels:?}");
+    };
+    assert!(crafts < iron, "{labels:?}");
 }
 
 #[test]
@@ -1353,4 +1388,51 @@ fn completion_after_dot_hides_properties_the_value_lacks() {
     assert!(!labels.iter().any(|label| label == ".rate"), "{labels:?}");
     assert!(!labels.iter().any(|label| label == ".time"), "{labels:?}");
     assert!(!labels.iter().any(|label| label == ".crafts"), "{labels:?}");
+}
+
+#[test]
+fn completion_after_dot_fuzzy_matches_signal_selectors() {
+    let registry = fixture_registry();
+    let process = ":assembling-machine-3: making :electronic-circuit:.";
+    assert!(
+        completion_labels(&registry, &format!("{process}ectric"))
+            .iter()
+            .any(|label| label == ".electric")
+    );
+    // A typed prefix keeps signal rows ahead of the property rows.
+    let labels = completion_labels(&registry, &format!("{process}cr"));
+    assert_eq!(
+        labels.first().map(String::as_str),
+        Some(".crafts"),
+        "{labels:?}"
+    );
+    assert!(
+        labels.iter().any(|label| label == ".electric"),
+        "{labels:?}"
+    );
+}
+
+#[test]
+fn completion_after_dot_reads_the_operand_of_a_reassignment() {
+    let registry = fixture_registry();
+    let process = "p = :assembling-machine-3: making :electronic-circuit:";
+    // The dot follows the `p` operand, so its value is the process `p` holds.
+    // Evaluating the whole statement would add the process to itself instead.
+    let labels = completion_labels(&registry, &format!("{process}\np += p."));
+    assert!(labels.iter().any(|label| label == ".crafts"), "{labels:?}");
+    assert!(!labels.iter().any(|label| label == ".rate"), "{labels:?}");
+    let first_unit = labels.iter().find(|label| !label.starts_with('.'));
+    assert_eq!(
+        first_unit.map(String::as_str),
+        Some("iron-plate"),
+        "{labels:?}"
+    );
+
+    let labels = completion_labels(&registry, &format!("{process}\np += p.:ir"));
+    let present = labels.iter().position(|label| label == "iron-plate");
+    let absent = labels.iter().position(|label| label == "iron-gear-wheel");
+    let (Some(present), Some(absent)) = (present, absent) else {
+        panic!("expected both iron rows, got {labels:?}");
+    };
+    assert!(present < absent, "{labels:?}");
 }

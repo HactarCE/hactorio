@@ -13,7 +13,7 @@ const DUMP: &str = r#"{
     "speed-module-3": {"type": "module", "name": "speed-module-3", "category": "speed", "tier": 3, "stack_size": 50, "effect": {"speed": 0.5}},
     "beacon": {"type": "item", "name": "beacon", "stack_size": 20}
   },
-  "fluid": {},
+  "fluid": {"water": {"type": "fluid", "name": "water"}},
   "module": {
     "speed-module-3": {"type": "module", "name": "speed-module-3", "category": "speed", "tier": 3, "stack_size": 50, "effect": {"speed": 0.5}}
   },
@@ -195,5 +195,262 @@ fn compound_assignments_respect_facets_and_diagnostics() {
         error.message.contains("incompatible values"),
         "{}",
         error.message
+    );
+}
+
+fn item_unit(registry: &Registry, name: &str) -> BaseUnit {
+    BaseUnit::Item(registry.entry_id(name).unwrap())
+}
+
+fn process_of(
+    output: &hactorio_core::facet_eval::StatementOutput,
+) -> &hactorio_core::facets::ProcessFacet {
+    output
+        .value
+        .as_ref()
+        .and_then(|value| value.process.as_ref())
+        .expect("expected a process")
+}
+
+fn error_message(output: &LineOutput) -> &str {
+    match output {
+        LineOutput::Error(error) => &error.message,
+        other => panic!("expected error, got {other:?}"),
+    }
+}
+
+#[test]
+fn process_net_assignments_mutate_the_net() {
+    let registry = registry();
+    let settings = Settings::default();
+    let outputs = evaluate(
+        "p = :iron-gear-wheel:/s in :assembling-machine-3:\n\
+         p.:iron-plate: = 5 :iron-plate:/s\n\
+         p.:iron-gear-wheel: += 2 :iron-gear-wheel:/s\n\
+         p.:copper-plate: -= 3 :copper-plate:/s\n\
+         p.:iron-plate: *= 4\n\
+         p.:copper-plate: /= 3\n\
+         p.crafts = 7/s\n\
+         p\n\
+         p.:iron-plate:",
+        &settings,
+        &registry,
+    );
+    assert_eq!(outputs.len(), 9);
+    for output in &outputs {
+        assert!(
+            matches!(output.output, LineOutput::Value(_)),
+            "{:?}",
+            output.output
+        );
+    }
+    let net = &process_of(&outputs[7]).net;
+    assert_eq!(net[&item_unit(&registry, "iron-plate")], 20.0);
+    assert_eq!(net[&item_unit(&registry, "iron-gear-wheel")], 3.0);
+    assert_eq!(net[&item_unit(&registry, "copper-plate")], -1.0);
+    assert_eq!(net[&BaseUnit::Craft], 7.0);
+
+    let item = outputs[8].value.as_ref().unwrap().item.as_ref().unwrap();
+    assert_eq!(item.coef(), 20.0);
+    assert_eq!(item.exponent(BaseUnit::Second), -1);
+}
+
+#[test]
+fn process_net_assignments_canonicalize_zero() {
+    let registry = registry();
+    let settings = Settings::default();
+    let outputs = evaluate(
+        "p = :iron-gear-wheel:/s in :assembling-machine-3:\n\
+         p.:iron-plate: = 0/s\n\
+         p.crafts = 0/s",
+        &settings,
+        &registry,
+    );
+    for output in &outputs {
+        assert!(
+            matches!(output.output, LineOutput::Value(_)),
+            "{:?}",
+            output.output
+        );
+    }
+    let net = &process_of(&outputs[1]).net;
+    assert!(!net.contains_key(&item_unit(&registry, "iron-plate")));
+    let net = &process_of(&outputs[2]).net;
+    assert!(!net.contains_key(&BaseUnit::Craft));
+}
+
+#[test]
+fn process_net_mul_and_div_skip_absent_units() {
+    let registry = registry();
+    let settings = Settings::default();
+    let outputs = evaluate(
+        "p = :iron-gear-wheel:/s in :assembling-machine-3:\n\
+         p.:copper-plate: *= 2\n\
+         p.:copper-plate: /= 0\n\
+         p",
+        &settings,
+        &registry,
+    );
+    for output in &outputs {
+        assert!(
+            matches!(output.output, LineOutput::Value(_)),
+            "{:?}",
+            output.output
+        );
+    }
+    let net = &process_of(&outputs[3]).net;
+    assert!(!net.contains_key(&item_unit(&registry, "copper-plate")));
+    assert!(net.values().all(|amount| amount.is_finite()));
+}
+
+#[test]
+fn process_net_assignments_reject_wrong_units() {
+    let registry = registry();
+    let settings = Settings::default();
+    let outputs = evaluate(
+        "p = :iron-gear-wheel:/s in :assembling-machine-3:\n\
+         q = p\n\
+         r = p\n\
+         v = p\n\
+         t = :iron-gear-wheel: in :assembling-machine-3:\n\
+         w = t\n\
+         p.:iron-plate: = 5\n\
+         q.:iron-plate: = 5 :copper-plate:/s\n\
+         r.power = 5\n\
+         v.:iron-plate: += 1 s\n\
+         t.crafts = 5/s\n\
+         w.:electric: = 5/s",
+        &settings,
+        &registry,
+    );
+    assert_eq!(
+        error_message(&outputs[6].output),
+        "expected `:iron-plate:/s` or `/s`"
+    );
+    assert_eq!(
+        error_message(&outputs[7].output),
+        "expected `:iron-plate:/s` or `/s`"
+    );
+    assert_eq!(
+        error_message(&outputs[8].output),
+        "expected a power value such as `100 kW`"
+    );
+    assert_eq!(
+        error_message(&outputs[9].output),
+        "expected `:iron-plate:/s` or `/s`"
+    );
+    assert_eq!(error_message(&outputs[10].output), "expected `craft`");
+    assert_eq!(
+        error_message(&outputs[11].output),
+        "expected an energy value such as `100 kJ`"
+    );
+}
+
+#[test]
+fn process_power_and_energy_assignments() {
+    let registry = registry();
+    let settings = Settings::default();
+    let outputs = evaluate(
+        "p = :assembling-machine-3: making :iron-gear-wheel:\n\
+         p.power = 100 kW\n\
+         p\n\
+         p.power\n\
+         p.:electric: += 1 kW\n\
+         p.power *= 2\n\
+         q = :iron-gear-wheel: in :assembling-machine-3:\n\
+         q.:electric: = 100 kJ\n\
+         q.:electric:\n\
+         q\n\
+         p.power = 0 W\n\
+         p",
+        &settings,
+        &registry,
+    );
+    for output in &outputs {
+        assert!(
+            matches!(output.output, LineOutput::Value(_)),
+            "{:?}",
+            output.output
+        );
+    }
+    assert_eq!(process_of(&outputs[2]).power_w, Some(100_000.0));
+    assert_eq!(
+        outputs[3]
+            .value
+            .as_ref()
+            .unwrap()
+            .item
+            .as_ref()
+            .unwrap()
+            .coef(),
+        100_000.0
+    );
+    assert_eq!(process_of(&outputs[4]).power_w, Some(101_000.0));
+    assert_eq!(process_of(&outputs[5]).power_w, Some(202_000.0));
+    assert_eq!(process_of(&outputs[9]).energy_j, Some(100_000.0));
+    assert_eq!(
+        outputs[8]
+            .value
+            .as_ref()
+            .unwrap()
+            .item
+            .as_ref()
+            .unwrap()
+            .coef(),
+        100_000.0
+    );
+    // A zeroed field stays present, unlike a zeroed net row.
+    assert_eq!(process_of(&outputs[11]).power_w, Some(0.0));
+}
+
+#[test]
+fn process_net_assigns_fluids() {
+    let registry = registry();
+    let settings = Settings::default();
+    let outputs = evaluate(
+        "p = :iron-gear-wheel:/s in :assembling-machine-3:\n\
+         p.:water: = 30 :water:/s\n\
+         p.:water:",
+        &settings,
+        &registry,
+    );
+    for output in &outputs {
+        assert!(
+            matches!(output.output, LineOutput::Value(_)),
+            "{:?}",
+            output.output
+        );
+    }
+    assert_eq!(
+        process_of(&outputs[1]).net[&BaseUnit::Fluid(registry.entry_id("water").unwrap())],
+        30.0
+    );
+    let item = outputs[2].value.as_ref().unwrap().item.as_ref().unwrap();
+    assert_eq!(item.coef(), 30.0);
+    assert_eq!(item.exponent(BaseUnit::Second), -1);
+}
+
+#[test]
+fn process_crafts_assignment_rejects_multiple_machine_specs() {
+    let registry = registry();
+    let settings = Settings::default();
+    let outputs = evaluate(
+        "p = :iron-gear-wheel:/s in :assembling-machine-3:\n\
+         q = :iron-gear-wheel:/s in (:assembling-machine-3: with :speed-module-3:)\n\
+         p = p + q\n\
+         p.crafts = 1/s",
+        &settings,
+        &registry,
+    );
+    for output in &outputs[..3] {
+        assert!(
+            matches!(output.output, LineOutput::Value(_)),
+            "{:?}",
+            output.output
+        );
+    }
+    assert_eq!(
+        error_message(&outputs[3].output),
+        "`.crafts` cannot be assigned to a process with multiple machine configurations"
     );
 }

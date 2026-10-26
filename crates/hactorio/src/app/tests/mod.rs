@@ -42,6 +42,7 @@ const FIXTURE: &str = r#"{
   "item": {
     "iron-plate": {"type": "item", "name": "iron-plate", "stack_size": 100, "icon": "a.png"},
     "copper-cable": {"type": "item", "name": "copper-cable", "stack_size": 200, "icon": "b.png"},
+    "iron-gear-wheel": {"type": "item", "name": "iron-gear-wheel", "stack_size": 100},
     "assembling-machine-3": {"type": "item", "name": "assembling-machine-3", "stack_size": 50, "icon": "c.png"}
   },
   "fluid": {"water": {"type": "fluid", "name": "water", "icon": "d.png"}},
