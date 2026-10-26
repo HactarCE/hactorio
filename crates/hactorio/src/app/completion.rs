@@ -246,6 +246,7 @@ const ALIASES: &[(&str, &[&str])] = &[
         "casting-low-density-structure",
         &["low-density-structure-casting"],
     ),
+    ("storage-tank", &["fluid-tank"]),
 ];
 
 fn aliases_for(id: &str) -> &'static [&'static str] {
