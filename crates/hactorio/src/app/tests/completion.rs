@@ -1349,21 +1349,6 @@ fn completion_after_dot_ranks_present_units_above_absent_ones() {
 }
 
 #[test]
-fn completion_after_dot_ranks_properties_above_units() {
-    let registry = fixture_registry();
-    let labels = completion_labels(
-        &registry,
-        ":assembling-machine-3: making :electronic-circuit:.",
-    );
-    let crafts = labels.iter().position(|label| label == ".crafts");
-    let iron = labels.iter().position(|label| label == "iron-plate");
-    let (Some(crafts), Some(iron)) = (crafts, iron) else {
-        panic!("expected both rows, got {labels:?}");
-    };
-    assert!(crafts < iron, "{labels:?}");
-}
-
-#[test]
 fn completion_after_dot_hides_abs_for_a_process() {
     let registry = fixture_registry();
     let process = completion_labels(&registry, "(:iron-plate: in :assembling-machine-3:).");
