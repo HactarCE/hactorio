@@ -21,7 +21,6 @@ A crucial concept here is that one value may have multiple **facets** capturing 
 - **Capacity** (either **Item Capacity** or **Fluid Capacity**)
 - **Machine**
 - **Config**
-- **Surface**
 - **Process** (either **Rate Process** or **Count Process**)
 
 ### Quantity
@@ -64,8 +63,6 @@ A Config consists of a list of modules and a list of beacon configurations (`Bea
 
 Only the standard vanilla beacons are allowed.
 
-###
-
 ## Primitives
 
 ### Number literals
@@ -85,11 +82,7 @@ Every non-hidden item/fluid/recipe has an associated icon. When appearing in exp
 - Fluid (if applicable)
 - Recipe (if applicable)
 - Machine (if applicable)
-- Config (for module/beacon)
-
-### Planet icon
-
-The planet icons (`:nauvis:`, `:vulcanus:`, `:gleba:`, `:fulgora:`, `:aquilo:`; or a compound consisting of a planet icon and `:space:` (rendered using the space platform icon) in any order) represent planets.
+- Config (if module/beacon)
 
 ## Operators
 
@@ -99,11 +92,22 @@ The planet icons (`:nauvis:`, `:vulcanus:`, `:gleba:`, `:fulgora:`, `:aquilo:`; 
 
 Negation works on any facet that is capable of being negated. For Quantity facets, all values in the numerator (`amount`) are negated. For Process facets, only the craft rate/count is negated.
 
+#### `:stacked-belt:`
+
+#### `:stack-size:`
+
+#### `:recycling:`
+
+This prefix takes an Item and returns the Recipe for recycling that item. This cna be found by finding the single recipe in the recycler that takes that item as input. If such a recipe does not exist, then it errors.
+
 ### Juxtaposition
 
 Juxtaposition is the tightest binary operator and hardly feels like an operator: it's more like forming a "word" in the language.
 
+Juxtaposition has the following valid forms:
 
+- `SpaceLocation(None)` with `Planet(planet_id)` (commutative) evaluates to a `SpaceLocation(Some(planet_id))`
+- Location with SolarPanel (commutative) evaluates to a Quantity of power production during the day
 
 ### `.property`
 
@@ -117,8 +121,8 @@ Unary suffix operator that access a property of a value. The following propertie
 - `.crafts` — Returns the number of crafts in a Count Process
 - `.productivity`/`.prod` — Returns the productivity multiplier for a Process
 - `.pollution` — Returns the pollution for a Process (units: 1/s for a Rate Process, or dimensionless for a Count Process)
-- `.abs` — Returns the absolute value of almost any facet
-    - 
+- `.abs` — Returns the absolute value of almost any facet (does not work on Process facet and facets that cannot be negated)
+- `.:stack-size:` — Returns the stack size of an Item
 
 Properties produce an error if they are invalid (either "unknown property name" or "expected <some_facet>, got <facet_list>").
 
@@ -160,3 +164,7 @@ All comparisons to zero use approximate comparison.
 ### NaN/inf
 
 NaN and infinities are allowed in operations, and are exposed to the user.
+
+## Things I'm not sure about
+
+What should be considered facets? We could have things like "beacon" and "belt" but these _could_ be inferred from the "item" facet. Should (unscaled) "item", "fluid", and "recipe" be separate, or just one combined facet representing an item/fluid/recipe that has not been scaled or used in arithmetic?
