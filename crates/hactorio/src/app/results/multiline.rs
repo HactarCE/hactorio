@@ -5,11 +5,7 @@ use std::sync::Arc;
 
 use egui::{Color32, RichText, Ui};
 use hactorio_core::Settings;
-use hactorio_core::facet_eval::{LineOutput, StatementOutput, line_hash};
-use hactorio_core::facet_format::{
-    format_facet, format_machine_stats, format_process_craft, format_process_energy,
-    format_process_inputs, format_process_machine_lines, format_process_outputs,
-};
+use hactorio_core::new_eval::{Output, format_facets, line_hash};
 use hactorio_data::Registry;
 
 use super::token_tip::value_line;
@@ -55,10 +51,10 @@ impl ResultsContext<'_> {
         let Some(text) = tab.text.split('\n').nth(line) else {
             return;
         };
-        let Some(statement) = self.outputs.get(line) else {
+        let Some(output) = self.outputs.outputs.get(line) else {
             return;
         };
-        if statement.source_hash != line_hash(text) {
+        if self.outputs.hashes.get(line).copied() != Some(line_hash(text)) {
             return;
         }
 
@@ -77,7 +73,7 @@ impl ResultsContext<'_> {
                 .invisible()
                 .sizing_pass(),
         );
-        multiline_result_ui(&mut measure, statement, self.settings, registry);
+        multiline_result_ui(&mut measure, output, self.settings, registry);
         let content_width = measure.min_rect().width().max(min_width);
         let total_width = content_width + 2.0 * multiline_result_inset(&style).x;
         let pos = multiline_result_pos(&style, anchor, screen, total_width);
@@ -90,7 +86,7 @@ impl ResultsContext<'_> {
                 egui::Frame::popup(ui.style())
                     .show(ui, |ui| {
                         ui.set_width(content_width);
-                        multiline_result_ui(ui, statement, self.settings, registry)
+                        multiline_result_ui(ui, output, self.settings, registry)
                     })
                     .inner
             })
@@ -103,58 +99,30 @@ impl ResultsContext<'_> {
 
 fn multiline_result_ui(
     ui: &mut Ui,
-    statement: &StatementOutput,
+    output: &Output,
     settings: &Settings,
     registry: &Registry,
 ) -> Option<Token> {
-    let mut token = None;
-    match &statement.output {
-        LineOutput::Nothing => {}
-        LineOutput::Error(error) => {
+    match output {
+        Output::Blank | Output::None => None,
+        Output::Error { message, .. } => {
             let color = Color32::from_rgb(220, 90, 90);
             ui.label(RichText::new("error").monospace().color(color));
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-            ui.label(RichText::new(&error.message).color(color));
+            ui.label(RichText::new(message).color(color));
+            None
         }
-        LineOutput::Value(value) => {
-            if value.process.is_none() {
-                let formatted = format_facet(value, settings, registry);
-                token = token.or(value_line(ui, &formatted, registry));
-            }
-            if let Some(machine) = &value.machine {
-                let stats = format_machine_stats(machine, settings, registry)
-                    .unwrap_or_else(|error| vec![("error".to_string(), error)]);
-                for (label, value) in stats {
-                    let line = format!("{label}: {value}");
+        Output::Value(value) => {
+            let mut token = None;
+            for line in format_facets(value, settings, registry) {
+                // The process panel's section headers are titles, not values.
+                if line == "in" || line == "out" {
+                    ui.label(RichText::new(line).weak());
+                } else {
                     token = token.or(value_line(ui, &line, registry));
                 }
             }
-
-            if let Some(process) = &value.process {
-                let mut header = format_process_machine_lines(process, settings, registry);
-                header.extend(format_process_craft(process, settings));
-                for line in header {
-                    token = token.or(value_line(ui, &line, registry));
-                }
-                let mut inputs = format_process_inputs(process, settings, registry);
-                inputs.push(format_process_energy(process, settings));
-                for (title, lines) in [
-                    ("inputs", inputs),
-                    (
-                        "outputs",
-                        format_process_outputs(process, settings, registry),
-                    ),
-                ] {
-                    if lines.is_empty() {
-                        continue;
-                    }
-                    ui.label(RichText::new(title).weak());
-                    for line in lines {
-                        token = token.or(value_line(ui, &line, registry));
-                    }
-                }
-            }
+            token
         }
     }
-    token
 }

@@ -96,6 +96,10 @@ pub fn postprocess(raw_dump_json: &str, locale: &Locale) -> Result<Registry> {
             let entity = entities.get(id.as_str());
             draft.item = Some(Item {
                 stack_size: uint(proto, "stack_size", 1) as u32,
+                subgroup: proto
+                    .get("subgroup")
+                    .and_then(Value::as_str)
+                    .map(Into::into),
                 machine,
                 belt: entity.and_then(|entity| entity.belt),
                 inserter: entity.and_then(|entity| entity.inserter),
@@ -123,6 +127,10 @@ pub fn postprocess(raw_dump_json: &str, locale: &Locale) -> Result<Registry> {
         if draft.item.is_none() {
             draft.item = Some(Item {
                 stack_size: uint(proto, "stack_size", 1) as u32,
+                subgroup: proto
+                    .get("subgroup")
+                    .and_then(Value::as_str)
+                    .map(Into::into),
                 machine: None,
                 belt: None,
                 inserter: None,
@@ -185,11 +193,13 @@ pub fn postprocess(raw_dump_json: &str, locale: &Locale) -> Result<Registry> {
 
     let researches = collect_productivity_researches(root, locale);
     let inserter_research = collect_inserter_research(root);
+    let belt_stacking = collect_belt_stacking_research(root);
     Registry::from_parts(
         entries,
         recipes.into_values().collect(),
         researches,
         inserter_research,
+        belt_stacking,
     )
 }
 
@@ -282,6 +292,28 @@ fn collect_inserter_research(root: &Map<String, Value>) -> InserterResearch {
     InserterResearch { levels }
 }
 
+/// Technologies that increase belt stacking, with the bonus per level.
+fn collect_belt_stacking_research(root: &Map<String, Value>) -> Vec<(Box<str>, u32)> {
+    let mut out: Vec<(Box<str>, u32)> = Vec::new();
+    for (id, proto) in table(root, "technology") {
+        let bonus: u32 = proto
+            .get("effects")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|effect| {
+                effect.get("type").and_then(Value::as_str) == Some("belt-stack-size-bonus")
+            })
+            .filter_map(|effect| effect.get("modifier").and_then(Value::as_u64))
+            .sum::<u64>() as u32;
+        if bonus > 0 {
+            out.push((id.into(), bonus));
+        }
+    }
+    out.sort();
+    out
+}
+
 #[derive(Default)]
 struct Draft {
     item: Option<Item>,
@@ -342,7 +374,7 @@ fn collect_entities(root: &Map<String, Value>) -> HashMap<Box<str>, EntityMeta> 
                         stack_size_bonus: uint(proto, "stack_size_bonus", 0) as u32,
                     });
                 }
-                "pump" => {
+                "pump" | "offshore-pump" => {
                     meta.pump = Some(crate::Pump {
                         pumping_speed: proto
                             .get("pumping_speed")

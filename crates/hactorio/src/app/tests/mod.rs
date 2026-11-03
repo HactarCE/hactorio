@@ -49,7 +49,8 @@ const FIXTURE: &str = r#"{
   "module": {"speed-module-3": {"type": "module", "name": "speed-module-3", "category": "speed", "tier": 3, "stack_size": 50, "effect": {"speed": 0.5}}},
   "recipe": {
     "iron-plate": {"type": "recipe", "name": "iron-plate", "categories": ["smelting"], "results": [{"type": "item", "name": "iron-plate", "amount": 1}]},
-    "electronic-circuit": {"type": "recipe", "name": "electronic-circuit", "categories": ["crafting"], "results": [{"type": "item", "name": "iron-plate", "amount": 1}]}
+    "electronic-circuit": {"type": "recipe", "name": "electronic-circuit", "categories": ["crafting"], "results": [{"type": "item", "name": "iron-plate", "amount": 1}]},
+    "iron-plate-recycling": {"type": "recipe", "name": "iron-plate-recycling", "categories": ["crafting"], "hidden": true, "ingredients": [{"type": "item", "name": "iron-plate", "amount": 1}], "results": [{"type": "item", "name": "iron-plate", "amount": 1}]}
   },
   "assembling-machine": {
     "assembling-machine-3": {"type": "assembling-machine", "name": "assembling-machine-3", "crafting_categories": ["crafting"], "crafting_speed": 1.25, "module_slots": 4, "energy_usage": "375kW"}

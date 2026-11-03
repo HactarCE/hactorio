@@ -9,7 +9,7 @@ use crate::registry::{Entry, InserterResearch, ProductivityResearch, Recipe, Reg
 use crate::{Error, Result};
 
 /// Bumping this invalidates every existing cache.
-pub(crate) const CACHE_VERSION: u32 = 8;
+pub(crate) const CACHE_VERSION: u32 = 9;
 
 #[derive(Serialize)]
 struct CacheRef<'a> {
@@ -18,6 +18,7 @@ struct CacheRef<'a> {
     recipes: &'a [Recipe],
     researches: &'a [ProductivityResearch],
     inserter_research: &'a InserterResearch,
+    belt_stacking: &'a [(Box<str>, u32)],
 }
 
 #[derive(Deserialize)]
@@ -29,6 +30,8 @@ struct CacheFile {
     researches: Vec<ProductivityResearch>,
     #[serde(default)]
     inserter_research: InserterResearch,
+    #[serde(default)]
+    belt_stacking: Vec<(Box<str>, u32)>,
 }
 
 impl Registry {
@@ -40,6 +43,7 @@ impl Registry {
             recipes: self.recipes(),
             researches: self.productivity_researches(),
             inserter_research: self.inserter_research(),
+            belt_stacking: self.belt_stacking_research(),
         };
         Ok(serde_json::to_vec(&cache)?)
     }
@@ -54,6 +58,7 @@ impl Registry {
             cache.recipes,
             cache.researches,
             cache.inserter_research,
+            cache.belt_stacking,
         )
     }
 

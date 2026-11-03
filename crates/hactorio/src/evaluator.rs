@@ -1,18 +1,22 @@
 //! The evaluation worker.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
 use hactorio_core::Settings;
-use hactorio_core::facet_eval::{StatementOutput, evaluate};
+use hactorio_core::new_eval::{Evaluation, evaluate};
 use hactorio_data::Registry;
 
-/// Owns the line cache off the UI thread. Latest request wins.
+/// Owns evaluation off the UI thread. Latest request wins, and a request that
+/// is superseded is cancelled rather than run to completion (§2.7).
 pub struct Evaluator {
     tx: Sender<Request>,
     rx: Receiver<Response>,
     generation: u64,
+    /// Set when the request being evaluated is superseded.
+    cancel: Arc<AtomicBool>,
 }
 
 struct Request {
@@ -20,11 +24,12 @@ struct Request {
     text: String,
     settings: Settings,
     registry: Arc<Registry>,
+    cancel: Arc<AtomicBool>,
 }
 
 pub struct Response {
     pub generation: u64,
-    pub outputs: Vec<StatementOutput>,
+    pub evaluation: Evaluation,
 }
 
 impl Evaluator {
@@ -34,11 +39,20 @@ impl Evaluator {
 
         thread::spawn(move || {
             while let Ok(request) = requests.recv() {
-                let outputs = evaluate(&request.text, &request.settings, &request.registry);
+                let cancel = request.cancel.clone();
+                let evaluation = evaluate(
+                    &request.text,
+                    &request.registry,
+                    &request.settings,
+                    &|| cancel.load(Ordering::Relaxed),
+                );
+                if evaluation.cancelled {
+                    continue;
+                }
                 if responses
                     .send(Response {
                         generation: request.generation,
-                        outputs,
+                        evaluation,
                     })
                     .is_err()
                 {
@@ -51,16 +65,21 @@ impl Evaluator {
             tx,
             rx,
             generation: 0,
+            cancel: Arc::new(AtomicBool::new(false)),
         }
     }
 
     pub fn request(&mut self, text: String, settings: Settings, registry: Arc<Registry>) -> u64 {
         self.generation += 1;
+        // Abandon whatever is running; its result would be stale anyway.
+        let previous = std::mem::replace(&mut self.cancel, Arc::new(AtomicBool::new(false)));
+        previous.store(true, Ordering::Relaxed);
         let _ = self.tx.send(Request {
             generation: self.generation,
             text,
             settings,
             registry,
+            cancel: self.cancel.clone(),
         });
         self.generation
     }

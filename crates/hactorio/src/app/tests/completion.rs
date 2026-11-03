@@ -440,12 +440,15 @@ fn dot_context_offers_properties_and_items() {
     assert_eq!(start, cursor);
     assert!(word.is_empty());
     let items = completion_items(&registry, &Settings::default(), text, start, &word);
-    let labels: Vec<&str> = items.iter().map(|item| item.insert.as_str()).collect();
-    assert!(labels.contains(&"rate"), "{labels:?}");
-    assert!(labels.contains(&"capacity"), "{labels:?}");
-    let plate = registry.entry("iron-plate").unwrap().glyph.to_string();
-    assert!(labels.contains(&plate.as_str()), "{labels:?}");
-    assert!(!labels.contains(&"in"), "{labels:?}");
+    let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+    assert!(labels.contains(&".rate"), "{labels:?}");
+    assert!(labels.contains(&".capacity"), "{labels:?}");
+    // `in`, `out`, and `net` are process selectors, so they are properties
+    // after a dot even though `in` is also an operator.
+    assert!(labels.contains(&".in"), "{labels:?}");
+    assert!(labels.contains(&".out"), "{labels:?}");
+    assert!(labels.contains(&".net"), "{labels:?}");
+    assert!(labels.contains(&"iron-plate"), "{labels:?}");
 
     let text = "x.ra";
     let cursor = text.chars().count();
@@ -898,7 +901,9 @@ fn completion_popup_grows_with_more_matches() {
     let (mut harness, dir) = completion_harness("growth", document);
     harness.run();
 
-    type_into_editor(&mut harness, " i");
+    // `w` matches ten rows, which fits under the popup's cap; `e` matches many
+    // more, so the popup grows until it caps.
+    type_into_editor(&mut harness, " w");
     let id = egui::Id::unique(("completion", 0usize));
     let short_items = harness
         .state()
@@ -1188,6 +1193,137 @@ fn belt_color_tokens_pick_their_belt() {
 }
 
 #[test]
+fn a_quantity_offers_items_after_a_dot() {
+    let registry = fixture_registry();
+    let text = "q = 2 :iron-plate:\nq.";
+    let labels: Vec<String> = {
+        let cursor = text.chars().count();
+        let (start, word) = completion_word(text, cursor);
+        completion_items(&registry, &Settings::default(), text, start, &word)
+            .into_iter()
+            .map(|item| item.label)
+            .collect()
+    };
+    assert!(labels.iter().any(|label| label == "iron-plate"), "{labels:?}");
+    assert!(labels.iter().any(|label| label == "water"), "{labels:?}");
+    assert!(labels.iter().any(|label| label == ".item"), "{labels:?}");
+    // A selector can be qualified, so the qualities are offered here too.
+    for quality in ["common", "rare", "quality-2"] {
+        assert!(labels.iter().any(|label| label == quality), "{labels:?}");
+    }
+}
+
+#[test]
+fn making_offers_qualities_alongside_recipes() {
+    let registry = fixture_registry();
+    let text = "making :";
+    let labels: Vec<String> = {
+        let cursor = text.chars().count();
+        let (start, word) = completion_word(text, cursor);
+        completion_items(&registry, &Settings::default(), text, start, &word)
+            .into_iter()
+            .map(|item| item.label)
+            .collect()
+    };
+    assert!(
+        labels.iter().any(|label| label == "electronic-circuit"),
+        "{labels:?}"
+    );
+    for quality in ["common", "quality-3", "legendary"] {
+        assert!(labels.iter().any(|label| label == quality), "{labels:?}");
+    }
+    // Hidden recipes are reachable by name but never suggested.
+    assert!(
+        !labels.iter().any(|label| label == "iron-plate-recycling"),
+        "{labels:?}"
+    );
+}
+
+#[test]
+fn a_process_offers_its_signals_after_a_dot() {
+    let registry = autocomplete_registry();
+    let text = "q = 1 :assembling-machine-3: making (:normal: :iron-gear-wheel:)\nq.";
+    let labels: Vec<String> = {
+        let cursor = text.chars().count();
+        let (start, word) = completion_word(text, cursor);
+        completion_items(&registry, &Settings::default(), text, start, &word)
+            .into_iter()
+            .map(|item| item.label)
+            .collect()
+    };
+    for expected in [
+        ".speed", ".electric", ".in", ".out", ".net", ".item", ".fluid", ".machines",
+    ] {
+        assert!(
+            labels.iter().any(|label| label == expected),
+            "{expected} missing from {labels:?}"
+        );
+    }
+}
+
+#[test]
+fn qualities_are_offered_with_their_own_glyph() {
+    let registry = autocomplete_registry();
+    for (query, id) in [
+        ("rar", "rare"),
+        ("leg", "legendary"),
+        ("nor", "normal"),
+    ] {
+        let item = first_completion(&registry, query);
+        assert_eq!(item.label, id, "{query}");
+        let glyph = hactorio_data::quality_by_id(id).unwrap().glyph;
+        assert_eq!(item.insert, glyph.to_string(), "{query}");
+        assert_eq!(item.glyphs, glyph.to_string(), "{query}");
+    }
+}
+
+#[test]
+fn quality_shortcuts_rank_their_quality_first() {
+    let registry = autocomplete_registry();
+    for (query, id) in [
+        ("q1", "quality-1"),
+        ("q2", "quality-2"),
+        ("q3", "quality-3"),
+        ("q4", "quality-4"),
+        ("q5", "quality-5"),
+    ] {
+        let item = first_completion(&registry, query);
+        assert_eq!(item.label, id, "{query}: got {:?}", item.label);
+        let quality = hactorio_core::new_eval::Quality::from_name(id).unwrap();
+        assert_eq!(item.insert, quality.glyph().to_string(), "{query}");
+    }
+
+    // The spelled-out aliases resolve too, `common` to the normal quality.
+    let item = first_completion(&registry, "common");
+    assert_eq!(item.label, "common");
+    assert_eq!(
+        item.insert,
+        hactorio_core::new_eval::Quality::Normal.glyph().to_string()
+    );
+}
+
+#[test]
+fn operators_are_suggested_without_with() {
+    let registry = autocomplete_registry();
+    for keyword in ["in", "into", "from", "making"] {
+        let labels: Vec<String> = {
+            let (start, word) = completion_word(keyword, keyword.chars().count());
+            completion_items(&registry, &Settings::default(), keyword, start, &word)
+                .into_iter()
+                .map(|item| item.label)
+                .collect()
+        };
+        assert!(labels.iter().any(|label| label == keyword), "{keyword}");
+    }
+    let (start, word) = completion_word("wit", 3);
+    let labels: Vec<String> = completion_items(&registry, &Settings::default(), "wit", start, &word)
+        .into_iter()
+        .map(|item| item.label)
+        .collect();
+    assert!(!labels.iter().any(|label| label == "with"), "{labels:?}");
+}
+
+#[test]
 fn stacked_belt_tokens_insert_the_stacked_prefix() {
     let registry = autocomplete_registry();
     let stacked = hactorio_data::SIGNALS
@@ -1195,15 +1331,15 @@ fn stacked_belt_tokens_insert_the_stacked_prefix() {
         .find(|signal| signal.id == "stacked-belt")
         .unwrap()
         .glyph;
-    for (query, label, tier) in [
-        ("syb", "stacked-yellow-belt", BeltTier::Yellow),
-        ("srb", "stacked-red-belt", BeltTier::Red),
-        ("sbb", "stacked-blue-belt", BeltTier::Blue),
-        ("sgb", "stacked-green-belt", BeltTier::Green),
+    for (query, label, belt_id) in [
+        ("syb", "stacked-yellow-belt", "transport-belt"),
+        ("srb", "stacked-red-belt", "fast-transport-belt"),
+        ("sbb", "stacked-blue-belt", "express-transport-belt"),
+        ("sgb", "stacked-green-belt", "turbo-transport-belt"),
     ] {
         let item = first_completion(&registry, query);
         assert_eq!(item.label, label, "{query}");
-        let belt = registry.entry(tier.item_id()).unwrap().glyph;
+        let belt = registry.entry(belt_id).unwrap().glyph;
         assert_eq!(item.insert, format!("{stacked}{belt}"), "{query}");
     }
 }
@@ -1406,7 +1542,14 @@ fn completion_after_dot_reads_the_operand_of_a_reassignment() {
     let labels = completion_labels(&registry, &format!("{process}\np += p."));
     assert!(labels.iter().any(|label| label == ".crafts"), "{labels:?}");
     assert!(!labels.iter().any(|label| label == ".rate"), "{labels:?}");
-    let first_unit = labels.iter().find(|label| !label.starts_with('.'));
+    // Qualities are selectors too, so skip them when looking for the unit.
+    let qualifiers: Vec<&str> = hactorio_core::new_eval::Quality::ALL
+        .iter()
+        .flat_map(|quality| quality.aliases().iter().copied())
+        .collect();
+    let first_unit = labels
+        .iter()
+        .find(|label| !label.starts_with('.') && !qualifiers.contains(&label.as_str()));
     assert_eq!(
         first_unit.map(String::as_str),
         Some("iron-plate"),
@@ -1421,3 +1564,4 @@ fn completion_after_dot_reads_the_operand_of_a_reassignment() {
     };
     assert!(present < absent, "{labels:?}");
 }
+

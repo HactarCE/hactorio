@@ -29,7 +29,8 @@ pub enum BinaryOp {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Keyword {
     In,
-    With,
+    Into,
+    From,
     Making,
     Joule(f64),
     Watt(f64),
@@ -41,7 +42,8 @@ pub(crate) enum Keyword {
 pub(crate) fn keyword(word: &str) -> Option<Keyword> {
     Some(match word {
         "in" => Keyword::In,
-        "with" => Keyword::With,
+        "into" => Keyword::Into,
+        "from" => Keyword::From,
         "making" => Keyword::Making,
         "joule" | "J" => Keyword::Joule(1.0),
         "kJ" => Keyword::Joule(1e3),
@@ -61,7 +63,7 @@ pub(crate) fn keyword(word: &str) -> Option<Keyword> {
 /// A category of text the editor paints in its own color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Highlight {
-    /// An operator keyword: `in`, `with`, `making`.
+    /// An operator keyword: `in`, `into`, `from`, `making`.
     OperatorKeyword,
     /// A unit keyword: `s`, `second`, `J`, `kJ`, `craft`, ...
     UnitKeyword,
@@ -135,8 +137,17 @@ pub fn highlights(text: &str) -> Vec<(Span, Highlight)> {
                 let after_dot = preceded_by_dot(text, start);
                 let defines = statement_start && assignment_follows(text, index);
                 statement_start = false;
-                let highlight = match keyword(word) {
-                    Some(Keyword::In | Keyword::With | Keyword::Making) => {
+                let highlight = if after_dot {
+                    // `p.in` names the property `in`; it is not the operator.
+                    None
+                } else {
+                    match keyword(word) {
+                    Some(
+                        Keyword::In
+                        | Keyword::Into
+                        | Keyword::From
+                        | Keyword::Making,
+                    ) => {
                         Some(Highlight::OperatorKeyword)
                     }
                     Some(
@@ -158,9 +169,9 @@ pub fn highlights(text: &str) -> Vec<(Span, Highlight)> {
                     }
                     // `value.rate` selects the property `rate`; a variable of
                     // that name is not in play there.
-                    None if after_dot => None,
                     None if variables.contains(word) => Some(Highlight::Variable),
                     None => None,
+                    }
                 };
                 if let Some(highlight) = highlight {
                     spans.push((Span::new(start as u32, index as u32), highlight));
@@ -226,6 +237,14 @@ mod tests {
             .into_iter()
             .map(|(span, highlight)| (&text[span.start as usize..span.end as usize], highlight))
             .collect()
+    }
+
+    #[test]
+    fn a_property_after_a_dot_is_not_an_operator_keyword() {
+        assert_eq!(classified("p.in"), Vec::new());
+        assert_eq!(classified("p . in"), Vec::new());
+        // The operator is still an operator away from a dot.
+        assert_eq!(classified("a in b"), vec![("in", Highlight::OperatorKeyword)]);
     }
 
     #[test]
@@ -298,8 +317,12 @@ mod tests {
     fn keywords_must_be_whole_words() {
         assert!(classified("withholding").is_empty());
         assert_eq!(
-            classified("with"),
-            vec![("with", Highlight::OperatorKeyword)]
+            classified("into"),
+            vec![("into", Highlight::OperatorKeyword)]
+        );
+        assert_eq!(
+            classified("from"),
+            vec![("from", Highlight::OperatorKeyword)]
         );
     }
 

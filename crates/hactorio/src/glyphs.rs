@@ -7,7 +7,7 @@ use egui::ColorImage;
 use egui::epaint::text::{
     FontPriority, GlyphBitmap, GlyphRasterizer, GlyphRasterizerRequest, RasterizedGlyph,
 };
-use hactorio_data::{EMPTY_GLYPH, IconImage, IconSource, Registry, SIGNALS};
+use hactorio_data::{EMPTY_GLYPH, IconImage, IconSource, QUALITIES, Registry, SIGNALS};
 
 /// Icon path of the variable's virtual signal.
 const VARIABLE_ICON: &str = "__base__/graphics/icons/signal/signal-item-parameter.png";
@@ -30,7 +30,7 @@ pub fn install(ctx: &egui::Context, registry: Arc<Registry>, source: &IconSource
             images.insert(entry.glyph, image);
         }
     }
-    for signal in &SIGNALS {
+    for signal in SIGNALS.iter().chain(QUALITIES.iter()) {
         if let Some(image) = source.read_rgba(signal.icon) {
             images.insert(signal.glyph, image);
         }

@@ -1,6 +1,6 @@
 //! Converts between plaintext `:prototype-id:` tokens and private-use glyphs.
 
-use hactorio_data::{Registry, signal_by_glyph, signal_by_id};
+use hactorio_data::{Registry, quality_by_glyph, quality_by_id, signal_by_glyph, signal_by_id};
 
 /// Replaces every known glyph with its `:prototype-id:` form.
 ///
@@ -8,7 +8,7 @@ use hactorio_data::{Registry, signal_by_glyph, signal_by_id};
 pub fn to_plaintext(text: &str, registry: &Registry) -> String {
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
-        if let Some(signal) = signal_by_glyph(ch) {
+        if let Some(signal) = signal_by_glyph(ch).or_else(|| quality_by_glyph(ch)) {
             out.push(':');
             out.push_str(signal.id);
             out.push(':');
@@ -40,7 +40,7 @@ pub fn from_plaintext(text: &str, registry: &Registry) -> String {
             return out;
         };
         let id = &after[..end];
-        if let Some(signal) = signal_by_id(id) {
+        if let Some(signal) = signal_by_id(id).or_else(|| quality_by_id(id)) {
             out.push(signal.glyph);
             rest = &after[end + 1..];
             continue;

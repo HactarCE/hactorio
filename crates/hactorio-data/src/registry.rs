@@ -66,6 +66,9 @@ pub enum PrototypeKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Item {
     pub stack_size: u32,
+    /// The prototype subgroup, e.g. `barrel`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subgroup: Option<Box<str>>,
     /// Present when the item is also a machine prototype.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<Machine>,
@@ -340,6 +343,8 @@ pub struct Registry {
     recipes: Vec<Recipe>,
     researches: Vec<ProductivityResearch>,
     inserter_research: InserterResearch,
+    /// Technologies that increase belt stacking, with the bonus per level.
+    belt_stacking: Vec<(Box<str>, u32)>,
     by_id: HashMap<Box<str>, EntryId>,
     recipe_by_id: HashMap<Box<str>, RecipeId>,
     /// How many recipe ingredients and products name each entry, indexed by
@@ -353,6 +358,7 @@ impl Registry {
         recipes: Vec<Recipe>,
         mut researches: Vec<ProductivityResearch>,
         inserter_research: InserterResearch,
+        belt_stacking: Vec<(Box<str>, u32)>,
     ) -> Result<Self> {
         researches.sort_by(|r1, r2| r1.display_name.cmp(&r2.display_name));
 
@@ -439,6 +445,7 @@ impl Registry {
             recipes,
             researches,
             inserter_research,
+            belt_stacking,
             by_id,
             recipe_by_id,
             references,
@@ -461,6 +468,12 @@ impl Registry {
 
     pub fn inserter_research(&self) -> &InserterResearch {
         &self.inserter_research
+    }
+
+    /// Technologies that increase belt stacking, with the bonus per completed
+    /// level.
+    pub fn belt_stacking_research(&self) -> &[(Box<str>, u32)] {
+        &self.belt_stacking
     }
 
     pub fn entry(&self, id: &str) -> Option<&Entry> {

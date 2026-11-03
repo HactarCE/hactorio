@@ -69,6 +69,13 @@ Rows inside content-sized panels use `ui.horizontal`; `ui.horizontal_top` alloca
 
 The raw data dump lives at `~/Library/Application Support/factorio/script-output/data-raw-dump.json`. If it is not there, ask the user to click the "Load game data" button in the application GUI.
 
-The foundry cannot run the `iron-gear-wheel` recipe (category `crafting`), but it has `casting-iron-gear-wheel` (category `metallurgy`), which also produces iron gear wheels. Recipe resolution in `in` must filter by the machine's categories; `:iron-gear-wheel: in :foundry:` is valid and resolves to the casting recipe.
+The foundry cannot run the `iron-gear-wheel` recipe (category `crafting`), but it has `casting-iron-gear-wheel` (category `metallurgy`), which also produces iron gear wheels. Recipe resolution in `in`/`from`/`into` must filter by the machine's categories; `:iron-gear-wheel: from :foundry:` is valid and resolves to the casting recipe.
 
 Inserter `hand_size` is cosmetic; capacity comes from `bulk`, `stack_size_bonus`, and the inserter capacity research modifiers.
+
+## Verification
+
+Every example output in a reply or a document must come from an actual run of
+the code. Never write a rendering, a count, a parse tree, or an error message
+from memory: run it and paste the result, or mark it unverified. A wrong
+example is worse than no example, because it is read as evidence.

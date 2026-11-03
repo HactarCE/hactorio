@@ -3,11 +3,12 @@
 use std::collections::HashMap;
 
 use egui::{Key, Modifiers, TextStyle, Ui};
-use hactorio_core::facet_eval::{evaluate, property_is_available};
-use hactorio_core::facet_parser::{Property, StatementKind, parse_line};
-use hactorio_core::facets::FacetValue;
-use hactorio_core::{BaseUnit, BeltTier, Settings};
-use hactorio_data::{EMPTY_GLYPH, Entry, EntryId, Registry, SIGNALS};
+use hactorio_core::new_eval::{
+    Item, Output, Quality, Resource, Value, definition_value_span, evaluate,
+    process_resources, property_is_available,
+};
+use hactorio_core::Settings;
+use hactorio_data::{EMPTY_GLYPH, Entry, EntryId, QUALITIES, Registry, SIGNALS};
 
 /// Maximum height of the autocomplete popup, before it scrolls.
 pub(super) const COMPLETION_MAX_HEIGHT: f32 = 240.0;
@@ -422,9 +423,15 @@ const COMPLETION_PROPERTY_BONUS: f64 = 40.0;
 /// A unit already in the process net outranks the same name when it is absent.
 const COMPLETION_PRESENT_ITEM_BONUS: f64 = 50.0;
 
+/// Ranking bonus for a quality alias such as `quality-3`.
+///
+/// A quality has one glyph and several spellings, so the alias rows have to
+/// outrank the near misses a short needle like `q1` also fuzzily matches.
+const COMPLETION_ALIAS_BONUS: f64 = 120.0;
+
 const KEYWORDS: &[&str] = &[
-    "in", "with", "making", "s", "second", "m", "minute", "h", "hour", "joule", "J", "kJ", "MJ",
-    "GJ", "TJ", "watt", "W", "kW", "MW", "GW", "TW", "craft",
+    "in", "into", "from", "making", "s", "second", "m", "minute", "h", "hour", "joule", "J", "kJ",
+    "MJ", "GJ", "TJ", "watt", "W", "kW", "MW", "GW", "TW", "craft",
 ];
 
 const PROPERTIES: &[&str] = &[
@@ -438,24 +445,29 @@ const PROPERTIES: &[&str] = &[
     "prod",
     "pollution",
     "abs",
+    "in",
+    "out",
+    "net",
 ];
 
-/// Signals that select like a property after a dot, with the property they read.
-const SELECTOR_SIGNALS: [(&str, Property); 5] = [
-    ("stack-size", Property::StackSize),
-    ("speed", Property::Speed),
-    ("time", Property::Time),
-    ("electric", Property::Electric),
-    ("module-slots", Property::Slots),
+/// Signals that select like a property after a dot.
+const SELECTOR_SIGNALS: [&str; 7] = [
+    "stack-size",
+    "speed",
+    "time",
+    "electric",
+    "module-slots",
+    "item",
+    "fluid",
 ];
 
 /// Stacked belt rows: one per tier, labelled by color but inserting the
 /// `stacked-belt` prefix followed by the belt's own glyph.
-const STACKED_BELTS: [(&str, BeltTier); 4] = [
-    ("stacked-yellow-belt", BeltTier::Yellow),
-    ("stacked-red-belt", BeltTier::Red),
-    ("stacked-blue-belt", BeltTier::Blue),
-    ("stacked-green-belt", BeltTier::Green),
+const STACKED_BELTS: [(&str, &str); 4] = [
+    ("stacked-yellow-belt", "transport-belt"),
+    ("stacked-red-belt", "fast-transport-belt"),
+    ("stacked-blue-belt", "express-transport-belt"),
+    ("stacked-green-belt", "turbo-transport-belt"),
 ];
 
 fn exact_rank(label: &str, insert: &str, needle: &str) -> u8 {
@@ -469,6 +481,26 @@ fn exact_rank(label: &str, insert: &str, needle: &str) -> u8 {
         1
     } else {
         0
+    }
+}
+
+/// Every spelling of every quality, so `q1` … `q5` and `common` find theirs.
+fn push_qualities(items: &mut Vec<(u8, f64, CompletionItem)>, needle: &str) {
+    for quality in &QUALITIES {
+        let Some(quality) = hactorio_core::new_eval::Quality::from_name(quality.id) else {
+            continue;
+        };
+        for alias in quality.aliases() {
+            if let Some(item) = word_completion(
+                alias,
+                quality.glyph().to_string(),
+                quality.glyph().to_string(),
+                needle,
+                COMPLETION_ALIAS_BONUS,
+            ) {
+                items.push(item);
+            }
+        }
     }
 }
 
@@ -512,11 +544,8 @@ fn signal_matches(id: &str, needle: &str) -> bool {
 /// value is the one before the write, and the statement's own value need not
 /// even evaluate.
 fn assignment_rhs<'a>(line: &'a str, registry: &Registry) -> Option<&'a str> {
-    let statement = parse_line(line, registry).ok()?;
-    let StatementKind::Definition { value, .. } = statement.kind else {
-        return None;
-    };
-    line.get(value.span.start as usize..value.span.end as usize)
+    let span = definition_value_span(line, registry)?;
+    line.get(span.start..span.end)
 }
 
 /// The value the selector after the dot ending at `word_start` applies to.
@@ -531,33 +560,43 @@ fn value_before_dot(
     word_start: usize,
     settings: &Settings,
     registry: &Registry,
-) -> Option<FacetValue> {
+) -> Option<Value> {
     let dot = word_start.checked_sub(1)?;
     let prefix: String = text.chars().take(dot).collect();
     let mut lines: Vec<&str> = prefix.split('\n').collect();
     if let Some(rhs) = lines.last().and_then(|line| assignment_rhs(line, registry)) {
         *lines.last_mut().unwrap() = rhs;
     }
-    evaluate(&lines.join("\n"), settings, registry)
-        .last()?
-        .value
-        .clone()
+    let evaluation = evaluate(&lines.join("\n"), registry, settings, &|| false);
+    match evaluation.outputs.last()? {
+        Output::Value(value) => Some(value.clone()),
+        _ => None,
+    }
 }
 
 /// Whether `entry` is a unit of the process `value` holds.
 ///
 /// Unit selectors only read a process; an item outside its net would select
 /// nothing.
-fn unit_in_value(value: &FacetValue, id: EntryId, entry: &Entry) -> bool {
-    let Some(process) = &value.process else {
+fn unit_in_value(
+    value: &Value,
+    id: EntryId,
+    entry: &Entry,
+    settings: &Settings,
+    registry: &Registry,
+) -> bool {
+    let Value::Process(process) = value else {
         return false;
     };
-    let unit = if entry.fluid {
-        BaseUnit::Fluid(id)
+    let resource = if entry.fluid {
+        Resource::Fluid(id)
     } else {
-        BaseUnit::Item(id)
+        Resource::Item(Item {
+            id,
+            quality: Quality::Normal,
+        })
     };
-    process.net.contains_key(&unit)
+    process_resources(process, registry, settings).contains(&resource)
 }
 
 pub(super) fn completion_items(
@@ -597,12 +636,18 @@ pub(super) fn completion_items(
         .enumerate()
         .filter(|(_, entry)| match context {
             CompletionContext::Machine => entry.machine().is_some(),
-            CompletionContext::Recipe => entry.recipe.is_some(),
+            CompletionContext::Recipe => entry
+                .recipe
+                .is_some_and(|recipe| !registry.recipe(recipe).hidden),
             CompletionContext::Config => entry.module.is_some() || entry.beacon.is_some(),
             CompletionContext::Property => match &value {
-                // Every item and fluid is a selector after a process dot; an
-                // absent unit reads as zero. Other values have no units.
-                Some(value) => value.process.is_some() && entry.is_item_or_fluid(),
+                // A process and a quantity both select by resource, so every
+                // item and fluid is a selector after their dot.
+                Some(Value::Process(_)) => entry.is_item_or_fluid(),
+                Some(Value::Multi(multi)) => {
+                    multi.quantity.is_some() && entry.is_item_or_fluid()
+                }
+                Some(Value::Quality(_)) => false,
                 None => entry.is_item_or_fluid(),
             },
             CompletionContext::Normal => true,
@@ -627,7 +672,9 @@ pub(super) fn completion_items(
             let rank = exact_rank(label, &insert, needle);
             let present = value
                 .as_ref()
-                .is_some_and(|value| unit_in_value(value, EntryId::from_index(index), entry));
+                .is_some_and(|value| {
+                    unit_in_value(value, EntryId::from_index(index), entry, settings, registry)
+                });
             let mut score = if needle.is_empty() {
                 score as f64
             } else {
@@ -691,15 +738,31 @@ pub(super) fn completion_items(
         }
     }
 
+    if matches!(
+        context,
+        CompletionContext::Normal | CompletionContext::Recipe
+    ) {
+        // A quality qualifies a prototype, filters a quantity, and can precede
+        // a recipe after `making`, so every spelling is offered (§4.6).
+        push_qualities(&mut items, needle);
+    }
+
     if context == CompletionContext::Property {
+        // A selector names a resource, and a resource can be qualified, so the
+        // qualities belong here too: `p.:rare::iron-plate:`.
+        let qualified = value.as_ref().is_some_and(|value| match value {
+            Value::Process(_) => true,
+            Value::Multi(multi) => multi.quantity.is_some(),
+            Value::Quality(_) => false,
+        });
+        if qualified {
+            push_qualities(&mut items, needle);
+        }
         for property in PROPERTIES {
-            if let Some(value) = &value {
-                let Some(known) = Property::from_name(property) else {
-                    continue;
-                };
-                if !property_is_available(value, known, registry, settings) {
-                    continue;
-                }
+            if let Some(value) = &value
+                && !property_is_available(value, property, registry, settings)
+            {
+                continue;
             }
             let label = format!(".{property}");
             if let Some(item) = word_completion(
@@ -712,9 +775,9 @@ pub(super) fn completion_items(
                 items.push(item);
             }
         }
-        for (id, property) in SELECTOR_SIGNALS {
+        for id in SELECTOR_SIGNALS {
             if let Some(value) = &value
-                && !property_is_available(value, property, registry, settings)
+                && !property_is_available(value, id, registry, settings)
             {
                 continue;
             }
@@ -737,7 +800,10 @@ pub(super) fn completion_items(
         }
     } else if context == CompletionContext::Normal {
         for signal in SIGNALS.iter().filter(|signal| {
-            matches!(signal.id, "stack-size" | "stacked-belt") && signal_matches(signal.id, needle)
+            matches!(
+                signal.id,
+                "stack-size" | "stacked-belt" | "recycling"
+            ) && signal_matches(signal.id, needle)
         }) {
             let label = signal.id.to_string();
             if let Some(item) = word_completion(
@@ -750,9 +816,10 @@ pub(super) fn completion_items(
                 items.push(item);
             }
         }
+        push_qualities(&mut items, needle);
         if let Some(stacked) = SIGNALS.iter().find(|signal| signal.id == "stacked-belt") {
-            for (label, tier) in STACKED_BELTS {
-                let Some(belt) = registry.entry(tier.item_id()) else {
+            for (label, belt_id) in STACKED_BELTS {
+                let Some(belt) = registry.entry(belt_id) else {
                     continue;
                 };
                 let glyphs = format!("{}{}", stacked.glyph, belt.glyph);

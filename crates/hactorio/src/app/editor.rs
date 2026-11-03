@@ -4,7 +4,7 @@ use egui::{
     Color32, Context, CursorIcon, Key, Modifiers, Rect, ScrollArea, Sense, TextEdit, TextStyle, Ui,
 };
 use hactorio_core::Settings;
-use hactorio_core::facet_eval::{LineOutput, StatementOutput, line_hash};
+use hactorio_core::new_eval::{Evaluation, line_hash};
 use hactorio_data::Registry;
 
 use super::completion::{self, CompletionState, completion_items, completion_word};
@@ -33,7 +33,7 @@ fn pointer_over_floating(ctx: &Context, active_tab: usize, pointer: egui::Pos2) 
 
 pub(super) struct EditorState<'a> {
     active_tab: usize,
-    outputs: &'a [StatementOutput],
+    outputs: &'a Evaluation,
     settings: &'a Settings,
     registry: &'a Registry,
     pending_focus: &'a mut Option<(usize, usize)>,
@@ -44,7 +44,7 @@ pub(super) struct EditorState<'a> {
 impl<'a> EditorState<'a> {
     pub(super) fn new(
         active_tab: usize,
-        outputs: &'a [StatementOutput],
+        outputs: &'a Evaluation,
         settings: &'a Settings,
         registry: &'a Registry,
         pending_focus: &'a mut Option<(usize, usize)>,
@@ -400,13 +400,13 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                         weak,
                     );
 
-                    let Some(statement) = outputs.get(index) else {
+                    let Some(output) = outputs.outputs.get(index) else {
                         continue;
                     };
-                    if statement.source_hash != line_hash(line) {
+                    if outputs.hashes.get(index).copied() != Some(line_hash(line)) {
                         continue;
                     }
-                    let Some(text) = single_line_result(statement, settings, registry) else {
+                    let Some(text) = single_line_result(output, settings, registry) else {
                         continue;
                     };
                     if events.focused_line == Some(index) {
@@ -414,7 +414,7 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                             Some((index, egui::pos2(single_line_x, y), single_line_width));
                         continue;
                     }
-                    let color = if matches!(statement.output, LineOutput::Error(_)) {
+                    let color = if output.error().is_some() {
                         error_color
                     } else {
                         weak

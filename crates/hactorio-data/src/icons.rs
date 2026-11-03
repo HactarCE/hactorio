@@ -29,7 +29,7 @@ pub const EMPTY_GLYPH: char = '\u{F8F8}';
 ///
 /// `F8F0..F8F7` are reserved, and namespace entries stop at `F8EF`, so signal
 /// lookup always precedes entry lookup.
-pub const SIGNALS: [SignalIcon; 6] = [
+pub const SIGNALS: [SignalIcon; 9] = [
     SignalIcon {
         id: "stack-size",
         glyph: STACK_SIZE_GLYPH,
@@ -60,7 +60,62 @@ pub const SIGNALS: [SignalIcon; 6] = [
         glyph: '\u{F8F9}',
         icon: "__core__/graphics/icons/mip/empty-module-slot.png",
     },
+    SignalIcon {
+        id: "item",
+        glyph: '\u{F8F0}',
+        icon: "__base__/graphics/icons/signal/signal-item-parameter.png",
+    },
+    SignalIcon {
+        id: "fluid",
+        glyph: '\u{F8F1}',
+        icon: "__base__/graphics/icons/signal/signal-fluid-parameter.png",
+    },
+    SignalIcon {
+        id: "recycling",
+        glyph: '\u{F8F2}',
+        icon: "__base__/graphics/icons/signal/signal-recycle.png",
+    },
 ];
+
+/// The five qualities, which are not namespace entries.
+///
+/// `F8F3..F8F7` complete the reserved signal range, so a qualifying glyph can
+/// never collide with an entry glyph.
+pub const QUALITIES: [SignalIcon; 5] = [
+    SignalIcon {
+        id: "normal",
+        glyph: '\u{F8F3}',
+        icon: "__base__/graphics/icons/quality-normal.png",
+    },
+    SignalIcon {
+        id: "uncommon",
+        glyph: '\u{F8F4}',
+        icon: "__quality__/graphics/icons/quality-uncommon.png",
+    },
+    SignalIcon {
+        id: "rare",
+        glyph: '\u{F8F5}',
+        icon: "__quality__/graphics/icons/quality-rare.png",
+    },
+    SignalIcon {
+        id: "epic",
+        glyph: '\u{F8F6}',
+        icon: "__quality__/graphics/icons/quality-epic.png",
+    },
+    SignalIcon {
+        id: "legendary",
+        glyph: '\u{F8F7}',
+        icon: "__quality__/graphics/icons/quality-legendary.png",
+    },
+];
+
+pub fn quality_by_id(id: &str) -> Option<&'static SignalIcon> {
+    QUALITIES.iter().find(|quality| quality.id == id)
+}
+
+pub fn quality_by_glyph(glyph: char) -> Option<&'static SignalIcon> {
+    QUALITIES.iter().find(|quality| quality.glyph == glyph)
+}
 
 pub fn signal_by_id(id: &str) -> Option<&'static SignalIcon> {
     SIGNALS.iter().find(|signal| signal.id == id)

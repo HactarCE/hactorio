@@ -6,9 +6,9 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use eframe::egui;
-use egui::{Align, Context, Layout, RichText, TextStyle, Ui};
-use hactorio_core::facet_eval::StatementOutput;
-use hactorio_core::{BeltTier, Settings, TimeUnit, from_plaintext, to_plaintext};
+use egui::{Align, Context, RichText, TextStyle, Ui};
+use hactorio_core::new_eval::Evaluation;
+use hactorio_core::{Settings, TimeUnit, from_plaintext, to_plaintext};
 use hactorio_data::{GameInstall, Registry, locate};
 
 use crate::document::{
@@ -100,16 +100,14 @@ enum DisplaySetting {
     Theme,
     Font,
     TimeUnit,
-    ItemRates,
     Decimals,
     MetricPrefixes,
 }
 
-const DISPLAY_SETTINGS: [DisplaySetting; 6] = [
+const DISPLAY_SETTINGS: [DisplaySetting; 5] = [
     DisplaySetting::Theme,
     DisplaySetting::Font,
     DisplaySetting::TimeUnit,
-    DisplaySetting::ItemRates,
     DisplaySetting::Decimals,
     DisplaySetting::MetricPrefixes,
 ];
@@ -273,8 +271,21 @@ fn settings_bar<T: Copy>(
 }
 
 /// The game item whose icon represents a belt tier.
-fn belt_tier_glyph(registry: &Registry, tier: BeltTier) -> Option<char> {
-    registry.entry(tier.item_id()).map(|entry| entry.glyph)
+/// The most research levels an effect can take before the productivity cap is
+/// reached, which bounds the research slider.
+fn productivity_research_cap(research: &hactorio_data::ProductivityResearch) -> u32 {
+    const BONUS_CAP: f64 = 3.0;
+    research
+        .effects
+        .iter()
+        .filter(|effect| effect.change > 0.0)
+        .map(|effect| {
+            // Trim float noise so an exact multiple does not round up.
+            let levels = BONUS_CAP / effect.change;
+            (levels - levels * 1e-12).ceil() as u32
+        })
+        .max()
+        .unwrap_or(u32::MAX)
 }
 
 pub struct HactorioApp {
@@ -283,7 +294,7 @@ pub struct HactorioApp {
     settings: Settings,
     evaluator: Evaluator,
     registry: Option<Arc<Registry>>,
-    outputs: Vec<StatementOutput>,
+    outputs: Evaluation,
     pending: u64,
     last_request: Option<(String, Settings)>,
     install: Option<GameInstall>,
@@ -370,7 +381,7 @@ impl HactorioApp {
             settings: document.settings,
             evaluator: Evaluator::new(),
             registry,
-            outputs: Vec::new(),
+            outputs: Evaluation::empty(),
             pending: 0,
             last_request: None,
             install,
@@ -405,7 +416,7 @@ impl HactorioApp {
     fn poll_evaluator(&mut self) {
         while let Some(response) = self.evaluator.poll() {
             if response.generation == self.pending {
-                self.outputs = response.outputs;
+                self.outputs = response.evaluation;
                 self.applied = response.generation;
             }
         }
@@ -413,7 +424,7 @@ impl HactorioApp {
 
     fn maybe_request(&mut self) {
         let Some(registry) = self.registry.clone() else {
-            self.outputs.clear();
+            self.outputs = Evaluation::empty();
             return;
         };
         let text = self.current_text();
@@ -491,7 +502,7 @@ impl HactorioApp {
         self.install = Some(install);
         self.evaluator = Evaluator::new();
         self.last_request = None;
-        self.outputs.clear();
+        self.outputs = Evaluation::empty();
         self.dirty = true;
     }
 
@@ -594,7 +605,7 @@ impl HactorioApp {
             && index != self.active_tab
         {
             self.active_tab = index;
-            self.outputs.clear();
+            self.outputs = Evaluation::empty();
             self.last_request = None;
         }
         if let Some(index) = delete {
@@ -607,9 +618,8 @@ impl HactorioApp {
         }
     }
 
-    fn display_bar(&mut self, ui: &mut Ui, registry: &Registry, label_width: f32) {
+    fn display_bar(&mut self, ui: &mut Ui, label_width: f32) {
         let before = self.settings.clone();
-        let belt_glyphs = BeltTier::ALL.map(|tier| (tier, belt_tier_glyph(registry, tier)));
 
         settings_bar(
             ui,
@@ -617,7 +627,7 @@ impl HactorioApp {
             label_width,
             &DISPLAY_SETTINGS,
             |ui, setting| {
-                self.display_setting_ui(ui, setting, &belt_glyphs);
+                self.display_setting_ui(ui, setting);
             },
         );
 
@@ -628,7 +638,6 @@ impl HactorioApp {
         &mut self,
         ui: &mut Ui,
         setting: DisplaySetting,
-        belt_glyphs: &[(BeltTier, Option<char>)],
     ) {
         match setting {
             DisplaySetting::Theme => {
@@ -666,29 +675,6 @@ impl HactorioApp {
                 for unit in [TimeUnit::Second, TimeUnit::Minute, TimeUnit::Hour] {
                     ui.selectable_value(&mut self.settings.time_unit, unit, unit.name());
                 }
-            }
-            DisplaySetting::ItemRates => {
-                ui.label("Item rates");
-                let unit = self.settings.time_unit.short_name();
-                ui.selectable_value(
-                    &mut self.settings.item_rate_belt,
-                    None,
-                    format!("item/{unit}"),
-                );
-                for (tier, glyph) in belt_glyphs {
-                    let label: egui::WidgetText = match glyph {
-                        Some(glyph) => RichText::new(glyph.to_string()).size(GLYPH_SIZE).into(),
-                        None => tier.token().to_string().into(),
-                    };
-                    ui.selectable_value(&mut self.settings.item_rate_belt, Some(*tier), label)
-                        .on_hover_text(format!("{} item/s", tier.items_per_second()));
-                }
-                ui.add_enabled_ui(self.settings.item_rate_belt.is_some(), |ui| {
-                    let stack_label =
-                        RichText::new(hactorio_data::STACK_SIZE_GLYPH.to_string()).size(GLYPH_SIZE);
-                    ui.toggle_value(&mut self.settings.stacked_belts, stack_label)
-                        .on_hover_text("Show item rates as stacks on stacked belts");
-                });
             }
             DisplaySetting::Decimals => {
                 ui.label("Decimals");
@@ -796,7 +782,7 @@ impl HactorioApp {
                     ui.set_min_width(ui.available_width());
                 }
                 let label = research.display_name.as_deref().unwrap_or(&research.id);
-                let cap = hactorio_core::facet_machine::productivity_research_cap(research);
+                let cap = productivity_research_cap(research);
                 let mut level = self.settings.research_level(&research.id).min(cap);
                 let drag = ui.horizontal(|ui| {
                     let drag = ui.add(egui::DragValue::new(&mut level).range(0..=cap).speed(0.1));
@@ -907,7 +893,7 @@ impl HactorioApp {
         let label_width = settings_label_width(ui);
         if let Some(registry) = &loaded {
             egui::Panel::top("display_settings").show(ui, |ui| {
-                self.display_bar(ui, registry, label_width);
+                self.display_bar(ui, label_width);
             });
 
             egui::Panel::top("research_settings").show(ui, |ui| {

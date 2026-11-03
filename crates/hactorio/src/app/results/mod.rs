@@ -14,8 +14,7 @@
 //! reserved for the completion dropdown.
 
 use hactorio_core::Settings;
-use hactorio_core::facet_eval::{LineOutput, StatementOutput};
-use hactorio_core::facet_format::format_facet;
+use hactorio_core::new_eval::{Evaluation, Output, format_value};
 use hactorio_data::Registry;
 
 mod multiline;
@@ -67,7 +66,7 @@ impl Token {
 pub(super) struct ResultsContext<'a> {
     pub tabs: &'a [Tab],
     pub active_tab: usize,
-    pub outputs: &'a [StatementOutput],
+    pub outputs: &'a Evaluation,
     pub settings: &'a Settings,
     pub registry: &'a Registry,
 }
@@ -154,15 +153,15 @@ pub(super) fn identifier_at(
     None
 }
 
-/// The one-line projection of a statement's result, or `None` if it shows nothing.
+/// The one-line projection of a line's result, or `None` if it shows nothing.
 pub(super) fn single_line_result(
-    statement: &StatementOutput,
+    output: &Output,
     settings: &Settings,
     registry: &Registry,
 ) -> Option<String> {
-    match &statement.output {
-        LineOutput::Nothing => None,
-        LineOutput::Error(_) => Some("error".to_string()),
-        LineOutput::Value(value) => Some(format_facet(value, settings, registry)),
+    match output {
+        Output::Blank | Output::None => None,
+        Output::Error { .. } => Some("error".to_string()),
+        Output::Value(value) => Some(format_value(value, settings, registry)),
     }
 }

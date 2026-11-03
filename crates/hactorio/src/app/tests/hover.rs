@@ -2,7 +2,6 @@ use super::*;
 use crate::app::results::{ResultsContext, Token};
 use crate::document::Tab;
 use egui_kittest::kittest::Queryable;
-use hactorio_core::facet_eval::evaluate;
 
 fn token_tip_is_open(harness: &Harness<'_, Option<HactorioApp>>) -> bool {
     harness.ctx.memory(|memory| {
@@ -81,7 +80,7 @@ fn multiline_result_content_starts_at_the_anchor() {
 }
 
 #[test]
-fn multiline_result_does_not_wrap_long_results() {
+fn multiline_result_wraps_a_long_error_message() {
     let unknown = "x".repeat(100);
     let text = format!("# Main\n:{unknown}:\n");
     let document = editor_document(&text, 1, 0);
@@ -93,7 +92,8 @@ fn multiline_result_does_not_wrap_long_results() {
         .memory(|memory| memory.area_rect(egui::Id::unique("multiline_result")))
         .expect("multiline result");
     assert!(area.width() > 420.0, "popup stayed narrow: {area:?}");
-    assert!(area.height() < 60.0, "popup wrapped: {area:?}");
+    // The message is prose, so it wraps rather than widening the panel.
+    assert!(area.height() > 60.0, "message did not wrap: {area:?}");
 
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -128,7 +128,6 @@ fn multiline_result_columns_do_not_wrap_at_large_font() {
     let text = ":transport-belt: :iron-plate: in (:assembling-machine-3: with 2 :speed-module-3: making :iron-gear-wheel:)";
     let mut document = editor_document(&format!("# prod test\n{text}\n"), 1, 0);
     document.font_size = 24.0;
-    document.settings.item_rate_belt = Some(hactorio_core::BeltTier::Yellow);
     let (mut harness, dir) = completion_harness_with("multiline-columns", document, FIXTURE);
     harness.run();
 
@@ -154,7 +153,7 @@ fn token_tip_for_a_prototype_lists_its_information() {
             let results = ResultsContext {
                 tabs: &[],
                 active_tab: 0,
-                outputs: &[],
+                outputs: &hactorio_core::new_eval::Evaluation::empty(),
                 settings: &settings,
                 registry: &registry,
             };
@@ -188,7 +187,7 @@ fn token_tip_for_a_variable_shows_its_value() {
     let settings = Settings::default();
     let text = "# Main\nrate = 3 :iron-plate: / second\n";
     let tabs = vec![Tab::from_text(text)];
-    let outputs = evaluate(text, &settings, &registry);
+    let outputs = hactorio_core::new_eval::evaluate(text, &registry, &settings, &|| false);
     let mut harness = Harness::builder()
         .with_size(egui::vec2(500.0, 400.0))
         .with_accessibility_check(false)
@@ -221,7 +220,7 @@ fn token_tip_for_a_variable_shows_the_latest_definition() {
     let settings = Settings::default();
     let text = "# Main\nrate = 3 :iron-plate: / second\nrate = 5 :iron-plate: / second\n";
     let tabs = vec![Tab::from_text(text)];
-    let outputs = evaluate(text, &settings, &registry);
+    let outputs = hactorio_core::new_eval::evaluate(text, &registry, &settings, &|| false);
     let mut harness = Harness::builder()
         .with_size(egui::vec2(500.0, 400.0))
         .with_accessibility_check(false)
@@ -250,7 +249,7 @@ fn token_tip_for_a_variable_shows_the_latest_definition() {
 
 #[test]
 fn multiline_result_shows_error_heading_and_message() {
-    let document = editor_document("# Main\n3 :iron-plate: + 3 :copper-cable:\n", 1, 0);
+    let document = editor_document("# Main\n1 + 3 :iron-plate:\n", 1, 0);
     let (mut harness, dir) = completion_harness("multiline-error", document);
     harness.run();
     assert!(harness.query_by_label("error").is_some());
