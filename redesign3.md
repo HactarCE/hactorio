@@ -168,3 +168,57 @@ NaN and infinities are allowed in operations, and are exposed to the user.
 ## Things I'm not sure about
 
 What should be considered facets? We could have things like "beacon" and "belt" but these _could_ be inferred from the "item" facet. Should (unscaled) "item", "fluid", and "recipe" be separate, or just one combined facet representing an item/fluid/recipe that has not been scaled or used in arithmetic?
+
+## Uncategorized/unprocessed
+
+new syntax for process scaling:
+- `Polynomial into MachineMaking` or `Polynomial into Machine` (input, infers recipe)
+- `Polynomial from MachineMaking` or `Polynomial from Machine` (output, infers recipe)
+- `Polynomial in MachineMaking` (net)
+
+
+r = 1:iron-plate:/s
+p * r/p.(r*s)
+
+new syntax for filtering:
+- `<QUALITY`
+- `>QUALITY`
+- `<=QUALITY`
+- `>=QUALITY`
+- `==QUALITY`
+- `!=QUALITY`
+
+new syntax for looping:
+```
+loop 1000 {
+  p += p.out<:rare: into :recycler:
+}
+```
+
+e.g.,
+
+```
+p = :scrap: into :recycler:
+```
+
+
+
+s
+J
+W
+(item & fluid) /s
+s / (item & fluid)
+(item & fluid) / J
+J / (item & fluid)
+(item & fluid) / W
+W / (item & fluid)
+
+numerator:
+- Vec<Item or Fluid>
+- seconds: bool
+- joules: bool
+
+denominator:
+- Option<Item or Fluid>
+- seconds: bool
+- joules: bool
