@@ -849,10 +849,6 @@ fn lex(line: &str, registry: &Registry) -> Result<Vec<Token>, ParseError> {
                         break;
                     }
                 }
-                // `stack-size` is the one hyphenated property name.
-                if &line[start..index] == "stack" && line[index..].starts_with("-size") {
-                    index += 5;
-                }
                 let word = &line[start..index];
                 let span = Span::new(start as u32, index as u32);
                 let kind = keyword(word).unwrap_or_else(|| TokenKind::Ident(word.to_string()));
@@ -1174,9 +1170,15 @@ mod tests {
     }
 
     #[test]
-    fn rejects_stack_size_as_an_identifier() {
+    fn stack_size_is_not_special_cased() {
         assert!(parse_line("stack-size = 7", &registry()).is_err());
-        assert!(parse_line("stack-size", &registry()).is_err());
+        assert!(matches!(
+            expr("stack-size").kind,
+            ExprKind::Binary {
+                op: BinaryOp::Sub,
+                ..
+            }
+        ));
         assert!(parse_line("x.stack-size", &registry()).is_err());
         assert!(parse_line("x.slots", &registry()).is_err());
         assert!(parse_line("x.:stack-size:", &registry()).is_ok());

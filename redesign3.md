@@ -157,6 +157,12 @@ Reason for keyword precedences: `with` should bind looser than `+` because `+` i
 
 ## Misc
 
+### Other things to change/simplify compared to old implementation
+
+- is Belt facet necessary?
+- machine idle power usage should be included in power usage, rounded up to nearest whole machine
+- process should track number of machines per config _and_ recipe
+
 ### Comparison to zero
 
 All comparisons to zero use approximate comparison.
@@ -167,7 +173,7 @@ NaN and infinities are allowed in operations, and are exposed to the user.
 
 ## Things I'm not sure about
 
-What should be considered facets? We could have things like "beacon" and "belt" but these _could_ be inferred from the "item" facet. Should (unscaled) "item", "fluid", and "recipe" be separate, or just one combined facet representing an item/fluid/recipe that has not been scaled or used in arithmetic?
+What concepts get facets? We could have things like "beacon" and "belt" but these _could_ be inferred from the "item" facet. Should (unscaled) "item", "fluid", and "recipe" be separate, or just one combined facet representing an item/fluid/recipe that has not been scaled or used in arithmetic?
 
 ## Uncategorized/unprocessed
 

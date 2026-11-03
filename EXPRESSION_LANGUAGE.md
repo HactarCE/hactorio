@@ -99,8 +99,6 @@ resolved through the registry glyph assignment.
 
 An identifier starts with an ASCII letter or `_` and continues with ASCII
 letters, digits, or `_`. Hyphens are not allowed in identifiers.
-`stack-size` is a special-cased lexer word, but it is not a valid identifier and
-cannot be used as a variable name.
 
 Keywords are reserved and cannot be variables: `in`, `with`, `making`, `joule`,
 `J`, `kJ`, `MJ`, `GJ`, `TJ`, `watt`, `W`, `kW`, `MW`, `GW`, `TW`, `craft`,
