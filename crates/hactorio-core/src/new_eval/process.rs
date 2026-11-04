@@ -363,38 +363,44 @@ pub fn quality_shares(base: Quality, chance: f64) -> Vec<(Quality, f64)> {
     shares
 }
 
-/// Totals a process's rows, scaled by their row scale (§6.4).
-pub fn totals(
-    process: &super::value::Process,
+/// The net rows of a set of rows: outputs minus inputs, before any assignment
+/// adjustment (§5.4).
+pub fn net(
+    rows: &BTreeMap<super::value::RowKey, f64>,
     registry: &Registry,
     settings: &Settings,
-    which: Rows,
 ) -> Option<BTreeMap<Resource, f64>> {
     let mut total: BTreeMap<Resource, f64> = BTreeMap::new();
-    for (key, scale) in &process.rows {
+    for (key, scale) in rows {
         let rates = row_rates(key, registry, settings)?;
-        let add =
-            |total: &mut BTreeMap<Resource, f64>, rows: &BTreeMap<Resource, f64>, sign: f64| {
-                for (resource, amount) in rows {
-                    *total.entry(*resource).or_insert(0.0) += amount * scale * sign;
-                }
-            };
-        match which {
-            Rows::Inputs => add(&mut total, &rates.inputs, 1.0),
-            Rows::Outputs => add(&mut total, &rates.outputs, 1.0),
-            Rows::Net => {
-                add(&mut total, &rates.outputs, 1.0);
-                add(&mut total, &rates.inputs, -1.0);
-            }
+        for (resource, amount) in &rates.outputs {
+            *total.entry(*resource).or_insert(0.0) += amount * scale;
         }
-    }
-    if which == Rows::Net {
-        for (resource, amount) in &process.net {
-            *total.entry(*resource).or_insert(0.0) += amount;
+        for (resource, amount) in &rates.inputs {
+            *total.entry(*resource).or_insert(0.0) -= amount * scale;
         }
     }
     total.retain(|_, amount| !super::value::is_zero(*amount));
     Some(total)
+}
+
+/// A process's net rows, or the part of them it produces or consumes (§5.4).
+pub fn totals(process: &super::value::Process, which: Rows) -> BTreeMap<Resource, f64> {
+    match which {
+        Rows::Net => process.net.clone(),
+        Rows::Inputs => process
+            .net
+            .iter()
+            .filter(|(_, amount)| amount.is_sign_negative())
+            .map(|(resource, amount)| (*resource, -amount))
+            .collect(),
+        Rows::Outputs => process
+            .net
+            .iter()
+            .filter(|(_, amount)| amount.is_sign_positive())
+            .map(|(resource, amount)| (*resource, *amount))
+            .collect(),
+    }
 }
 
 /// The craft rate or craft total of a process (§6.4).

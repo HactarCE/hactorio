@@ -255,7 +255,7 @@ impl Runner<'_> {
                 .lookup(&place.name)
                 .and_then(|current| Ok((current, self.eval(value)?)))
                 .and_then(|(current, rhs)| {
-                    assign_resource(&current, resource, op, &rhs, self.registry, self.settings)
+                    assign_resource(&current, resource, op, &rhs)
                 }),
             Some(other) => Err(ValueError::new(format!(
                 "`{}` is not assignable; only resources are",
@@ -732,8 +732,7 @@ impl Runner<'_> {
                 Ok(Value::number(multiplier))
             }
             Selector::Resource(resource) => {
-                let totals = process::totals(process, self.registry, self.settings, Rows::Net)
-                    .ok_or_else(|| ValueError::new("a row has no rate"))?;
+                let totals = process::totals(process, Rows::Net);
                 let selected = Quantity::new(Amount::Resources(totals), None, rate, 0, 0)
                     .select(&resource);
                 Ok(Value::quantity(selected))
@@ -753,8 +752,7 @@ impl Runner<'_> {
         rate: i32,
         _unused: bool,
     ) -> Result<Value, ValueError> {
-        let totals = process::totals(process, self.registry, self.settings, Rows::Net)
-            .ok_or_else(|| ValueError::new("a row has no rate"))?;
+        let totals = process::totals(process, Rows::Net);
         let quantity = Quantity::new(Amount::Resources(totals), None, rate, 0, 0);
         Ok(Value::quantity(quantity.select_medium(item)))
     }
@@ -765,8 +763,7 @@ impl Runner<'_> {
         which: Rows,
         rate: i32,
     ) -> Result<Value, ValueError> {
-        let totals = process::totals(process, self.registry, self.settings, which)
-            .ok_or_else(|| ValueError::new("a row has no rate"))?;
+        let totals = process::totals(process, which);
         Ok(Value::quantity(Quantity::new(
             Amount::Resources(totals),
             None,
@@ -927,8 +924,6 @@ fn assign_resource(
     resource: &ResourceRef,
     op: AssignOp,
     rhs: &Value,
-    registry: &Registry,
-    settings: &Settings,
 ) -> Result<Value, ValueError> {
     let Value::Process(process) = current else {
         return Err(ValueError::new(format!(
@@ -993,14 +988,8 @@ fn assign_resource(
         }
     }
 
-    // Assignment works on the row's total, so `=` replaces what the recipes
-    // produce and the stored value is only the difference.
-    let mut recipe_only = process.clone();
-    recipe_only.net.clear();
-    let base = process::totals(&recipe_only, registry, settings, Rows::Net)
-        .and_then(|totals| totals.get(&target).copied())
-        .unwrap_or(0.0);
-    let total = base + process.net.get(&target).copied().unwrap_or(0.0);
+    // The stored net is the row's total, so assignment replaces it in place.
+    let total = process.net.get(&target).copied().unwrap_or(0.0);
     let total = match op {
         AssignOp::Assign => coefficient,
         AssignOp::Add => total + coefficient,
@@ -1008,12 +997,11 @@ fn assign_resource(
         AssignOp::Mul => total * coefficient,
         AssignOp::Div => total / coefficient,
     };
-    let assigned = total - base;
     let mut net = process.net.clone();
-    if super::value::is_zero(assigned) {
+    if super::value::is_zero(total) {
         net.remove(&target);
     } else {
-        net.insert(target, assigned);
+        net.insert(target, total);
     }
     Ok(Value::Process(Process {
         net,
@@ -1022,14 +1010,11 @@ fn assign_resource(
 }
 
 /// The resources a process's net rows mention, for completion ranking.
-pub fn process_resources(
-    process: &Process,
-    registry: &Registry,
-    settings: &Settings,
-) -> Vec<Resource> {
-    process::totals(process, registry, settings, Rows::Net)
-        .map(|totals| totals.keys().copied().collect())
-        .unwrap_or_default()
+pub fn process_resources(process: &Process) -> Vec<Resource> {
+    process::totals(process, Rows::Net)
+        .keys()
+        .copied()
+        .collect()
 }
 
 /// Whether `name` is a property this value can read (§6.6), which is what
@@ -1255,8 +1240,9 @@ fn build_process(
     } else {
         Extent::Unscaled
     };
-    let _ = settings;
-    let process = Process::new(extent, rows);
+    let net = process::net(&rows, registry, settings)
+        .ok_or_else(|| ValueError::new("a row of that process has no rate"))?;
+    let process = Process::new(extent, rows, net);
     if extent == Extent::Machines {
         return process
             .collapsed()
@@ -1324,6 +1310,7 @@ fn size_value(
     if terms.is_empty() && quantity.craft == 0 {
         return Ok(Value::Process(Process::new(
             Extent::Unspecified,
+            BTreeMap::new(),
             BTreeMap::new(),
         )));
     }
@@ -1410,7 +1397,9 @@ fn size_value(
     } else {
         Extent::MachineSeconds
     };
-    Ok(Value::Process(Process::new(extent, rows)))
+    let net = process::net(&rows, registry, settings)
+        .ok_or_else(|| ValueError::new("a row of that process has no rate"))?;
+    Ok(Value::Process(Process::new(extent, rows, net)))
 }
 
 /// The coefficient a row contributes for `resource`, positive.

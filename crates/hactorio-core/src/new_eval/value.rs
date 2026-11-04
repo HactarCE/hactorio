@@ -1069,17 +1069,18 @@ pub struct Process {
     pub extent: Extent,
     /// Row scale in the extent's unit.
     pub rows: BTreeMap<RowKey, f64>,
-    /// Net rows written by property assignment, in the extent's unit (§2.2).
+    /// Net rows in the extent's unit: what the recipes produce minus what they
+    /// consume, plus any assignment adjustment (§5.4).
     pub net: BTreeMap<Resource, f64>,
 }
 
 impl Process {
-    pub fn new(extent: Extent, rows: BTreeMap<RowKey, f64>) -> Self {
-        Self {
-            extent,
-            rows,
-            net: BTreeMap::new(),
-        }
+    pub fn new(
+        extent: Extent,
+        rows: BTreeMap<RowKey, f64>,
+        net: BTreeMap<Resource, f64>,
+    ) -> Self {
+        Self { extent, rows, net }
     }
 
     pub fn scale(&self, factor: f64) -> Self {

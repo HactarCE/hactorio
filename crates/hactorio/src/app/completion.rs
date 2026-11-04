@@ -628,13 +628,7 @@ fn value_before_dot(
 ///
 /// Unit selectors only read a process; an item outside its net would select
 /// nothing.
-fn unit_in_value(
-    value: &Value,
-    id: EntryId,
-    entry: &Entry,
-    settings: &Settings,
-    registry: &Registry,
-) -> bool {
+fn unit_in_value(value: &Value, id: EntryId, entry: &Entry) -> bool {
     let Value::Process(process) = value else {
         return false;
     };
@@ -646,7 +640,7 @@ fn unit_in_value(
             quality: Quality::Normal,
         })
     };
-    process_resources(process, registry, settings).contains(&resource)
+    process_resources(process).contains(&resource)
 }
 
 pub(super) fn completion_items(
@@ -723,7 +717,7 @@ pub(super) fn completion_items(
             let insert = entry.glyph.to_string();
             let rank = exact_rank(label, &insert, needle);
             let present = value.as_ref().is_some_and(|value| {
-                unit_in_value(value, EntryId::from_index(index), entry, settings, registry)
+                unit_in_value(value, EntryId::from_index(index), entry)
             });
             let mut score = if needle.is_empty() {
                 score as f64

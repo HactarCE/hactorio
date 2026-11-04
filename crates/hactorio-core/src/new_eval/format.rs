@@ -176,9 +176,7 @@ pub fn format_process_panel(
     }
 
     for (header, which) in [("in", Rows::Inputs), ("out", Rows::Outputs)] {
-        let Some(totals) = super::process::totals(process, registry, settings, which) else {
-            continue;
-        };
+        let totals = super::process::totals(process, which);
         if totals.is_empty() {
             continue;
         }
@@ -236,7 +234,8 @@ fn format_process(process: &Process, settings: &Settings, registry: &Registry) -
     } else {
         format!("/{}", time_unit_name(settings.time_unit))
     };
-    if let Some(totals) = super::process::totals(process, registry, settings, Rows::Net) {
+    {
+        let totals = super::process::totals(process, Rows::Net);
         let factor = if machine_seconds {
             1.0
         } else {
