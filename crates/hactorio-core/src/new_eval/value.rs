@@ -148,10 +148,7 @@ impl Resource {
 
     pub fn with_quality(self, quality: Quality) -> Self {
         match self {
-            Resource::Item(item) => Resource::Item(Item {
-                quality,
-                ..item
-            }),
+            Resource::Item(item) => Resource::Item(Item { quality, ..item }),
             fluid => fluid,
         }
     }
@@ -211,9 +208,10 @@ impl Amount {
     /// The single term of a one-term bundle, which is what cancellation needs.
     pub fn single_term(&self) -> Option<(Resource, f64)> {
         match self {
-            Amount::Resources(terms) if terms.len() == 1 => {
-                terms.iter().next().map(|(resource, coefficient)| (*resource, *coefficient))
-            }
+            Amount::Resources(terms) if terms.len() == 1 => terms
+                .iter()
+                .next()
+                .map(|(resource, coefficient)| (*resource, *coefficient)),
             _ => None,
         }
     }
@@ -375,10 +373,16 @@ impl Quantity {
                         // The denominator cancels against the bundle (§5.3).
                         (self.amount.scale(coefficient), None)
                     } else {
-                        (Self::multiply_amounts(&self.amount, &other.amount)?, Some(per))
+                        (
+                            Self::multiply_amounts(&self.amount, &other.amount)?,
+                            Some(per),
+                        )
                     }
                 } else {
-                    (Self::multiply_amounts(&self.amount, &other.amount)?, Some(per))
+                    (
+                        Self::multiply_amounts(&self.amount, &other.amount)?,
+                        Some(per),
+                    )
                 }
             }
             (None, Some(per)) => {
@@ -386,10 +390,16 @@ impl Quantity {
                     if resource == per {
                         (other.amount.scale(coefficient), None)
                     } else {
-                        (Self::multiply_amounts(&self.amount, &other.amount)?, Some(per))
+                        (
+                            Self::multiply_amounts(&self.amount, &other.amount)?,
+                            Some(per),
+                        )
                     }
                 } else {
-                    (Self::multiply_amounts(&self.amount, &other.amount)?, Some(per))
+                    (
+                        Self::multiply_amounts(&self.amount, &other.amount)?,
+                        Some(per),
+                    )
                 }
             }
             (None, None) => (Self::multiply_amounts(&self.amount, &other.amount)?, None),
@@ -446,7 +456,9 @@ impl Quantity {
 
     pub fn pow(&self, exponent: &Self) -> Result<Self> {
         let Some(power) = exponent.is_dimensionless_number() else {
-            return Err(ValueError::new("the exponent must be a dimensionless number"));
+            return Err(ValueError::new(
+                "the exponent must be a dimensionless number",
+            ));
         };
         let Some(base) = self.amount.number_value() else {
             return Err(ValueError::new(
@@ -994,9 +1006,7 @@ impl Machine {
 impl Machine {
     /// Machines add when they are the same prototype, quality, and config.
     fn same(left: &Self, right: &Self) -> Option<Self> {
-        if left.entry != right.entry
-            || left.quality != right.quality
-            || left.config != right.config
+        if left.entry != right.entry || left.quality != right.quality || left.config != right.config
         {
             return None;
         }
@@ -1187,11 +1197,7 @@ impl Process {
                 extent: Extent::MachineSeconds,
                 // An unscaled row is one machine, so its machine-seconds are
                 // the seconds themselves.
-                rows: self
-                    .rows
-                    .keys()
-                    .map(|key| (key.clone(), seconds))
-                    .collect(),
+                rows: self.rows.keys().map(|key| (key.clone(), seconds)).collect(),
                 net: self
                     .net
                     .iter()
@@ -1325,14 +1331,13 @@ impl MultiValue {
 
     pub fn sub(&self, other: &Self) -> Result<Self> {
         let negated = other.negate()?;
-        self.add(&negated)
-            .map_err(|_| {
-                ValueError::new(format!(
-                    "`-` dropped every facet (left: {}, right: {})",
-                    self.facets(),
-                    other.facets()
-                ))
-            })
+        self.add(&negated).map_err(|_| {
+            ValueError::new(format!(
+                "`-` dropped every facet (left: {}, right: {})",
+                self.facets(),
+                other.facets()
+            ))
+        })
     }
 
     pub fn mul(&self, other: &Self) -> Result<Self> {
@@ -1374,7 +1379,11 @@ impl MultiValue {
 
     pub fn pow(&self, other: &Self) -> Result<Self> {
         let quantity = Self::combine(&self.quantity, &other.quantity, |a, b| a.pow(b).ok());
-        Self { quantity, ..Self::default() }.or_dropped("^", self, other)
+        Self {
+            quantity,
+            ..Self::default()
+        }
+        .or_dropped("^", self, other)
     }
 
     pub fn negate(&self) -> Result<Self> {
@@ -1420,7 +1429,10 @@ impl MultiValue {
                 ..quantity.clone()
             }),
             stack_rate: self.stack_rate.as_ref().map(|stacks| stacks.scale(factor)),
-            stack_capacity: self.stack_capacity.as_ref().map(|stacks| stacks.scale(factor)),
+            stack_capacity: self
+                .stack_capacity
+                .as_ref()
+                .map(|stacks| stacks.scale(factor)),
             machine: self.machine.as_ref().map(|machine| Machine {
                 count: Some(machine.count() * factor),
                 ..machine.clone()
@@ -1490,7 +1502,9 @@ impl MultiValue {
                 self.facets()
             )));
         };
-        Ok(Self::quantity(quantity.filter_amount(comparison, threshold)))
+        Ok(Self::quantity(
+            quantity.filter_amount(comparison, threshold),
+        ))
     }
 
     pub fn filter_quality(&self, comparison: Comparison, quality: Quality) -> Result<Self> {
@@ -1640,9 +1654,10 @@ impl Value {
 
     pub fn add(&self, other: &Self) -> Result<Self> {
         if let (Some(left), Some(right)) = (self.as_process(), other.as_process()) {
-            return left.add(right).map(Value::Process).ok_or_else(|| {
-                ValueError::new("processes add only when their extents agree")
-            });
+            return left
+                .add(right)
+                .map(Value::Process)
+                .ok_or_else(|| ValueError::new("processes add only when their extents agree"));
         }
         Ok(Value::Multi(self.as_multi("+")?.add(other.as_multi("+")?)?))
     }
@@ -1659,18 +1674,26 @@ impl Value {
             return self.scale_value(other, factor);
         }
         if let Some(factor) = other.dimensionless() {
-            return self.scale_value(self, factor).and_then(|_| self.scale_value(self, factor));
+            return self
+                .scale_value(self, factor)
+                .and_then(|_| self.scale_value(self, factor));
         }
         // Machines multiplied by a time become machine-seconds (§5.4).
         if let (Some(process), Some(seconds)) = (self.as_process(), other.pure_time()) {
-            return process.times_seconds(seconds).map(Value::Process).ok_or_else(|| {
-                ValueError::new("a machine-seconds process cannot be multiplied by a time")
-            });
+            return process
+                .times_seconds(seconds)
+                .map(Value::Process)
+                .ok_or_else(|| {
+                    ValueError::new("a machine-seconds process cannot be multiplied by a time")
+                });
         }
         if let (Some(seconds), Some(process)) = (self.pure_time(), other.as_process()) {
-            return process.times_seconds(seconds).map(Value::Process).ok_or_else(|| {
-                ValueError::new("a machine-seconds process cannot be multiplied by a time")
-            });
+            return process
+                .times_seconds(seconds)
+                .map(Value::Process)
+                .ok_or_else(|| {
+                    ValueError::new("a machine-seconds process cannot be multiplied by a time")
+                });
         }
         Ok(Value::Multi(self.as_multi("*")?.mul(other.as_multi("*")?)?))
     }
@@ -1680,20 +1703,25 @@ impl Value {
             return self.scale_value(self, 1.0 / factor);
         }
         if let (Some(process), Some(seconds)) = (self.as_process(), other.pure_time()) {
-            return process.divided_by_seconds(seconds).map(Value::Process).ok_or_else(|| {
-                ValueError::new("only a machine-seconds process can be divided by a time")
-            });
+            return process
+                .divided_by_seconds(seconds)
+                .map(Value::Process)
+                .ok_or_else(|| {
+                    ValueError::new("only a machine-seconds process can be divided by a time")
+                });
         }
         Ok(Value::Multi(self.as_multi("/")?.div(other.as_multi("/")?)?))
     }
 
     fn scale_value(&self, target: &Self, factor: f64) -> Result<Self> {
         match target {
-            Value::Process(process) => process.scaled(factor).map(Value::Process).ok_or_else(|| {
-                ValueError::new(
-                    "scaling a process needs one recipe, and that process has several",
-                )
-            }),
+            Value::Process(process) => {
+                process.scaled(factor).map(Value::Process).ok_or_else(|| {
+                    ValueError::new(
+                        "scaling a process needs one recipe, and that process has several",
+                    )
+                })
+            }
             _ => Ok(Value::Multi(target.as_multi("*")?.scale(factor)?)),
         }
     }
@@ -1739,7 +1767,9 @@ impl Value {
             )));
         }
         if let Value::Quality(quality) = self {
-            return Ok(Value::Multi(other.as_multi("juxtaposition")?.qualify(*quality)?));
+            return Ok(Value::Multi(
+                other.as_multi("juxtaposition")?.qualify(*quality)?,
+            ));
         }
         if let Some(factor) = self.dimensionless() {
             return self.scale_value(other, factor);
@@ -1747,7 +1777,10 @@ impl Value {
         if let Some(factor) = other.dimensionless() {
             return self.scale_value(self, factor);
         }
-        let (left, right) = (self.as_multi("juxtaposition")?, other.as_multi("juxtaposition")?);
+        let (left, right) = (
+            self.as_multi("juxtaposition")?,
+            other.as_multi("juxtaposition")?,
+        );
         if let Some(applied) = left.apply_stacks(right, stack_size)? {
             return Ok(Value::Multi(applied));
         }
@@ -1830,7 +1863,11 @@ mod tests {
     #[test]
     fn division_moves_a_single_term_resource_into_the_denominator() {
         let ratio = Quantity::number(6.0)
-            .div(&Quantity::resource(iron()).mul(&Quantity::number(2.0)).unwrap())
+            .div(
+                &Quantity::resource(iron())
+                    .mul(&Quantity::number(2.0))
+                    .unwrap(),
+            )
             .unwrap();
         assert_eq!(ratio.amount, Amount::Number(3.0));
         assert_eq!(ratio.per, Some(iron()));
@@ -1839,12 +1876,23 @@ mod tests {
     #[test]
     fn multiplying_by_the_denominator_cancels_it() {
         let ratio = Quantity::resource(copper())
-            .div(&Quantity::resource(iron()).mul(&Quantity::number(2.0)).unwrap())
+            .div(
+                &Quantity::resource(iron())
+                    .mul(&Quantity::number(2.0))
+                    .unwrap(),
+            )
             .unwrap();
-        let product = ratio.mul(&Quantity::resource(iron()).mul(&Quantity::number(3.0)).unwrap());
+        let product = ratio.mul(
+            &Quantity::resource(iron())
+                .mul(&Quantity::number(3.0))
+                .unwrap(),
+        );
         let product = product.unwrap();
         assert_eq!(product.per, None);
-        assert_eq!(product.amount, Amount::Resources(BTreeMap::from([(copper(), 1.5)])));
+        assert_eq!(
+            product.amount,
+            Amount::Resources(BTreeMap::from([(copper(), 1.5)]))
+        );
     }
 
     #[test]
@@ -1860,9 +1908,11 @@ mod tests {
 
     #[test]
     fn a_product_of_two_bundles_is_unrepresentable() {
-        assert!(Quantity::resource(iron())
-            .mul(&Quantity::resource(copper()))
-            .is_err());
+        assert!(
+            Quantity::resource(iron())
+                .mul(&Quantity::resource(copper()))
+                .is_err()
+        );
     }
 
     #[test]
@@ -1873,7 +1923,10 @@ mod tests {
         assert_eq!(rate.second, -1);
         let amount = rate.mul(&Quantity::time(4.0)).unwrap();
         assert_eq!(amount.second, 0);
-        assert_eq!(amount.amount, Amount::Resources(BTreeMap::from([(iron(), 4.0)])));
+        assert_eq!(
+            amount.amount,
+            Amount::Resources(BTreeMap::from([(iron(), 4.0)]))
+        );
     }
 
     #[test]
@@ -1881,9 +1934,11 @@ mod tests {
         let squared = Quantity::time(2.0).pow(&Quantity::number(2.0)).unwrap();
         assert_eq!(squared.amount, Amount::Number(4.0));
         assert_eq!(squared.second, 2);
-        assert!(Quantity::resource(iron())
-            .pow(&Quantity::number(2.0))
-            .is_err());
+        assert!(
+            Quantity::resource(iron())
+                .pow(&Quantity::number(2.0))
+                .is_err()
+        );
         assert!(Quantity::time(2.0).pow(&Quantity::time(1.0)).is_err());
     }
 

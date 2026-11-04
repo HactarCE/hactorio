@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use egui::{RichText, Sense, TextStyle, Ui};
 use hactorio_core::Settings;
 use hactorio_core::new_eval::{
-    Amount, Item, Output, Quality, Quantity, Resource, Value, format_facets,
-    format_number, format_value, is_zero, line_hash,
+    Amount, Item, Output, Quality, Quantity, Resource, Value, format_facets, format_number,
+    format_value, is_zero, line_hash,
 };
 use hactorio_data::{PrototypeKind, Registry};
 
@@ -81,10 +81,7 @@ impl ResultsContext<'_> {
                 ("quality", module.effect.quality),
             ] {
                 if !is_zero(value) {
-                    rows.push((
-                        label.to_string(),
-                        signed_percent(value, self.settings),
-                    ));
+                    rows.push((label.to_string(), signed_percent(value, self.settings)));
                 }
             }
             self.section_grid(ui, "module", rows);
@@ -111,7 +108,12 @@ impl ResultsContext<'_> {
                 ),
                 (
                     "productivity allowed".to_string(),
-                    if recipe.allow_productivity { "yes" } else { "no" }.to_string(),
+                    if recipe.allow_productivity {
+                        "yes"
+                    } else {
+                        "no"
+                    }
+                    .to_string(),
                 ),
             ];
             if !recipe.ingredients.is_empty() {
@@ -133,7 +135,9 @@ impl ResultsContext<'_> {
                     recipe
                         .products
                         .iter()
-                        .map(|product| self.amount_text(product.kind, &product.name, product.amount))
+                        .map(|product| {
+                            self.amount_text(product.kind, &product.name, product.amount)
+                        })
                         .collect::<Vec<_>>()
                         .join(", "),
                 ));
@@ -143,10 +147,7 @@ impl ResultsContext<'_> {
 
         if let Some(machine) = entry.machine() {
             let mut rows = vec![
-                (
-                    "speed".to_string(),
-                    format_number(machine.speed),
-                ),
+                ("speed".to_string(), format_number(machine.speed)),
                 ("module slots".to_string(), machine.module_slots.to_string()),
             ];
             if !is_zero(machine.base_productivity) {
@@ -276,11 +277,7 @@ impl ResultsContext<'_> {
             joule: 0,
             craft: 0,
         };
-        format_value(
-            &Value::quantity(quantity),
-            self.settings,
-            self.registry,
-        )
+        format_value(&Value::quantity(quantity), self.settings, self.registry)
     }
 }
 

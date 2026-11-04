@@ -142,35 +142,33 @@ pub fn highlights(text: &str) -> Vec<(Span, Highlight)> {
                     None
                 } else {
                     match keyword(word) {
-                    Some(
-                        Keyword::In
-                        | Keyword::Into
-                        | Keyword::From
-                        | Keyword::Making,
-                    ) => {
-                        Some(Highlight::OperatorKeyword)
-                    }
-                    Some(
-                        Keyword::Joule(_) | Keyword::Watt(_) | Keyword::Craft | Keyword::Time(_),
-                    ) => Some(Highlight::UnitKeyword),
-                    // A bare multiplier only means a scale when it directly
-                    // follows a number; elsewhere it is an ordinary word.
-                    None if is_scale(word)
-                        && matches!(
-                            spans.last(),
-                            Some((span, Highlight::Number)) if span.end as usize == start
-                        ) =>
-                    {
-                        Some(Highlight::UnitKeyword)
-                    }
-                    None if defines => {
-                        variables.insert(word);
-                        Some(Highlight::Variable)
-                    }
-                    // `value.rate` selects the property `rate`; a variable of
-                    // that name is not in play there.
-                    None if variables.contains(word) => Some(Highlight::Variable),
-                    None => None,
+                        Some(Keyword::In | Keyword::Into | Keyword::From | Keyword::Making) => {
+                            Some(Highlight::OperatorKeyword)
+                        }
+                        Some(
+                            Keyword::Joule(_)
+                            | Keyword::Watt(_)
+                            | Keyword::Craft
+                            | Keyword::Time(_),
+                        ) => Some(Highlight::UnitKeyword),
+                        // A bare multiplier only means a scale when it directly
+                        // follows a number; elsewhere it is an ordinary word.
+                        None if is_scale(word)
+                            && matches!(
+                                spans.last(),
+                                Some((span, Highlight::Number)) if span.end as usize == start
+                            ) =>
+                        {
+                            Some(Highlight::UnitKeyword)
+                        }
+                        None if defines => {
+                            variables.insert(word);
+                            Some(Highlight::Variable)
+                        }
+                        // `value.rate` selects the property `rate`; a variable of
+                        // that name is not in play there.
+                        None if variables.contains(word) => Some(Highlight::Variable),
+                        None => None,
                     }
                 };
                 if let Some(highlight) = highlight {
@@ -244,7 +242,10 @@ mod tests {
         assert_eq!(classified("p.in"), Vec::new());
         assert_eq!(classified("p . in"), Vec::new());
         // The operator is still an operator away from a dot.
-        assert_eq!(classified("a in b"), vec![("in", Highlight::OperatorKeyword)]);
+        assert_eq!(
+            classified("a in b"),
+            vec![("in", Highlight::OperatorKeyword)]
+        );
     }
 
     #[test]

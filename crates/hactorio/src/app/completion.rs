@@ -3,11 +3,11 @@
 use std::collections::HashMap;
 
 use egui::{Key, Modifiers, TextStyle, Ui};
-use hactorio_core::new_eval::{
-    Item, Output, Quality, Resource, Value, definition_value_span, evaluate,
-    process_resources, property_is_available,
-};
 use hactorio_core::Settings;
+use hactorio_core::new_eval::{
+    Item, Output, Quality, Resource, Value, definition_value_span, evaluate, process_resources,
+    property_is_available,
+};
 use hactorio_data::{EMPTY_GLYPH, Entry, EntryId, QUALITIES, Registry, SIGNALS};
 
 /// Maximum height of the autocomplete popup, before it scrolls.
@@ -672,11 +672,9 @@ pub(super) fn completion_items(
             let references = registry.reference_count(EntryId::from_index(index));
             let insert = entry.glyph.to_string();
             let rank = exact_rank(label, &insert, needle);
-            let present = value
-                .as_ref()
-                .is_some_and(|value| {
-                    unit_in_value(value, EntryId::from_index(index), entry, settings, registry)
-                });
+            let present = value.as_ref().is_some_and(|value| {
+                unit_in_value(value, EntryId::from_index(index), entry, settings, registry)
+            });
             let mut score = if needle.is_empty() {
                 score as f64
             } else {
@@ -802,10 +800,8 @@ pub(super) fn completion_items(
         }
     } else if context == CompletionContext::Normal {
         for signal in SIGNALS.iter().filter(|signal| {
-            matches!(
-                signal.id,
-                "stack-size" | "stacked-belt" | "recycling"
-            ) && signal_matches(signal.id, needle)
+            matches!(signal.id, "stack-size" | "stacked-belt" | "recycling")
+                && signal_matches(signal.id, needle)
         }) {
             let label = signal.id.to_string();
             if let Some(item) = word_completion(

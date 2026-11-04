@@ -422,7 +422,10 @@ fn hidden_items_and_recipes_are_not_suggested() {
     }
 
     let suggestions = suggested_ids(&registry, "");
-    assert!(suggestions.contains(&glyph("iron-plate")), "{suggestions:?}");
+    assert!(
+        suggestions.contains(&glyph("iron-plate")),
+        "{suggestions:?}"
+    );
     // A visible item keeps its entry even when its recipe is hidden.
     assert!(suggestions.contains(&glyph("pistol")), "{suggestions:?}");
     for hidden in ["loader", "iron-plate-recycling", "rocket-part"] {
@@ -433,9 +436,15 @@ fn hidden_items_and_recipes_are_not_suggested() {
     }
 
     let suggestions = suggested_ids(&registry, "making ");
-    assert!(suggestions.contains(&glyph("iron-plate")), "{suggestions:?}");
+    assert!(
+        suggestions.contains(&glyph("iron-plate")),
+        "{suggestions:?}"
+    );
     // A visible recipe is still offered when its item is hidden.
-    assert!(suggestions.contains(&glyph("rocket-part")), "{suggestions:?}");
+    assert!(
+        suggestions.contains(&glyph("rocket-part")),
+        "{suggestions:?}"
+    );
     for hidden in ["loader", "iron-plate-recycling", "pistol"] {
         assert!(
             !suggestions.contains(&glyph(hidden)),
@@ -1255,7 +1264,10 @@ fn a_quantity_offers_items_after_a_dot() {
             .map(|item| item.label)
             .collect()
     };
-    assert!(labels.iter().any(|label| label == "iron-plate"), "{labels:?}");
+    assert!(
+        labels.iter().any(|label| label == "iron-plate"),
+        "{labels:?}"
+    );
     assert!(labels.iter().any(|label| label == "water"), "{labels:?}");
     assert!(labels.iter().any(|label| label == ".item"), "{labels:?}");
     // A selector can be qualified, so the qualities are offered here too.
@@ -1303,7 +1315,14 @@ fn a_process_offers_its_signals_after_a_dot() {
             .collect()
     };
     for expected in [
-        ".speed", ".electric", ".in", ".out", ".net", ".item", ".fluid", ".machines",
+        ".speed",
+        ".electric",
+        ".in",
+        ".out",
+        ".net",
+        ".item",
+        ".fluid",
+        ".machines",
     ] {
         assert!(
             labels.iter().any(|label| label == expected),
@@ -1315,11 +1334,7 @@ fn a_process_offers_its_signals_after_a_dot() {
 #[test]
 fn qualities_are_offered_with_their_own_glyph() {
     let registry = autocomplete_registry();
-    for (query, id) in [
-        ("rar", "rare"),
-        ("leg", "legendary"),
-        ("nor", "normal"),
-    ] {
+    for (query, id) in [("rar", "rare"), ("leg", "legendary"), ("nor", "normal")] {
         let item = first_completion(&registry, query);
         assert_eq!(item.label, id, "{query}");
         let glyph = hactorio_data::quality_by_id(id).unwrap().glyph;
@@ -1367,10 +1382,11 @@ fn operators_are_suggested_without_with() {
         assert!(labels.iter().any(|label| label == keyword), "{keyword}");
     }
     let (start, word) = completion_word("wit", 3);
-    let labels: Vec<String> = completion_items(&registry, &Settings::default(), "wit", start, &word)
-        .into_iter()
-        .map(|item| item.label)
-        .collect();
+    let labels: Vec<String> =
+        completion_items(&registry, &Settings::default(), "wit", start, &word)
+            .into_iter()
+            .map(|item| item.label)
+            .collect();
     assert!(!labels.iter().any(|label| label == "with"), "{labels:?}");
 }
 
@@ -1615,4 +1631,3 @@ fn completion_after_dot_reads_the_operand_of_a_reassignment() {
     };
     assert!(present < absent, "{labels:?}");
 }
-

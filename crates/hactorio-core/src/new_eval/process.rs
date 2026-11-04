@@ -43,7 +43,12 @@ pub fn row_rates(key: &RowKey, registry: &Registry, settings: &Settings) -> Opti
 
     let mut inputs = BTreeMap::new();
     for ingredient in &recipe.ingredients {
-        let resource = resource_of(ingredient.kind, &ingredient.name, key.recipe_quality, registry)?;
+        let resource = resource_of(
+            ingredient.kind,
+            &ingredient.name,
+            key.recipe_quality,
+            registry,
+        )?;
         *inputs.entry(resource).or_insert(0.0) += ingredient.amount * craft_per_second;
     }
     let mut outputs = BTreeMap::new();
@@ -56,7 +61,8 @@ pub fn row_rates(key: &RowKey, registry: &Registry, settings: &Settings) -> Opti
             PrototypeKind::Item => {
                 // Quality modules spread each product over the qualities above
                 // the recipe's own (§6.3).
-                for (quality, share) in quality_shares(key.recipe_quality, modifiers.quality_chance) {
+                for (quality, share) in quality_shares(key.recipe_quality, modifiers.quality_chance)
+                {
                     *outputs
                         .entry(Resource::Item(Item { id, quality }))
                         .or_insert(0.0) += amount * share;
@@ -205,7 +211,11 @@ fn module_effect(
 }
 
 /// The speed every row of a process shares (§6.6).
-pub fn speed(process: &super::value::Process, registry: &Registry, settings: &Settings) -> Option<f64> {
+pub fn speed(
+    process: &super::value::Process,
+    registry: &Registry,
+    settings: &Settings,
+) -> Option<f64> {
     let mut shared: Option<f64> = None;
     for key in process.rows.keys() {
         let speed = row_modifiers(key, registry, settings)?.speed;
@@ -233,8 +243,15 @@ fn scale_effect(effect: ModuleEffect, factor: f64) -> ModuleEffect {
 /// process of "two foundries making iron plates at any quality" is two machines
 /// rather than ten (§6.4).
 pub fn machines(rows: &BTreeMap<RowKey, f64>) -> f64 {
-    let mut seen: BTreeMap<(&hactorio_data::EntryId, &Quality, &Config, &hactorio_data::RecipeId), f64> =
-        BTreeMap::new();
+    let mut seen: BTreeMap<
+        (
+            &hactorio_data::EntryId,
+            &Quality,
+            &Config,
+            &hactorio_data::RecipeId,
+        ),
+        f64,
+    > = BTreeMap::new();
     for (key, scale) in rows {
         let slot = seen
             .entry((&key.machine, &key.machine_quality, &key.config, &key.recipe))
@@ -356,11 +373,12 @@ pub fn totals(
     let mut total: BTreeMap<Resource, f64> = BTreeMap::new();
     for (key, scale) in &process.rows {
         let rates = row_rates(key, registry, settings)?;
-        let add = |total: &mut BTreeMap<Resource, f64>, rows: &BTreeMap<Resource, f64>, sign: f64| {
-            for (resource, amount) in rows {
-                *total.entry(*resource).or_insert(0.0) += amount * scale * sign;
-            }
-        };
+        let add =
+            |total: &mut BTreeMap<Resource, f64>, rows: &BTreeMap<Resource, f64>, sign: f64| {
+                for (resource, amount) in rows {
+                    *total.entry(*resource).or_insert(0.0) += amount * scale * sign;
+                }
+            };
         match which {
             Rows::Inputs => add(&mut total, &rates.inputs, 1.0),
             Rows::Outputs => add(&mut total, &rates.outputs, 1.0),

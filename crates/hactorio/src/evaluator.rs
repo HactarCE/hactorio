@@ -40,12 +40,10 @@ impl Evaluator {
         thread::spawn(move || {
             while let Ok(request) = requests.recv() {
                 let cancel = request.cancel.clone();
-                let evaluation = evaluate(
-                    &request.text,
-                    &request.registry,
-                    &request.settings,
-                    &|| cancel.load(Ordering::Relaxed),
-                );
+                let evaluation =
+                    evaluate(&request.text, &request.registry, &request.settings, &|| {
+                        cancel.load(Ordering::Relaxed)
+                    });
                 if evaluation.cancelled {
                     continue;
                 }

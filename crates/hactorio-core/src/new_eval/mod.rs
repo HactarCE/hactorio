@@ -16,9 +16,7 @@ mod parse;
 mod process;
 pub mod value;
 
-pub use eval::{
-    Evaluation, Output, evaluate, line_hash, process_resources, property_is_available,
-};
+pub use eval::{Evaluation, Output, evaluate, line_hash, process_resources, property_is_available};
 pub use format::{format_facets, format_number, format_process_panel, format_value};
 pub use parse::{ParseError, Span, definition_value_span, parse_line};
 pub use value::{
@@ -212,18 +210,18 @@ pub(crate) fn test_registry() -> hactorio_data::Registry {
 mod tests {
     use super::*;
     use crate::new_eval::format::format_process_panel;
-    
-    use crate::new_eval::value::{StackLimit, Stacks};
+
     use crate::Settings;
+    use crate::new_eval::value::{StackLimit, Stacks};
     use hactorio_data::STACK_SIZE_GLYPH;
 
     fn number(text: &str) -> f64 {
         let registry = test_registry();
         let outputs = evaluate(text, &registry, &Settings::default(), &|| false).outputs;
         match &outputs[0] {
-            Output::Value(value) => value.dimensionless().unwrap_or_else(|| {
-                panic!("expected a dimensionless value, got {value:?}")
-            }),
+            Output::Value(value) => value
+                .dimensionless()
+                .unwrap_or_else(|| panic!("expected a dimensionless value, got {value:?}")),
             other => panic!("expected a value, got {other:?}"),
         }
     }
@@ -242,7 +240,9 @@ mod tests {
     }
 
     fn fluid_glyph() -> char {
-        hactorio_data::signal_by_id("fluid").expect("a fluid signal").glyph
+        hactorio_data::signal_by_id("fluid")
+            .expect("a fluid signal")
+            .glyph
     }
 
     fn full_belt_research() -> Settings {
@@ -281,13 +281,20 @@ mod tests {
         let glyph = registry
             .entry_by_index(registry.entry_id("iron-plate").unwrap())
             .glyph;
-        assert_eq!(format_value(value, &Settings::default(), &registry), format!("1{glyph}"));
+        assert_eq!(
+            format_value(value, &Settings::default(), &registry),
+            format!("1{glyph}")
+        );
     }
 
     #[test]
     fn a_document_renders_its_results() {
         let registry = test_registry();
-        let glyph = |id: &str| registry.entry_by_index(registry.entry_id(id).unwrap()).glyph;
+        let glyph = |id: &str| {
+            registry
+                .entry_by_index(registry.entry_id(id).unwrap())
+                .glyph
+        };
         let (iron, copper) = (glyph("iron-plate"), glyph("copper-plate"));
 
         let text = "x = 2:iron-plate:\nx + 1:copper-plate:\n:iron-plate: .:stack-size:\n(2:iron-plate:) .:stack-size:\n:stacked-belt: :transport-belt:";
@@ -320,7 +327,9 @@ mod tests {
     #[test]
     fn belts_apply_and_stack() {
         let registry = test_registry();
-        let iron = registry.entry_by_index(registry.entry_id("iron-plate").unwrap()).glyph;
+        let iron = registry
+            .entry_by_index(registry.entry_id("iron-plate").unwrap())
+            .glyph;
 
         // A yellow belt moves 15 items/s at a stack cap of one.
         let outputs = evaluate(
@@ -333,7 +342,10 @@ mod tests {
         let Output::Value(value) = &outputs[0] else {
             panic!("expected a value, got {:?}", outputs[0]);
         };
-        assert_eq!(format_value(value, &Settings::default(), &registry), format!("15{iron}/s"));
+        assert_eq!(
+            format_value(value, &Settings::default(), &registry),
+            format!("15{iron}/s")
+        );
 
         // With belt-stacking research complete, stacked belts carry four per
         // slot, so 60 items/s.
@@ -348,7 +360,10 @@ mod tests {
         let Output::Value(value) = &outputs[0] else {
             panic!("expected a value, got {:?}", outputs[0]);
         };
-        assert_eq!(format_value(value, &Settings::default(), &registry), format!("60{iron}/s"));
+        assert_eq!(
+            format_value(value, &Settings::default(), &registry),
+            format!("60{iron}/s")
+        );
 
         // Stacking an already stacked rate is an error: its limit is not one.
         // At level one stacking is a no-op, so the error needs research.
@@ -392,7 +407,10 @@ mod tests {
         };
 
         // A basic inserter moves one item per cycle, at cap one.
-        assert_eq!(run(":inserter: .rate", &settings), format!("0.857{}₁/s", STACK_SIZE_GLYPH));
+        assert_eq!(
+            run(":inserter: .rate", &settings),
+            format!("0.857{}₁/s", STACK_SIZE_GLYPH)
+        );
         assert_eq!(
             run(":bulk-inserter: .rate", &settings),
             format!("0.857{}₂/s", STACK_SIZE_GLYPH)
@@ -407,10 +425,7 @@ mod tests {
             run(":storage-tank: .capacity", &settings),
             format!("25k{fluid}")
         );
-        assert_eq!(
-            run(":pump: .rate", &settings),
-            format!("30{fluid}/s")
-        );
+        assert_eq!(run(":pump: .rate", &settings), format!("30{fluid}/s"));
         // The offshore pump is its own prototype: 20 fluid per tick.
         assert_eq!(
             run(":offshore-pump: .rate", &settings),
@@ -421,10 +436,7 @@ mod tests {
             run(":crude-oil-barrel: .capacity", &settings),
             format!("50{fluid}")
         );
-        assert_eq!(
-            run(":barrel: .capacity", &settings),
-            format!("50{fluid}")
-        );
+        assert_eq!(run(":barrel: .capacity", &settings), format!("50{fluid}"));
 
         // Research reaches the capacity, and an over-large level is clamped to
         // the levels the registry has.
@@ -491,8 +503,20 @@ mod tests {
             panic!("expected a bundle");
         };
         assert_eq!(terms.len(), 2);
-        assert_eq!(terms[&Resource::Item(Item { id: iron, quality: Quality::Normal })], 2.0);
-        assert_eq!(terms[&Resource::Item(Item { id: iron, quality: Quality::Rare })], 3.0);
+        assert_eq!(
+            terms[&Resource::Item(Item {
+                id: iron,
+                quality: Quality::Normal
+            })],
+            2.0
+        );
+        assert_eq!(
+            terms[&Resource::Item(Item {
+                id: iron,
+                quality: Quality::Rare
+            })],
+            3.0
+        );
 
         // Quality is a first-class value with its level and multiplier.
         assert_eq!(number(":rare: .level"), 2.0);
@@ -500,7 +524,10 @@ mod tests {
 
         // The operand promotes a token, and selection picks one quality out.
         assert_eq!(coefficient("(:epic: :iron-plate:).:epic::iron-plate:"), 1.0);
-        assert_eq!(coefficient("(:epic: :iron-plate:).:normal::iron-plate:"), 0.0);
+        assert_eq!(
+            coefficient("(:epic: :iron-plate:).:normal::iron-plate:"),
+            0.0
+        );
     }
 
     #[test]
@@ -581,8 +608,13 @@ mod tests {
     fn machines_and_configs_render_round_trippably() {
         let registry = test_registry();
         let settings = Settings::default();
-        let glyph = |id: &str| registry.entry_by_index(registry.entry_id(id).unwrap()).glyph;
-        let (foundry, module, beacon) = (glyph("foundry"), glyph("speed-module-2"), glyph("beacon"));
+        let glyph = |id: &str| {
+            registry
+                .entry_by_index(registry.entry_id(id).unwrap())
+                .glyph
+        };
+        let (foundry, module, beacon) =
+            (glyph("foundry"), glyph("speed-module-2"), glyph("beacon"));
         let rendered = |text: &str| {
             let outputs = evaluate(text, &registry, &settings, &|| false).outputs;
             match &outputs[0] {
@@ -613,11 +645,19 @@ mod tests {
 
         // Config juxtaposition may only build a module list or fill an empty
         // beacon; anything else needs `+`.
-        assert_eq!(rendered(":speed-module-2: :speed-module-2:"), format!("{module}{module}"));
+        assert_eq!(
+            rendered(":speed-module-2: :speed-module-2:"),
+            format!("{module}{module}")
+        );
         // `+` is the only way to combine a module list with a beacon group;
         // the item quantities add alongside, so check the config itself.
-        let outputs = evaluate(":speed-module-2: + 2 :beacon:", &registry, &settings, &|| false)
-            .outputs;
+        let outputs = evaluate(
+            ":speed-module-2: + 2 :beacon:",
+            &registry,
+            &settings,
+            &|| false,
+        )
+        .outputs;
         let Output::Value(Value::Multi(multi)) = &outputs[0] else {
             panic!("expected facets, got {:?}", outputs[0]);
         };
@@ -685,12 +725,36 @@ mod tests {
         for (text, settings, expected) in [
             // Belts, alone and stacked. Stacking is researched, so the default
             // document stacks at one.
-            (":transport-belt: :iron-plate:", &default, "15:iron-plate:/s"),
-            (":stacked-belt: :transport-belt: :iron-plate:", &unstacked, "15:iron-plate:/s"),
-            (":stacked-belt: :transport-belt: :iron-plate:", &researched, "60:iron-plate:/s"),
-            (":stacked-belt: :transport-belt:", &unstacked, "15:stack-size:₁/s"),
-            (":stacked-belt: :transport-belt:", &researched, "15:stack-size:₄/s"),
-            ("(:transport-belt: * 8s).capacity", &default, "120:stack-size:₁"),
+            (
+                ":transport-belt: :iron-plate:",
+                &default,
+                "15:iron-plate:/s",
+            ),
+            (
+                ":stacked-belt: :transport-belt: :iron-plate:",
+                &unstacked,
+                "15:iron-plate:/s",
+            ),
+            (
+                ":stacked-belt: :transport-belt: :iron-plate:",
+                &researched,
+                "60:iron-plate:/s",
+            ),
+            (
+                ":stacked-belt: :transport-belt:",
+                &unstacked,
+                "15:stack-size:₁/s",
+            ),
+            (
+                ":stacked-belt: :transport-belt:",
+                &researched,
+                "15:stack-size:₄/s",
+            ),
+            (
+                "(:transport-belt: * 8s).capacity",
+                &default,
+                "120:stack-size:₁",
+            ),
             (":transport-belt: * 8s", &default, "8:transport-belt:s"),
             ("2 * :transport-belt: .rate", &default, "30:stack-size:₁/s"),
             (":transport-belt: .rate * 2", &default, "30:stack-size:₁/s"),
@@ -725,8 +789,16 @@ mod tests {
             ),
             ("2:foundry: + 3:foundry:", &default, "5:foundry:"),
             ("(2:foundry: + 3:foundry:).machines", &default, "5"),
-            (":speed-module-2: :speed-module-2:", &default, ":speed-module-2::speed-module-2:"),
-            (":beacon: :speed-module-2:", &default, ":beacon::speed-module-2:"),
+            (
+                ":speed-module-2: :speed-module-2:",
+                &default,
+                ":speed-module-2::speed-module-2:",
+            ),
+            (
+                ":beacon: :speed-module-2:",
+                &default,
+                ":beacon::speed-module-2:",
+            ),
             // A general config addition keeps the item quantities, so the
             // quantity facet is what renders.
             (
@@ -777,8 +849,12 @@ mod tests {
                 other => panic!("expected a value, got {other:?}"),
             }
         };
-        let iron = registry.entry_by_index(registry.entry_id("iron-plate").unwrap()).glyph;
-        let ore = registry.entry_by_index(registry.entry_id("iron-ore").unwrap()).glyph;
+        let iron = registry
+            .entry_by_index(registry.entry_id("iron-plate").unwrap())
+            .glyph;
+        let ore = registry
+            .entry_by_index(registry.entry_id("iron-ore").unwrap())
+            .glyph;
 
         // The foundry runs at speed 4, so 3.2 s per craft is 1.25 crafts/s.
         assert_eq!(
@@ -789,7 +865,10 @@ mod tests {
             render("(:foundry: making (:normal: :iron-plate:)).net.:iron-ore:"),
             format!("-1.25{ore}/s")
         );
-        assert_eq!(render("(:foundry: making (:normal: :iron-plate:)).machines"), "1");
+        assert_eq!(
+            render("(:foundry: making (:normal: :iron-plate:)).machines"),
+            "1"
+        );
         assert_eq!(
             render("(2 :foundry: making (:normal: :iron-plate:)).out.:iron-plate:"),
             format!("3.75{iron}/s")
@@ -804,8 +883,6 @@ mod tests {
             render("(540 :iron-plate:/s from (:foundry: making (:normal: :iron-plate:))).machines"),
             "288"
         );
-
-
 
         // An amount rather than a rate gives machine-seconds, which has no
         // machine count.
@@ -876,7 +953,10 @@ mod tests {
         let beacon = registry
             .entry_by_index(registry.entry_id("beacon").unwrap())
             .glyph;
-        assert_eq!(render(":beacon: :efficiency-module-1:"), format!("{beacon}{efficiency}"));
+        assert_eq!(
+            render(":beacon: :efficiency-module-1:"),
+            format!("{beacon}{efficiency}")
+        );
         for refused in [
             ":beacon: :productivity-module-1:",
             ":beacon: 3 :speed-module-2:",
@@ -963,7 +1043,11 @@ mod tests {
             &|| false,
         )
         .outputs;
-        assert!(matches!(outputs[0], Output::Error { .. }), "{:?}", outputs[0]);
+        assert!(
+            matches!(outputs[0], Output::Error { .. }),
+            "{:?}",
+            outputs[0]
+        );
 
         // Asking for the rare recipe outright is an error too.
         let outputs = evaluate(
@@ -973,7 +1057,11 @@ mod tests {
             &|| false,
         )
         .outputs;
-        assert!(matches!(outputs[0], Output::Error { .. }), "{:?}", outputs[0]);
+        assert!(
+            matches!(outputs[0], Output::Error { .. }),
+            "{:?}",
+            outputs[0]
+        );
     }
 
     #[test]
@@ -1031,7 +1119,11 @@ mod tests {
             panic!("expected a process, got {:?}", one[0]);
         };
         // 1 craft per 2 s at speed 1 is 0.5 carbon/s, so 200 machines.
-        assert!((process.machines() - 200.0).abs() < 1e-9, "{}", process.machines());
+        assert!(
+            (process.machines() - 200.0).abs() < 1e-9,
+            "{}",
+            process.machines()
+        );
     }
 
     #[test]
@@ -1053,7 +1145,8 @@ mod tests {
     fn quality_modules_spread_the_output_across_qualities() {
         let registry = test_registry();
         let settings = Settings::default();
-        let document = "p = 1 :foundry: :quality-module-2: making (:normal: :iron-plate:)\np.out.:iron-plate:";
+        let document =
+            "p = 1 :foundry: :quality-module-2: making (:normal: :iron-plate:)\np.out.:iron-plate:";
         let outputs = evaluate(document, &registry, &settings, &|| false).outputs;
         let Output::Value(Value::Multi(multi)) = &outputs[1] else {
             panic!("expected facets, got {:?}", outputs[1]);
@@ -1066,7 +1159,12 @@ mod tests {
         // A 25% chance upgrades a product by one level, and each further level
         // costs another 25% of what is left, so p^n per level.
         let iron = registry.entry_id("iron-plate").unwrap();
-        let rate = |quality| terms.get(&Resource::Item(Item { id: iron, quality })).copied().unwrap_or(0.0);
+        let rate = |quality| {
+            terms
+                .get(&Resource::Item(Item { id: iron, quality }))
+                .copied()
+                .unwrap_or(0.0)
+        };
         assert_eq!(terms.len(), 5, "every quality is represented");
         // 1.875 plates/s overall, split 0.25 / 0.0625 / 0.015625 / 0.00390625.
         let total: f64 = terms.values().sum();
@@ -1085,17 +1183,19 @@ mod tests {
         let registry = test_registry();
         let settings = Settings::default();
         let render = |text: &str| {
-            let document = format!(
-                "p = 1 :foundry: making (:normal: :iron-plate:)\n{text}"
-            );
+            let document = format!("p = 1 :foundry: making (:normal: :iron-plate:)\n{text}");
             let outputs = evaluate(&document, &registry, &settings, &|| false).outputs;
             match &outputs[1] {
                 Output::Value(value) => format_value(value, &settings, &registry),
                 other => panic!("expected a value, got {other:?}"),
             }
         };
-        let ore = registry.entry_by_index(registry.entry_id("iron-ore").unwrap()).glyph;
-        let plate = registry.entry_by_index(registry.entry_id("iron-plate").unwrap()).glyph;
+        let ore = registry
+            .entry_by_index(registry.entry_id("iron-ore").unwrap())
+            .glyph;
+        let plate = registry
+            .entry_by_index(registry.entry_id("iron-plate").unwrap())
+            .glyph;
 
         // `in` is a keyword and a property; after a dot it is the property.
         // Inputs are positive there; only `net` carries the sign.
@@ -1142,15 +1242,27 @@ mod tests {
             number("(:foundry: :legendary::productivity-module-1:).productivity"),
             1.6
         );
-        assert_eq!(render("(:foundry: :legendary::productivity-module-1:).power"), "2.8MW");
+        assert_eq!(
+            render("(:foundry: :legendary::productivity-module-1:).power"),
+            "2.8MW"
+        );
 
         // A legendary speed module is faster, and no hungrier: 2 MW * 1.7.
-        assert_eq!(number("(:foundry: :legendary::speed-module-2:).:speed:"), 7.0);
-        assert_eq!(render("(:foundry: :legendary::speed-module-2:).power"), "3.4MW");
+        assert_eq!(
+            number("(:foundry: :legendary::speed-module-2:).:speed:"),
+            7.0
+        );
+        assert_eq!(
+            render("(:foundry: :legendary::speed-module-2:).power"),
+            "3.4MW"
+        );
 
         // A legendary efficiency module saves more, and changes nothing else:
         // -0.3 * 2.5 = -0.75 consumption, so 2 MW * 0.25, with base productivity.
-        assert_eq!(render("(:foundry: :legendary::efficiency-module-1:).power"), "500kW");
+        assert_eq!(
+            render("(:foundry: :legendary::efficiency-module-1:).power"),
+            "500kW"
+        );
         assert_eq!(
             number("(:foundry: :legendary::efficiency-module-1:).productivity"),
             1.5
@@ -1169,14 +1281,15 @@ mod tests {
                 other => panic!("expected a value, got {other:?}"),
             }
         };
-        let ore = registry.entry_by_index(registry.entry_id("iron-ore").unwrap()).glyph;
-        let plate = registry.entry_by_index(registry.entry_id("iron-plate").unwrap()).glyph;
+        let ore = registry
+            .entry_by_index(registry.entry_id("iron-ore").unwrap())
+            .glyph;
+        let plate = registry
+            .entry_by_index(registry.entry_id("iron-plate").unwrap())
+            .glyph;
 
         // Items are both the ore consumed and the plates produced.
-        assert_eq!(
-            render("p.:item:"),
-            format!("-1.25{ore} + 1.875{plate}/s")
-        );
+        assert_eq!(render("p.:item:"), format!("-1.25{ore} + 1.875{plate}/s"));
         assert_eq!(render("p.:fluid:"), "0/s");
 
         // A rare selection is empty, and quality renders as its own glyph.
@@ -1270,22 +1383,33 @@ mod tests {
                 other => panic!("expected a value, got {other:?}"),
             }
         };
-        assert_eq!(rendered(":common::iron-plate:"), rendered(":normal::iron-plate:"));
-        assert_eq!(rendered(":quality-5::iron-plate:"), rendered(":legendary::iron-plate:"));
+        assert_eq!(
+            rendered(":common::iron-plate:"),
+            rendered(":normal::iron-plate:")
+        );
+        assert_eq!(
+            rendered(":quality-5::iron-plate:"),
+            rendered(":legendary::iron-plate:")
+        );
     }
 
     #[test]
     fn a_dot_takes_any_expression_naming_a_resource() {
         let registry = test_registry();
         let settings = Settings::default();
-        let plate = registry.entry_by_index(registry.entry_id("iron-plate").unwrap()).glyph;
+        let plate = registry
+            .entry_by_index(registry.entry_id("iron-plate").unwrap())
+            .glyph;
 
         let document = "p = 1 :foundry: making (:normal: :iron-plate:)\nq = :iron-plate:\np . q";
         let outputs = evaluate(document, &registry, &settings, &|| false).outputs;
         let Output::Value(value) = &outputs[2] else {
             panic!("expected a value, got {:?}", outputs[2]);
         };
-        assert_eq!(format_value(value, &settings, &registry), format!("1.875{plate}/s"));
+        assert_eq!(
+            format_value(value, &settings, &registry),
+            format!("1.875{plate}/s")
+        );
 
         // The same selection, spelled with parentheses and a quality.
         let document =
@@ -1294,7 +1418,10 @@ mod tests {
         let Output::Value(value) = &outputs[1] else {
             panic!("expected a value, got {:?}", outputs[1]);
         };
-        assert_eq!(format_value(value, &settings, &registry), format!("1.875{plate}/s"));
+        assert_eq!(
+            format_value(value, &settings, &registry),
+            format!("1.875{plate}/s")
+        );
 
         // A selector that names nothing is an error, not a silent zero.
         let document = "p = 1 :foundry: making (:normal: :iron-plate:)\np . 3";
@@ -1313,7 +1440,11 @@ mod tests {
             };
             format_process_panel(process, &settings, &registry)
         };
-        let glyph = |id: &str| registry.entry_by_index(registry.entry_id(id).unwrap()).glyph;
+        let glyph = |id: &str| {
+            registry
+                .entry_by_index(registry.entry_id(id).unwrap())
+                .glyph
+        };
         let (foundry, ore, plate) = (glyph("foundry"), glyph("iron-ore"), glyph("iron-plate"));
 
         let lines = panel("540 :iron-plate:/s from (:foundry: making (:normal: :iron-plate:))");
@@ -1352,7 +1483,9 @@ mod tests {
     fn process_rows_are_assignable() {
         let registry = test_registry();
         let settings = Settings::default();
-        let plate = registry.entry_by_index(registry.entry_id("iron-plate").unwrap()).glyph;
+        let plate = registry
+            .entry_by_index(registry.entry_id("iron-plate").unwrap())
+            .glyph;
 
         // Two foundries make 3.75 plates/s; adding ten more is a row write.
         let mut document = String::from("p = 2 :foundry: making (:normal: :iron-plate:)\n");
@@ -1362,7 +1495,10 @@ mod tests {
         let Output::Value(value) = &outputs[2] else {
             panic!("expected a value, got {:?}", outputs[2]);
         };
-        assert_eq!(format_value(value, &settings, &registry), format!("13.75{plate}/s"));
+        assert_eq!(
+            format_value(value, &settings, &registry),
+            format!("13.75{plate}/s")
+        );
 
         // `=` sets the row's total, so the stored difference is 5 - 1.875.
         let mut document = String::from("p = 1 :foundry: making (:normal: :iron-plate:)\n");
@@ -1372,7 +1508,10 @@ mod tests {
         let Output::Value(value) = &outputs[2] else {
             panic!("expected a value, got {:?}", outputs[2]);
         };
-        assert_eq!(format_value(value, &settings, &registry), format!("5{plate}/s"));
+        assert_eq!(
+            format_value(value, &settings, &registry),
+            format!("5{plate}/s")
+        );
 
         // An unspecified quality means normal, so the same row is written.
         let mut document = String::from("p = 1 :foundry: making (:normal: :iron-plate:)\n");
@@ -1382,7 +1521,10 @@ mod tests {
         let Output::Value(value) = &outputs[2] else {
             panic!("expected a value, got {:?}", outputs[2]);
         };
-        assert_eq!(format_value(value, &settings, &registry), format!("6.875{plate}/s"));
+        assert_eq!(
+            format_value(value, &settings, &registry),
+            format!("6.875{plate}/s")
+        );
 
         // Only resources are assignable.
         for refused in ["p.crafts = 1", "p.machines = 1", "p.power = 1"] {
@@ -1399,11 +1541,16 @@ mod tests {
     #[test]
     fn recycling_resolves_the_hidden_recipe() {
         let registry = test_registry();
-        let outputs = evaluate(":recycling: :iron-plate:", &registry, &Settings::default(), &|| false).outputs;
+        let outputs = evaluate(
+            ":recycling: :iron-plate:",
+            &registry,
+            &Settings::default(),
+            &|| false,
+        )
+        .outputs;
         let Output::Value(Value::Multi(multi)) = &outputs[0] else {
             panic!("expected facets, got {:?}", outputs[0]);
         };
         assert!(multi.recipe.is_some());
     }
 }
-

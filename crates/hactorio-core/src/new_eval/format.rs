@@ -65,13 +65,17 @@ pub fn format_facets(value: &Value, settings: &Settings, registry: &Registry) ->
             let mut lines = Vec::new();
             if let Some(machine) = &multi.machine {
                 lines.push(format_machine(machine, settings, registry));
-                if let Some(modifiers) = super::process::machine_modifiers(machine, registry, settings)
+                if let Some(modifiers) =
+                    super::process::machine_modifiers(machine, registry, settings)
                 {
                     lines.push(format!(
                         "power {}",
                         format_si(modifiers.power_w * machine.count(), "W", settings)
                     ));
-                    lines.push(format!("speed {}", format_number_with(modifiers.speed, settings)));
+                    lines.push(format!(
+                        "speed {}",
+                        format_number_with(modifiers.speed, settings)
+                    ));
                     lines.push(format!(
                         "productivity {}",
                         format_number_with(1.0 + modifiers.productivity, settings)
@@ -282,9 +286,19 @@ fn format_config(config: &Config, registry: &Registry) -> String {
         if *count != 1 {
             text.push_str(&count.to_string());
         }
-        text.push_str(&format_module_glyph(group.beacon, group.quality, 1, registry));
+        text.push_str(&format_module_glyph(
+            group.beacon,
+            group.quality,
+            1,
+            registry,
+        ));
         for ((module, quality), module_count) in &group.modules {
-            text.push_str(&format_module_glyph(*module, *quality, *module_count, registry));
+            text.push_str(&format_module_glyph(
+                *module,
+                *quality,
+                *module_count,
+                registry,
+            ));
         }
     }
     text
@@ -487,11 +501,7 @@ fn format_number_with(value: f64, settings: &Settings) -> String {
     if text.contains('.') {
         text = text.trim_end_matches('0').trim_end_matches('.').to_string();
     }
-    if text == "-0" {
-        "0".to_string()
-    } else {
-        text
-    }
+    if text == "-0" { "0".to_string() } else { text }
 }
 
 /// `k`/`M`/`G`/`T`, which are also scale suffixes so a rendering round-trips.

@@ -2,7 +2,7 @@
 
 use hactorio_data::Registry;
 
-use super::lex::{lex, Keyword, Signal, Token, Unit};
+use super::lex::{Keyword, Signal, Token, Unit, lex};
 use super::value::{Comparison, Quality, ResourceRef};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -211,7 +211,11 @@ pub fn definition_value_span(line: &str, registry: &Registry) -> Option<Span> {
     let assign = tokens.iter().position(|(token, _)| {
         matches!(
             token,
-            Token::Assign | Token::AddAssign | Token::SubAssign | Token::MulAssign | Token::DivAssign
+            Token::Assign
+                | Token::AddAssign
+                | Token::SubAssign
+                | Token::MulAssign
+                | Token::DivAssign
         )
     })?;
     let (_, first) = tokens.get(assign + 1)?;
@@ -701,7 +705,4 @@ mod tests {
         assert!(parse_line("(q = 1)", &test_registry()).is_err());
         assert!(parse_line("q = 1", &test_registry()).is_ok());
     }
-
-
-
 }

@@ -634,11 +634,7 @@ impl HactorioApp {
         self.settings_changed(before);
     }
 
-    fn display_setting_ui(
-        &mut self,
-        ui: &mut Ui,
-        setting: DisplaySetting,
-    ) {
+    fn display_setting_ui(&mut self, ui: &mut Ui, setting: DisplaySetting) {
         match setting {
             DisplaySetting::Theme => {
                 egui::global_theme_preference_buttons(ui);

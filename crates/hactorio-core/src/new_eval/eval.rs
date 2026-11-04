@@ -21,7 +21,10 @@ pub enum Output {
     Blank,
     Value(Value),
     /// An error with the span it should be underlined at.
-    Error { message: String, span: Span },
+    Error {
+        message: String,
+        span: Span,
+    },
     None,
 }
 
@@ -141,11 +144,11 @@ impl Runner<'_> {
             self.variables[line] = self.env.keys().cloned().collect();
             match parsed {
                 Err(error) => {
-                self.outputs[line] = Output::Error {
-                    message: error.message.clone(),
-                    span: error.span,
-                };
-            }
+                    self.outputs[line] = Output::Error {
+                        message: error.message.clone(),
+                        span: error.span,
+                    };
+                }
                 Ok(Line::Blank | Line::Comment) => self.outputs[line] = Output::Blank,
                 Ok(Line::Expression(expr)) => {
                     self.outputs[line] = match self.eval(expr) {
@@ -291,9 +294,9 @@ impl Runner<'_> {
                     Value::Process(_) => Err(ValueError::new(
                         "`:stacked-belt:` needs a value, not a process",
                     )),
-                    Value::Quality(_) => {
-                        Err(ValueError::new("`:stacked-belt:` needs a value, not a quality"))
-                    }
+                    Value::Quality(_) => Err(ValueError::new(
+                        "`:stacked-belt:` needs a value, not a quality",
+                    )),
                 }
             }
             Expr::Recycling(inner) => self.recycling(&self.eval(inner)?),
@@ -383,10 +386,7 @@ impl Runner<'_> {
             if let Some(inserter) = item.inserter {
                 let capacity = inserter_capacity(inserter, self.settings, self.registry);
                 let cycles = inserter_cycles(inserter).ok_or_else(|| {
-                    ValueError::new(format!(
-                        "`:{}:` has an unusable rotation speed",
-                        entry.id
-                    ))
+                    ValueError::new(format!("`:{}:` has an unusable rotation speed", entry.id))
                 })?;
                 multi.stack_rate = Some(Stacks::items(StackLimit::Limit(capacity.max(1)), cycles));
             }
@@ -416,7 +416,11 @@ impl Runner<'_> {
         if entry.beacon.is_some() {
             multi.config = Some(Config::beacon(id, concrete));
         }
-        if entry.item.as_ref().is_some_and(|item| item.machine.is_some()) {
+        if entry
+            .item
+            .as_ref()
+            .is_some_and(|item| item.machine.is_some())
+        {
             multi.machine = Some(Machine::new(id, concrete));
         }
         if let Some(recipe) = entry.recipe {
@@ -427,14 +431,19 @@ impl Runner<'_> {
         }
 
         if multi.quantity.is_none() && multi.resource.is_none() && multi.recipe.is_none() {
-            return Err(ValueError::new(format!("`:{}:` has no usable facets", entry.id)));
+            return Err(ValueError::new(format!(
+                "`:{}:` has no usable facets",
+                entry.id
+            )));
         }
         Ok(Value::Multi(multi))
     }
 
     fn stack_size(&self, value: &Value) -> Result<Value, ValueError> {
         let Value::Multi(multi) = value else {
-            return Err(ValueError::new("`.:stack-size:` needs an item, not a quality"));
+            return Err(ValueError::new(
+                "`.:stack-size:` needs an item, not a quality",
+            ));
         };
         let Some(resource) = multi.resource else {
             return Err(ValueError::new(format!(
@@ -447,17 +456,16 @@ impl Runner<'_> {
         }
         let entry = self.registry.entry_by_index(resource.id);
         let Some(item) = &entry.item else {
-            return Err(ValueError::new(format!(
-                "`:{}:` is not an item",
-                entry.id
-            )));
+            return Err(ValueError::new(format!("`:{}:` is not an item", entry.id)));
         };
         Ok(Value::number(f64::from(item.stack_size)))
     }
 
     fn recycling(&self, value: &Value) -> Result<Value, ValueError> {
         let Value::Multi(multi) = value else {
-            return Err(ValueError::new("`:recycling:` needs an item, not a quality"));
+            return Err(ValueError::new(
+                "`:recycling:` needs an item, not a quality",
+            ));
         };
         let Some(resource) = multi.resource else {
             return Err(ValueError::new(format!(
@@ -474,7 +482,10 @@ impl Runner<'_> {
             .recipes()
             .iter()
             .position(|recipe| {
-                recipe.categories.iter().any(|category| category.as_ref() == "recycling")
+                recipe
+                    .categories
+                    .iter()
+                    .any(|category| category.as_ref() == "recycling")
                     && recipe
                         .ingredients
                         .iter()
@@ -604,9 +615,7 @@ impl Runner<'_> {
                     .ok_or_else(|| ValueError::new(format!("`:{}:` is not a machine", entry.id)))?;
                 Ok(Value::number(f64::from(slots)))
             }
-            Selector::Property(Property::Abs) => {
-                Ok(Value::Multi(multi.absolute()?))
-            }
+            Selector::Property(Property::Abs) => Ok(Value::Multi(multi.absolute()?)),
             other => Err(ValueError::new(format!(
                 "`{}` needs a facet this value does not have ({})",
                 describe_selector(other),
@@ -629,12 +638,8 @@ impl Runner<'_> {
                 }
                 Ok(Value::number(process.machines()))
             }
-            Selector::Property(Property::In) => {
-                self.process_totals(process, Rows::Inputs, rate)
-            }
-            Selector::Property(Property::Out) => {
-                self.process_totals(process, Rows::Outputs, rate)
-            }
+            Selector::Property(Property::In) => self.process_totals(process, Rows::Inputs, rate),
+            Selector::Property(Property::Out) => self.process_totals(process, Rows::Outputs, rate),
             Selector::Property(Property::Net) => self.process_totals(process, Rows::Net, rate),
             Selector::Property(Property::Crafts) => {
                 let crafts = process::crafts(process, self.registry, self.settings)
@@ -677,9 +682,10 @@ impl Runner<'_> {
                 self.process_medium(process, false, rate, false)
             }
             Selector::Signal(super::lex::Signal::Speed) => {
-                let speed = process::speed(process, self.registry, self.settings).ok_or_else(
-                    || ValueError::new("the rows of that process have different speeds"),
-                )?;
+                let speed =
+                    process::speed(process, self.registry, self.settings).ok_or_else(|| {
+                        ValueError::new("the rows of that process have different speeds")
+                    })?;
                 Ok(Value::number(speed))
             }
             Selector::Signal(super::lex::Signal::Electric) => {
@@ -701,13 +707,9 @@ impl Runner<'_> {
                 }
             }
             Selector::Property(Property::Pollution) => {
-                let pollution = process::pollution(
-                    process,
-                    self.registry,
-                    self.settings,
-                    machine_seconds,
-                )
-                .ok_or_else(|| ValueError::new("a row has no pollution"))?;
+                let pollution =
+                    process::pollution(process, self.registry, self.settings, machine_seconds)
+                        .ok_or_else(|| ValueError::new("a row has no pollution"))?;
                 Ok(Value::number(pollution))
             }
             Selector::Property(Property::Productivity) => {
@@ -861,10 +863,7 @@ fn inserter_capacity(
 /// One full in-and-out swing per cycle, in cycles per second.
 fn inserter_cycles(inserter: hactorio_data::Inserter) -> Option<f64> {
     let rotation_speed = inserter.rotation_speed;
-    if !(rotation_speed > 0.0
-        && !super::value::is_zero(rotation_speed)
-        && rotation_speed < 0.5)
-    {
+    if !(rotation_speed > 0.0 && !super::value::is_zero(rotation_speed) && rotation_speed < 0.5) {
         return None;
     }
     let ticks_half = (0.5 / rotation_speed).ceil() - 1.0;
@@ -874,10 +873,14 @@ fn inserter_cycles(inserter: hactorio_data::Inserter) -> Option<f64> {
 
 fn iterations(value: &Value) -> Result<u32, ValueError> {
     let Some(count) = value.dimensionless() else {
-        return Err(ValueError::new("a loop count must be a dimensionless number"));
+        return Err(ValueError::new(
+            "a loop count must be a dimensionless number",
+        ));
     };
     if count < 0.0 || count.fract().abs() > super::value::APPROX_ZERO {
-        return Err(ValueError::new("a loop count must be a non-negative integer"));
+        return Err(ValueError::new(
+            "a loop count must be a non-negative integer",
+        ));
     }
     if count > f64::from(u32::MAX) {
         return Err(ValueError::new("loop count is too large"));
@@ -975,7 +978,9 @@ fn assign_resource(
     match op {
         AssignOp::Mul | AssignOp::Div => {
             if quantity.second != 0 || quantity.joule != 0 || quantity.craft != 0 {
-                return Err(ValueError::new("scaling a row needs a dimensionless number"));
+                return Err(ValueError::new(
+                    "scaling a row needs a dimensionless number",
+                ));
             }
         }
         _ if rate => {
@@ -987,9 +992,7 @@ fn assign_resource(
         }
         _ => {
             if quantity.second != 0 {
-                return Err(ValueError::new(
-                    "a machine-seconds process takes an amount",
-                ));
+                return Err(ValueError::new("a machine-seconds process takes an amount"));
             }
         }
     }
@@ -1016,7 +1019,10 @@ fn assign_resource(
     } else {
         net.insert(target, assigned);
     }
-    Ok(Value::Process(Process { net, ..process.clone() }))
+    Ok(Value::Process(Process {
+        net,
+        ..process.clone()
+    }))
 }
 
 /// The resources a process's net rows mention, for completion ranking.
@@ -1032,7 +1038,12 @@ pub fn process_resources(
 
 /// Whether `name` is a property this value can read (§6.6), which is what
 /// completion offers after a dot.
-pub fn property_is_available(value: &Value, name: &str, _registry: &Registry, _settings: &Settings) -> bool {
+pub fn property_is_available(
+    value: &Value,
+    name: &str,
+    _registry: &Registry,
+    _settings: &Settings,
+) -> bool {
     match (value, name) {
         (Value::Quality(_), "level" | "multiplier") => true,
         (Value::Multi(_), "abs" | "item" | "fluid") => true,
@@ -1040,12 +1051,16 @@ pub fn property_is_available(value: &Value, name: &str, _registry: &Registry, _s
         (Value::Multi(multi), "capacity") => multi.stack_capacity.is_some(),
         (Value::Multi(multi), "machines" | "speed" | "module-slots") => multi.machine.is_some(),
         (Value::Multi(multi), "power" | "productivity") => multi.machine.is_some(),
-        (Value::Multi(multi), "stack-size") => multi.resource.is_some_and(|resource| !resource.is_fluid),
+        (Value::Multi(multi), "stack-size") => {
+            multi.resource.is_some_and(|resource| !resource.is_fluid)
+        }
         (Value::Process(process), "machines") => process.extent != Extent::MachineSeconds,
         (Value::Process(process), "energy") => process.extent == Extent::MachineSeconds,
-        (Value::Process(_),
-            "in" | "out" | "net" | "crafts" | "pollution" | "productivity" | "power"
-            | "electric" | "item" | "fluid" | "speed") => true,
+        (
+            Value::Process(_),
+            "in" | "out" | "net" | "crafts" | "pollution" | "productivity" | "power" | "electric"
+            | "item" | "fluid" | "speed",
+        ) => true,
         _ => false,
     }
 }
@@ -1154,7 +1169,13 @@ fn make_value(
             right.facets()
         )));
     };
-    build_process(machine, recipe_ref.id, recipe_ref.quality, registry, settings)
+    build_process(
+        machine,
+        recipe_ref.id,
+        recipe_ref.quality,
+        registry,
+        settings,
+    )
 }
 
 /// Builds the unscaled or counted process a machine and recipe imply (§5.4).
@@ -1167,7 +1188,10 @@ fn build_process(
 ) -> Result<Value, ValueError> {
     let entry = registry.entry_by_index(machine.entry);
     let Some(prototype) = entry.item.as_ref().and_then(|item| item.machine.as_ref()) else {
-        return Err(ValueError::new(format!("`:{}:` is not a machine", entry.id)));
+        return Err(ValueError::new(format!(
+            "`:{}:` is not a machine",
+            entry.id
+        )));
     };
     let prototype_recipe = registry.recipe(recipe);
     if !prototype_recipe
@@ -1286,7 +1310,10 @@ fn size_value(
     };
 
     let terms: Vec<(Resource, f64)> = match &quantity.amount {
-        Amount::Resources(terms) => terms.iter().map(|(resource, coefficient)| (*resource, *coefficient)).collect(),
+        Amount::Resources(terms) => terms
+            .iter()
+            .map(|(resource, coefficient)| (*resource, *coefficient))
+            .collect(),
         Amount::Number(_) if quantity.craft > 0 => Vec::new(),
         Amount::Number(value) if super::value::is_zero(*value) => Vec::new(),
         Amount::Number(_) => {
@@ -1322,7 +1349,8 @@ fn size_value(
                         "two resources select the same recipe, which would double count",
                     ));
                 }
-                let coefficient = row_coefficient(&key, *resource, rows_wanted, registry, settings)?;
+                let coefficient =
+                    row_coefficient(&key, *resource, rows_wanted, registry, settings)?;
                 rows.insert(key, amount / coefficient);
             }
             if quantity.craft > 0 {
@@ -1361,7 +1389,8 @@ fn size_value(
                         "two resources select the same recipe, which would double count",
                     ));
                 }
-                let coefficient = row_coefficient(&key, *resource, rows_wanted, registry, settings)?;
+                let coefficient =
+                    row_coefficient(&key, *resource, rows_wanted, registry, settings)?;
                 rows.insert(key, amount / coefficient);
             }
             if quantity.craft > 0 {
@@ -1396,8 +1425,8 @@ fn row_coefficient(
     registry: &Registry,
     settings: &Settings,
 ) -> Result<f64, ValueError> {
-    let rates =
-        process::row_rates(key, registry, settings).ok_or_else(|| ValueError::new("a row has no rate"))?;
+    let rates = process::row_rates(key, registry, settings)
+        .ok_or_else(|| ValueError::new("a row has no rate"))?;
     let coefficient = match which {
         Rows::Inputs => rates.inputs.get(&resource).copied().unwrap_or(0.0),
         Rows::Outputs => rates.outputs.get(&resource).copied().unwrap_or(0.0),
@@ -1428,7 +1457,9 @@ fn find_row(
             return Ok(key.clone());
         }
     }
-    Err(ValueError::new("no row of that process involves the resource"))
+    Err(ValueError::new(
+        "no row of that process involves the resource",
+    ))
 }
 
 fn which_rows(op: BinaryOp) -> Rows {
@@ -1449,7 +1480,10 @@ fn infer_recipe(
 ) -> Result<RecipeId, ValueError> {
     let entry = registry.entry_by_index(machine.entry);
     let Some(prototype) = entry.item.as_ref().and_then(|item| item.machine.as_ref()) else {
-        return Err(ValueError::new(format!("`:{}:` is not a machine", entry.id)));
+        return Err(ValueError::new(format!(
+            "`:{}:` is not a machine",
+            entry.id
+        )));
     };
     let mut candidates = Vec::new();
     for (index, recipe) in registry.recipes().iter().enumerate() {
@@ -1611,8 +1645,12 @@ mod tests {
                 other => panic!("expected a value, got {other:?}"),
             }
         };
-        let plate = registry.entry_by_index(registry.entry_id("iron-plate").unwrap()).glyph;
-        let cable = registry.entry_by_index(registry.entry_id("copper-plate").unwrap()).glyph;
+        let plate = registry
+            .entry_by_index(registry.entry_id("iron-plate").unwrap())
+            .glyph;
+        let cable = registry
+            .entry_by_index(registry.entry_id("copper-plate").unwrap())
+            .glyph;
 
         // A bundle split by sign.
         assert_eq!(
@@ -1677,4 +1715,3 @@ mod tests {
         assert!(error(":iron-plate: making :iron-plate:").contains("machine facet"));
     }
 }
-

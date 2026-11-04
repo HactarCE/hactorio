@@ -3,7 +3,7 @@
 //! Lexing is per line, so a quality cannot qualify a prototype on the next
 //! line (§4.5).
 
-use hactorio_data::{signal_by_glyph, EntryId, Registry};
+use hactorio_data::{EntryId, Registry, signal_by_glyph};
 
 use super::parse::{ParseError, Span};
 use super::value::Quality;
@@ -259,7 +259,10 @@ pub fn lex(line: &str, registry: &Registry) -> Result<Vec<(Token, Span)>, ParseE
         }
         if let Some(signal) = Signal::from_glyph(ch) {
             let start = index;
-            tokens.push((Token::Signal(signal), Span::new(start, start + ch.len_utf8())));
+            tokens.push((
+                Token::Signal(signal),
+                Span::new(start, start + ch.len_utf8()),
+            ));
             index += ch.len_utf8();
             continue;
         }
@@ -268,7 +271,10 @@ pub fn lex(line: &str, registry: &Registry) -> Result<Vec<(Token, Span)>, ParseE
                 .entry_id(entry.id.as_ref())
                 .expect("a glyph belongs to a known entry");
             let start = index;
-            tokens.push((Token::Prototype(id), Span::new(start, start + ch.len_utf8())));
+            tokens.push((
+                Token::Prototype(id),
+                Span::new(start, start + ch.len_utf8()),
+            ));
             index += ch.len_utf8();
             continue;
         }
@@ -355,13 +361,7 @@ fn merge_qualified(tokens: Vec<(Token, Span)>) -> Vec<(Token, Span)> {
         if let Token::Quality(quality) = token {
             if let Some((Token::Prototype(id), next)) = iter.peek() {
                 let merged = Span::new(span.start, next.end);
-                out.push((
-                    Token::Qualified {
-                        id: *id,
-                        quality,
-                    },
-                    merged,
-                ));
+                out.push((Token::Qualified { id: *id, quality }, merged));
                 iter.next();
                 continue;
             }
