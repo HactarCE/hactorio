@@ -11,9 +11,15 @@ Before starting a unit of work, run `jj status`.
 
 After completing a unit of work, run `jj describe` and describe the whole set of changes, including the existing work on the commit (if any) and the new work you just did. Run `jj new` before the next unrelated unit: `jj describe` does not close the commit, so later edits amend it.
 
+Quote a description containing backticks with a heredoc — `jj describe -m "$(cat <<'EOF' … EOF)"` — because a double-quoted `-m` runs them as commands.
+
 ## README
 
 `README.md` is the user's. Do not edit it — report proposed wording instead.
+
+## Language spec
+
+See `SPEC.md` for the calculator language specification.
 
 ## UI vocabulary
 
@@ -61,6 +67,10 @@ A monospace character is narrower than the font size, so a glyph is not one text
 column wide and glyphs and text do not share column alignment. Do not align
 columns across them; size a glyph column as `count × font_size` points.
 
+A new glyph kind belongs in the data crate's table, where `glyphs::install`
+finds its icon, and in `to_plaintext`/`from_plaintext`, or it renders blank and
+saves as a raw codepoint.
+
 ## egui
 
 Rows inside content-sized panels use `ui.horizontal`; `ui.horizontal_top` allocates the remaining height and causes a growth feedback loop.
@@ -72,6 +82,8 @@ The raw data dump lives at `~/Library/Application Support/factorio/script-output
 The foundry cannot run the `iron-gear-wheel` recipe (category `crafting`), but it has `casting-iron-gear-wheel` (category `metallurgy`), which also produces iron gear wheels. Recipe resolution in `in`/`from`/`into` must filter by the machine's categories; `:iron-gear-wheel: from :foundry:` is valid and resolves to the casting recipe.
 
 Inserter `hand_size` is cosmetic; capacity comes from `bulk`, `stack_size_bonus`, and the inserter capacity research modifiers.
+
+Test fixtures: a recipe without `"allow_productivity": true` has productivity zeroed, because the flag defaults to false, and a machine prototype needs an item of the same name before `:name:` gives it a machine facet.
 
 ## Verification
 
