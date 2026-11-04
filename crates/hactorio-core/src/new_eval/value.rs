@@ -553,30 +553,6 @@ impl Quantity {
         Self::new(amount, per, self.second, self.joule, self.craft)
     }
 
-    /// Keeps the terms whose coefficient satisfies the comparison (§5.3).
-    ///
-    /// `q > 0` is the positive terms and `q < 0` the negative ones, which is how
-    /// a bundle is split by sign.
-    pub fn filter_amount(&self, comparison: Comparison, threshold: f64) -> Self {
-        let amount = match &self.amount {
-            Amount::Number(value) => {
-                if comparison.eval_f64(*value, threshold) {
-                    Amount::Number(*value)
-                } else {
-                    Amount::Number(0.0)
-                }
-            }
-            Amount::Resources(terms) => Amount::Resources(
-                terms
-                    .iter()
-                    .filter(|(_, coefficient)| comparison.eval_f64(**coefficient, threshold))
-                    .map(|(resource, coefficient)| (*resource, *coefficient))
-                    .collect(),
-            ),
-        };
-        Self::new(amount, self.per, self.second, self.joule, self.craft)
-    }
-
     /// Keeps the terms a reference selector matches (§5.3).
     pub fn select(&self, selector: &ResourceRef) -> Self {
         let matches = |resource: Resource| {
@@ -657,16 +633,6 @@ impl Comparison {
     }
 
     /// The same comparison on plain numbers.
-    pub fn eval_f64(self, left: f64, right: f64) -> bool {
-        match self {
-            Comparison::Less => left < right,
-            Comparison::Greater => left > right,
-            Comparison::LessEqual => left <= right,
-            Comparison::GreaterEqual => left >= right,
-            Comparison::Equal => left == right,
-            Comparison::NotEqual => left != right,
-        }
-    }
 
     pub fn symbol(self) -> &'static str {
         match self {
@@ -1511,19 +1477,6 @@ impl MultiValue {
             return Err(ValueError::new("a quality operand dropped every facet"));
         }
         Ok(qualified)
-    }
-
-    pub fn filter_amount(&self, comparison: Comparison, threshold: f64) -> Result<Self> {
-        let Some(quantity) = &self.quantity else {
-            return Err(ValueError::new(format!(
-                "`{}` dropped every facet (left: {}, right: quantity)",
-                comparison.symbol(),
-                self.facets()
-            )));
-        };
-        Ok(Self::quantity(
-            quantity.filter_amount(comparison, threshold),
-        ))
     }
 
     pub fn filter_quality(&self, comparison: Comparison, quality: Quality) -> Result<Self> {

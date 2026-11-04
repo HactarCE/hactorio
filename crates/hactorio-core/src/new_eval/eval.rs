@@ -901,11 +901,8 @@ fn binary_values(
                     comparison.symbol()
                 )));
             };
-            // The right operand says what is compared: a quality filters by
-            // quality, a plain number filters by coefficient (§5.3).
-            if let Some(threshold) = right.dimensionless() {
-                return Ok(Value::Multi(multi.filter_amount(comparison, threshold)?));
-            }
+            // Only a quality is comparable (§5.3); a number or a quantity is
+            // not a filter, it is a mistake.
             let quality = quality_of(right)?;
             Ok(Value::Multi(multi.filter_quality(comparison, quality)?))
         }
@@ -1620,7 +1617,7 @@ mod tests {
     }
 
     #[test]
-    fn a_number_filter_keeps_terms_by_sign() {
+    fn only_a_quality_is_a_filter() {
         let registry = test_registry();
         let settings = crate::Settings::default();
         let render = |text: &str| {
@@ -1633,23 +1630,20 @@ mod tests {
         let plate = registry
             .entry_by_index(registry.entry_id("iron-plate").unwrap())
             .glyph;
-        let cable = registry
-            .entry_by_index(registry.entry_id("copper-plate").unwrap())
-            .glyph;
 
-        // A bundle split by sign.
-        assert_eq!(
-            render("(2:iron-plate: - 3:copper-plate:) > 0"),
-            format!("2{plate}")
-        );
-        assert_eq!(
-            render("(2:iron-plate: - 3:copper-plate:) < 0"),
-            format!("-3{cable}")
-        );
-        // A quantity with no term of that sign is zero.
-        assert_eq!(render("(2:iron-plate:) < 0"), "0");
+        // A number on the right of a comparison is not a filter (§5.3).
+        let error = |text: &str| {
+            let outputs = evaluate(text, &registry, &settings, &|| false).outputs;
+            assert!(
+                matches!(outputs[0], Output::Error { .. }),
+                "{text} was not an error"
+            );
+        };
+        error("(2:iron-plate: - 3:copper-plate:) > 0");
+        error("(2:iron-plate: - 3:copper-plate:) < 0");
+        error("(2:iron-plate:) == 2 :iron-plate:");
 
-        // The quality filter still works, because a quality is not a number.
+        // A quality still selects terms.
         assert_eq!(
             render("(2:iron-plate: + 3:rare::iron-plate:) > :normal:"),
             format!(
