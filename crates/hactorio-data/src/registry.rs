@@ -235,6 +235,12 @@ pub struct Entry {
     pub beacon: Option<Beacon>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub equipment: Option<Equipment>,
+    /// Whether the prototype behind this entry is hidden from players.
+    ///
+    /// The entry stays in the registry so its glyph still resolves: hidden
+    /// recipes are reachable through the recycler and explicit `making`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
 }
 
 impl Entry {

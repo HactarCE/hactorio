@@ -395,6 +395,56 @@ fn an_empty_query_lists_everything_the_context_allows() {
 }
 
 #[test]
+fn hidden_items_and_recipes_are_not_suggested() {
+    const HIDDEN_FIXTURE: &str = r#"{
+        "item": {
+            "iron-plate": {"type": "item", "name": "iron-plate", "stack_size": 100},
+            "loader": {"type": "item", "name": "loader", "stack_size": 50, "hidden": true},
+            "pistol": {"type": "item", "name": "pistol", "stack_size": 5},
+            "rocket-part": {"type": "item", "name": "rocket-part", "stack_size": 5, "hidden": true}
+        },
+        "recipe": {
+            "iron-plate": {"type": "recipe", "name": "iron-plate", "results": [{"type": "item", "name": "iron-plate", "amount": 1}]},
+            "loader": {"type": "recipe", "name": "loader", "hidden": true, "ingredients": [{"type": "item", "name": "iron-plate", "amount": 1}], "results": [{"type": "item", "name": "loader", "amount": 1}]},
+            "iron-plate-recycling": {"type": "recipe", "name": "iron-plate-recycling", "hidden": true, "ingredients": [{"type": "item", "name": "iron-plate", "amount": 1}], "results": [{"type": "item", "name": "iron-plate", "amount": 1}]},
+            "pistol": {"type": "recipe", "name": "pistol", "hidden": true, "ingredients": [{"type": "item", "name": "iron-plate", "amount": 1}], "results": [{"type": "item", "name": "pistol", "amount": 1}]},
+            "rocket-part": {"type": "recipe", "name": "rocket-part", "ingredients": [{"type": "item", "name": "iron-plate", "amount": 1}], "results": [{"type": "item", "name": "rocket-part", "amount": 1}]}
+        }
+    }"#;
+    let registry =
+        hactorio_data::postprocess(HIDDEN_FIXTURE, &hactorio_data::Locale::empty()).unwrap();
+    let glyph = |id: &str| registry.entry(id).unwrap().glyph.to_string();
+
+    // Hidden prototypes stay in the registry, so explicit tokens and recipe
+    // inference still resolve them.
+    for id in ["loader", "iron-plate-recycling", "pistol", "rocket-part"] {
+        assert!(registry.entry(id).is_some(), "{id}");
+    }
+
+    let suggestions = suggested_ids(&registry, "");
+    assert!(suggestions.contains(&glyph("iron-plate")), "{suggestions:?}");
+    // A visible item keeps its entry even when its recipe is hidden.
+    assert!(suggestions.contains(&glyph("pistol")), "{suggestions:?}");
+    for hidden in ["loader", "iron-plate-recycling", "rocket-part"] {
+        assert!(
+            !suggestions.contains(&glyph(hidden)),
+            "{hidden}: {suggestions:?}"
+        );
+    }
+
+    let suggestions = suggested_ids(&registry, "making ");
+    assert!(suggestions.contains(&glyph("iron-plate")), "{suggestions:?}");
+    // A visible recipe is still offered when its item is hidden.
+    assert!(suggestions.contains(&glyph("rocket-part")), "{suggestions:?}");
+    for hidden in ["loader", "iron-plate-recycling", "pistol"] {
+        assert!(
+            !suggestions.contains(&glyph(hidden)),
+            "{hidden}: {suggestions:?}"
+        );
+    }
+}
+
+#[test]
 fn an_empty_query_is_not_cut_to_the_typed_query_limit() {
     let items: Vec<String> = (0..60)
         .map(|index| {
@@ -1097,6 +1147,7 @@ fn exact_names_outrank_near_miss_fuzzy_matches() {
             recipe: None,
             beacon: None,
             equipment: None,
+            hidden: false,
         }
     }
 

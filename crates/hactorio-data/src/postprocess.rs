@@ -93,6 +93,7 @@ pub fn postprocess(raw_dump_json: &str, locale: &Locale) -> Result<Registry> {
             let draft = drafts.entry(id.as_str().into()).or_default();
             draft.display_name = locale.items.get(id.as_str()).cloned();
             draft.icon = icon_path(proto);
+            draft.hidden |= flag(proto, "hidden");
             let entity = entities.get(id.as_str());
             draft.item = Some(Item {
                 stack_size: uint(proto, "stack_size", 1) as u32,
@@ -119,11 +120,13 @@ pub fn postprocess(raw_dump_json: &str, locale: &Locale) -> Result<Registry> {
         draft.display_name = locale.fluids.get(id).cloned();
         draft.icon = icon_path(proto);
         draft.fluid = true;
+        draft.hidden |= flag(proto, "hidden");
     }
 
     for (id, proto) in table(root, "module") {
         let draft = drafts.entry(id.into()).or_default();
         draft.icon = icon_path(proto);
+        draft.hidden |= flag(proto, "hidden");
         if draft.item.is_none() {
             draft.item = Some(Item {
                 stack_size: uint(proto, "stack_size", 1) as u32,
@@ -171,6 +174,15 @@ pub fn postprocess(raw_dump_json: &str, locale: &Locale) -> Result<Registry> {
             ))
         })?;
         let recipe = recipe_ids.get(&id).copied();
+        // An entry keeps the visibility of its item/fluid/module prototype.
+        // Recipe-only entries take the recipe's visibility, so hidden
+        // recycling recipes stay resolvable but out of autocomplete.
+        let has_prototype = draft.item.is_some() || draft.fluid || draft.module.is_some();
+        let hidden = if has_prototype {
+            draft.hidden
+        } else {
+            recipes.get(&id).is_some_and(|recipe| recipe.hidden)
+        };
         let beacon = entities
             .get(id.as_ref())
             .and_then(|entity| entity.beacon.clone());
@@ -188,6 +200,7 @@ pub fn postprocess(raw_dump_json: &str, locale: &Locale) -> Result<Registry> {
             recipe,
             beacon,
             equipment,
+            hidden,
         });
     }
 
@@ -323,6 +336,7 @@ struct Draft {
     icon: Option<Box<str>>,
     recipe_display_name: Option<Box<str>>,
     recipe_icon: Option<Box<str>>,
+    hidden: bool,
 }
 
 fn table<'a>(root: &'a Map<String, Value>, key: &str) -> Vec<(&'a str, &'a Value)> {

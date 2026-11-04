@@ -840,8 +840,9 @@ needing, since it drops fluids.
   and productivity filtering. One candidate is used; zero candidates is an
   error; several candidates are an error that asks for `making`, unless exactly
   one of them has the selected resource's id.
-- Hidden recipes are excluded from inference and from autocomplete. They are
-  reachable only by naming them, which for recycling means `:recycling:`.
+- Hidden items and hidden recipes are excluded from autocomplete; they stay in
+  the registry, so naming them (`:recycling:`) or inferring them from a machine
+  still works.
 - The result contains exactly the rows the quantity's terms select. Rows of the
   input process that no term selects are dropped rather than left unscaled.
 - A solved process is rejected: these operators size a process once.
@@ -1429,7 +1430,8 @@ p.out.:iron-plate: >= :rare:
 ```
 
 - The recycling recipe has to be named with `:recycling:`; it is hidden, so it
-  is neither inferable by `into` nor offered by autocomplete.
+  is not offered by autocomplete. It stays resolvable by name and inferable by
+  `into`.
 - Inner `into` scales one row per resource term: `p.out.:iron-plate: < :rare:`
   has a normal term and an uncommon term, which select two of the recipe's
   quality rows, so no double count is reported and the unselected rows are
@@ -1497,5 +1499,5 @@ quantities, configs, machines, and qualities (§7.5).
 | D41 | A quantity with several resource terms scales one process row per term, and two terms selecting the same recipe is an error. | T3 filters to a set of qualities, and each quality is its own recipe; the same recipe twice would double count. |
 | D42 | There is no `belt` facet. | No operator reads one. A belt token carries `quantity`, `stack_rate`, and `stack_capacity`, and `:stacked-belt:` works on any non-fluid `stack_rate`. |
 | D43 | Machine-seconds is an extent magnitude, not a unit; `.machines` is a rate-process property and `.:time:` is a count-process property. | Quantities carry only `second`, `joule`, `craft`, and resources; the extent already says whether the number is a rate or a total. |
-| D44 | Hidden recipes are excluded from autocomplete but not from inference, and remain reachable by naming them (`:recycling:`). | A recycler only makes hidden recipes, so excluding them from inference makes `into :recycler:` fail; they are kept out of the completion list because they would dominate it. |
+| D44 | Hidden items and hidden recipes are excluded from autocomplete but not from inference, and remain reachable by naming them (`:recycling:`). | A recycler mostly makes hidden recipes, so excluding them from inference makes `into :recycler:` fail; they are kept out of the completion list because they would dominate it. |
 | D45 | `:stacked-belt:` requires a single `Limit(1)` stack limit and errors otherwise. | Stacking is a belt operation. An inserter's rate is incidentally at `Limit(1)` before capacity research, which is meaningless but not worth a special case to reject. |

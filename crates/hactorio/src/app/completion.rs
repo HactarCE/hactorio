@@ -635,18 +635,20 @@ pub(super) fn completion_items(
         .iter()
         .enumerate()
         .filter(|(_, entry)| match context {
-            CompletionContext::Machine => entry.machine().is_some(),
+            // A hidden item can share its entry with a visible recipe (the
+            // rocket part), and a visible item can share it with a hidden
+            // recipe (the pistol): recipe offers depend on the recipe alone.
             CompletionContext::Recipe => entry
                 .recipe
                 .is_some_and(|recipe| !registry.recipe(recipe).hidden),
+            _ if entry.hidden => false,
+            CompletionContext::Machine => entry.machine().is_some(),
             CompletionContext::Config => entry.module.is_some() || entry.beacon.is_some(),
             CompletionContext::Property => match &value {
-                // A process and a quantity both select by resource, so every
-                // item and fluid is a selector after their dot.
+                // A process and a quantity both select by resource, so
+                // every item and fluid is a selector after their dot.
                 Some(Value::Process(_)) => entry.is_item_or_fluid(),
-                Some(Value::Multi(multi)) => {
-                    multi.quantity.is_some() && entry.is_item_or_fluid()
-                }
+                Some(Value::Multi(multi)) => multi.quantity.is_some() && entry.is_item_or_fluid(),
                 Some(Value::Quality(_)) => false,
                 None => entry.is_item_or_fluid(),
             },
