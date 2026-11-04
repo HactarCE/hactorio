@@ -341,25 +341,24 @@ fn format_quantity(quantity: &Quantity, settings: &Settings, registry: &Registry
         )
     };
 
-    let mut text = format_amount(&amount, settings, registry);
+    let mut suffix = String::new();
     if let Some(per) = quantity.per {
-        text.push('/');
-        text.push_str(&format_resource(per, registry));
+        suffix.push('/');
+        suffix.push_str(&format_resource(per, registry));
     }
-    text.push_str(&unit_suffix(quantity.joule, "J"));
-    text.push_str(&unit_suffix(quantity.craft, "craft"));
-    text.push_str(&unit_suffix(quantity.second, seconds_name));
-    text
-}
+    suffix.push_str(&unit_suffix(quantity.joule, "J"));
+    suffix.push_str(&unit_suffix(quantity.craft, "craft"));
+    suffix.push_str(&unit_suffix(quantity.second, seconds_name));
 
-fn format_amount(amount: &Amount, settings: &Settings, registry: &Registry) -> String {
-    match amount {
-        Amount::Number(value) => format_number_with(*value, settings),
+    match &amount {
+        Amount::Number(value) => format!("{}{suffix}", format_number_with(*value, settings)),
+        // Every term repeats the units, so the rendering parses back to the
+        // same quantity: `1:iron-plate:/s + 2:copper-plate:/s` (§7.5).
         Amount::Resources(terms) => terms
             .iter()
             .map(|(resource, coefficient)| {
                 format!(
-                    "{}{}",
+                    "{}{}{suffix}",
                     format_prefixed(*coefficient, settings, settings.metric_prefixes),
                     format_resource(*resource, registry)
                 )

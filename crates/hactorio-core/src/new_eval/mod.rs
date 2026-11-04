@@ -1157,7 +1157,8 @@ mod tests {
         };
 
         // A 25% chance upgrades a product by one level, and each further level
-        // costs another 25% of what is left, so p^n per level.
+        // is a constant 10% roll: 0.9Q, 0.09Q, 0.009Q, then 0.001Q for the top
+        // tier (https://wiki.factorio.com/Quality#Quality_modules).
         let iron = registry.entry_id("iron-plate").unwrap();
         let rate = |quality| {
             terms
@@ -1166,16 +1167,16 @@ mod tests {
                 .unwrap_or(0.0)
         };
         assert_eq!(terms.len(), 5, "every quality is represented");
-        // 1.875 plates/s overall, split 0.25 / 0.0625 / 0.015625 / 0.00390625.
+        // 1.875 plates/s overall, split 0.225 / 0.0225 / 0.00225 / 0.00025.
         let total: f64 = terms.values().sum();
         assert!((total - 1.875).abs() < 1e-9, "{total}");
-        assert!((rate(Quality::Uncommon) - 1.875 * 0.25).abs() < 1e-9);
-        assert!((rate(Quality::Rare) - 1.875 * 0.0625).abs() < 1e-9);
-        assert!((rate(Quality::Epic) - 1.875 * 0.015625).abs() < 1e-9);
-        assert!((rate(Quality::Legendary) - 1.875 * 0.003_906_25).abs() < 1e-9);
+        assert!((rate(Quality::Uncommon) - 1.875 * 0.225).abs() < 1e-9);
+        assert!((rate(Quality::Rare) - 1.875 * 0.0225).abs() < 1e-9);
+        assert!((rate(Quality::Epic) - 1.875 * 0.00225).abs() < 1e-9);
+        assert!((rate(Quality::Legendary) - 1.875 * 0.00025).abs() < 1e-9);
         // Normal keeps the remainder, so it is the largest share here.
         assert!(rate(Quality::Normal) > rate(Quality::Uncommon));
-        assert!((rate(Quality::Normal) - 1.875 * (1.0 - 0.332_031_25)).abs() < 1e-9);
+        assert!((rate(Quality::Normal) - 1.875 * 0.75).abs() < 1e-9);
     }
 
     #[test]
@@ -1289,7 +1290,10 @@ mod tests {
             .glyph;
 
         // Items are both the ore consumed and the plates produced.
-        assert_eq!(render("p.:item:"), format!("-1.25{ore} + 1.875{plate}/s"));
+        assert_eq!(
+            render("p.:item:"),
+            format!("-1.25{ore}/s + 1.875{plate}/s")
+        );
         assert_eq!(render("p.:fluid:"), "0");
 
         // A rare selection is empty, and quality renders as its own glyph. A

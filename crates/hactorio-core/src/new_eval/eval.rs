@@ -563,18 +563,67 @@ impl Runner<'_> {
                 ))),
             },
             Selector::Property(Property::Power) => {
-                let Some(machine) = &multi.machine else {
-                    return Err(ValueError::new(format!(
-                        "`.power` needs a machine facet ({})",
-                        multi.facets()
+                if let Some(machine) = &multi.machine {
+                    let modifiers =
+                        process::machine_modifiers(machine, self.registry, self.settings)
+                            .ok_or_else(|| ValueError::new("that machine has no modifiers"))?;
+                    return Ok(Value::quantity(Quantity::new(
+                        Amount::Number(modifiers.power_w * machine.count()),
+                        None,
+                        -1,
+                        1,
+                        0,
                     )));
-                };
-                let modifiers = process::machine_modifiers(machine, self.registry, self.settings)
-                    .ok_or_else(|| ValueError::new("that machine has no modifiers"))?;
+                }
+                let watts = self
+                    .item_amount(&multi, |item| item.power_w)
+                    .ok_or_else(|| ValueError::new(format!(
+                        "`.power` needs a machine facet or an item with a `power_w` ({})",
+                        multi.facets()
+                    )))?;
                 Ok(Value::quantity(Quantity::new(
-                    Amount::Number(modifiers.power_w * machine.count()),
+                    Amount::Number(watts),
                     None,
                     -1,
+                    1,
+                    0,
+                )))
+            }
+            Selector::Property(Property::Energy) => {
+                let joules = self
+                    .item_amount(&multi, |item| item.stored_energy_j)
+                    .ok_or_else(|| ValueError::new(format!(
+                        "`.energy` needs a machine-seconds process or a stored energy ({})",
+                        multi.facets()
+                    )))?;
+                Ok(Value::quantity(Quantity::new(
+                    Amount::Number(joules),
+                    None,
+                    0,
+                    1,
+                    0,
+                )))
+            }
+            Selector::Signal(super::lex::Signal::Electric) => {
+                if let Some(watts) = self.item_amount(&multi, |item| item.power_w) {
+                    return Ok(Value::quantity(Quantity::new(
+                        Amount::Number(watts),
+                        None,
+                        -1,
+                        1,
+                        0,
+                    )));
+                }
+                let joules = self
+                    .item_amount(&multi, |item| item.stored_energy_j)
+                    .ok_or_else(|| ValueError::new(format!(
+                        "`.:electric:` needs a machine, a `power_w`, or a stored energy ({})",
+                        multi.facets()
+                    )))?;
+                Ok(Value::quantity(Quantity::new(
+                    Amount::Number(joules),
+                    None,
+                    0,
                     1,
                     0,
                 )))
@@ -639,6 +688,15 @@ impl Runner<'_> {
                     ));
                 }
                 Ok(Value::number(process.machines()))
+            }
+            Selector::Signal(super::lex::Signal::Time) => {
+                if !machine_seconds {
+                    return Err(ValueError::new(
+                        "`.:time:` needs a machine-seconds process",
+                    ));
+                }
+                let seconds: f64 = process.rows.values().sum();
+                Ok(Value::quantity(Quantity::time(seconds)))
             }
             Selector::Property(Property::In) => self.process_totals(process, Rows::Inputs, rate),
             Selector::Property(Property::Out) => self.process_totals(process, Rows::Outputs, rate),
@@ -771,6 +829,33 @@ impl Runner<'_> {
             0,
             0,
         )))
+    }
+}
+
+impl Runner<'_> {
+    /// A sum over the item terms of a quantity, each weighted by its
+    /// coefficient and by whatever the prototype carries (§6.6).
+    fn item_amount(
+        &self,
+        multi: &MultiValue,
+        field: impl Fn(&hactorio_data::Item) -> Option<f64>,
+    ) -> Option<f64> {
+        let quantity = multi.quantity.as_ref()?;
+        let Amount::Resources(terms) = &quantity.amount else {
+            return None;
+        };
+        let mut total = 0.0;
+        let mut found = false;
+        for (resource, coefficient) in terms {
+            let Resource::Item(item) = resource else {
+                continue;
+            };
+            let entry = self.registry.entry_by_index(item.id);
+            let item = entry.item.as_ref()?;
+            total += field(item)? * coefficient;
+            found = true;
+        }
+        found.then_some(total)
     }
 }
 

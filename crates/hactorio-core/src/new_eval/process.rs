@@ -340,26 +340,34 @@ pub enum Rows {
 
 /// How a product splits across qualities (§6.3).
 ///
-/// Reaching `n` levels above the recipe's quality has probability `p^n`; the
-/// recipe's own quality takes the remainder. A legendary recipe has nowhere to
-/// go, so it stays put.
+/// The first roll upgrades by one level with the machine's quality chance; every
+/// further level is a constant 10% roll. The share that reaches at least `n`
+/// levels is therefore `Q · 0.1^(n-1)`, and the recipe's own quality takes
+/// `1 - Q`. A legendary recipe has nowhere to go, so it stays put.
 pub fn quality_shares(base: Quality, chance: f64) -> Vec<(Quality, f64)> {
     let levels = Quality::ALL;
     let Some(base_index) = levels.iter().position(|quality| *quality == base) else {
         return vec![(base, 1.0)];
     };
     let chance = chance.clamp(0.0, 1.0);
-    let mut shares = Vec::new();
-    let mut upgraded = 0.0;
-    for (offset, quality) in levels[base_index + 1..].iter().enumerate() {
-        let share = chance.powi(i32::try_from(offset + 1).unwrap_or(1));
+    let above = &levels[base_index + 1..];
+    let mut shares = vec![(base, 1.0 - chance)];
+    for (offset, quality) in above.iter().enumerate() {
+        let level = offset + 1;
+        let at_least = |level: usize| {
+            chance * 0.1_f64.powi(i32::try_from(level - 1).unwrap_or(i32::MAX))
+        };
+        // The top tier keeps everything that reached it; a middle tier keeps
+        // only what did not roll one level further.
+        let share = if level == above.len() {
+            at_least(level)
+        } else {
+            at_least(level) - at_least(level + 1)
+        };
         if share > 0.0 {
-            upgraded += share;
             shares.push((*quality, share));
         }
     }
-    let base_share = (1.0 - upgraded).max(0.0);
-    shares.insert(0, (base, base_share));
     shares
 }
 

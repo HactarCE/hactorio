@@ -281,6 +281,7 @@ pub fn parse_line(line: &str, registry: &Registry) -> Result<Line, ParseError> {
 
 // Juxtaposition is handled inside `parse_chain`, so it needs no binding power.
 const BP_IN: u8 = 10;
+const BP_MAKE: u8 = 20;
 const BP_COMPARE: u8 = 30;
 const BP_ADD: u8 = 40;
 const BP_SUB: u8 = 45;
@@ -384,6 +385,7 @@ impl Parser<'_> {
         let token = self.peek()?;
         Some(match token {
             Token::Keyword(Keyword::In) => (BinaryOp::In, BP_IN, false),
+            Token::Keyword(Keyword::Making) => (BinaryOp::Make, BP_MAKE, false),
             Token::Keyword(Keyword::Into) => (BinaryOp::Into, BP_IN, false),
             Token::Keyword(Keyword::From) => (BinaryOp::From, BP_IN, false),
             Token::Less => (BinaryOp::Compare(Comparison::Less), BP_COMPARE, false),
@@ -405,39 +407,23 @@ impl Parser<'_> {
         })
     }
 
-    /// An operand chain (§4.1). `making` attaches to the chain on its left.
+    /// An operand chain (§4.1).
     fn parse_chain(&mut self) -> Result<Expr, ParseError> {
         let mut operands = vec![self.parse_operand()?];
         while self.peek().is_some_and(Token::starts_operand) {
             operands.push(self.parse_operand()?);
         }
-        let mut chain = if operands.len() == 1 {
+        Ok(if operands.len() == 1 {
             operands.pop().expect("one operand")
         } else {
             Expr::Juxtapose(operands)
-        };
-
-        if matches!(self.peek(), Some(Token::Keyword(Keyword::Making))) {
-            self.pos += 1;
-            let recipe = self.parse_primary()?;
-            chain = Expr::Binary {
-                op: BinaryOp::Make,
-                lhs: Box::new(chain),
-                rhs: Box::new(recipe),
-            };
-        }
-        Ok(chain)
+        })
     }
 
-    /// The right side of `in`/`into`/`from`: a machine expression, with no
-    /// arithmetic (§5.4).
+    /// The right side of `in`/`into`/`from`: everything tighter than those
+    /// operators (§4.3), which includes `making`.
     fn parse_machine_expr(&mut self) -> Result<Expr, ParseError> {
-        let mut expr = self.parse_chain()?;
-        while matches!(self.peek(), Some(Token::Dot)) {
-            self.pos += 1;
-            expr = self.selector_expr(expr)?;
-        }
-        Ok(expr)
+        self.parse_bp(BP_IN + 1)
     }
 
     fn parse_operand(&mut self) -> Result<Expr, ParseError> {
@@ -665,22 +651,26 @@ mod tests {
     }
 
     #[test]
-    fn making_attaches_to_the_chain_before_arithmetic() {
+    fn making_is_looser_than_arithmetic_and_tighter_than_in() {
         assert_eq!(
             shape(&expr("2 * :foundry: making :iron-plate:")),
-            "(2 * (token making token))"
+            "((2 * token) making token)"
         );
         assert_eq!(
             shape(&expr(":foundry: making :iron-plate: * 2")),
-            "((token making token) * 2)"
+            "(token making (token * 2))"
+        );
+        assert_eq!(
+            shape(&expr("3 :iron-plate: in :foundry: making :iron-plate:")),
+            "([3 token] in (token making token))"
         );
     }
 
     #[test]
-    fn in_takes_a_machine_expression_and_stops_before_arithmetic() {
+    fn in_takes_everything_tighter_than_in_on_its_right() {
         assert_eq!(
             shape(&expr("3 :iron-plate: in :foundry: * 2")),
-            "(([3 token] in token) * 2)"
+            "([3 token] in (token * 2))"
         );
     }
 
