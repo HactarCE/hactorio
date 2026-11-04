@@ -571,11 +571,13 @@ impl Runner<'_> {
                 };
                 let modifiers = process::machine_modifiers(machine, self.registry, self.settings)
                     .ok_or_else(|| ValueError::new("that machine has no modifiers"))?;
-                Ok(Value::quantity(Quantity {
-                    joule: 1,
-                    second: -1,
-                    ..Quantity::number(modifiers.power_w * machine.count())
-                }))
+                Ok(Value::quantity(Quantity::new(
+                    Amount::Number(modifiers.power_w * machine.count()),
+                    None,
+                    -1,
+                    1,
+                    0,
+                )))
             }
             Selector::Property(Property::Productivity) => {
                 let Some(machine) = &multi.machine else {
@@ -644,13 +646,13 @@ impl Runner<'_> {
             Selector::Property(Property::Crafts) => {
                 let crafts = process::crafts(process, self.registry, self.settings)
                     .ok_or_else(|| ValueError::new("a row has no craft rate"))?;
-                Ok(Value::quantity(Quantity {
-                    amount: Amount::Number(crafts),
-                    per: None,
-                    second: rate,
-                    joule: 0,
-                    craft: 1,
-                }))
+                Ok(Value::quantity(Quantity::new(
+                    Amount::Number(crafts),
+                    None,
+                    rate,
+                    0,
+                    1,
+                )))
             }
             Selector::Property(Property::Power) => {
                 if machine_seconds {
@@ -658,11 +660,13 @@ impl Runner<'_> {
                 }
                 let watts = process::power(process, self.registry, self.settings)
                     .ok_or_else(|| ValueError::new("a row has no power"))?;
-                Ok(Value::quantity(Quantity {
-                    joule: 1,
-                    second: -1,
-                    ..Quantity::number(watts)
-                }))
+                Ok(Value::quantity(Quantity::new(
+                    Amount::Number(watts),
+                    None,
+                    -1,
+                    1,
+                    0,
+                )))
             }
             Selector::Property(Property::Energy) => {
                 if !machine_seconds {
@@ -670,10 +674,13 @@ impl Runner<'_> {
                 }
                 let joules = process::power(process, self.registry, self.settings)
                     .ok_or_else(|| ValueError::new("a row has no power"))?;
-                Ok(Value::quantity(Quantity {
-                    joule: 1,
-                    ..Quantity::number(joules)
-                }))
+                Ok(Value::quantity(Quantity::new(
+                    Amount::Number(joules),
+                    None,
+                    0,
+                    1,
+                    0,
+                )))
             }
             Selector::Signal(super::lex::Signal::Item) => {
                 self.process_medium(process, true, rate, false)
@@ -692,18 +699,23 @@ impl Runner<'_> {
                 if machine_seconds {
                     let joules = process::power(process, self.registry, self.settings)
                         .ok_or_else(|| ValueError::new("a row has no power"))?;
-                    Ok(Value::quantity(Quantity {
-                        joule: 1,
-                        ..Quantity::number(joules)
-                    }))
+                    Ok(Value::quantity(Quantity::new(
+                        Amount::Number(joules),
+                        None,
+                        0,
+                        1,
+                        0,
+                    )))
                 } else {
                     let watts = process::power(process, self.registry, self.settings)
                         .ok_or_else(|| ValueError::new("a row has no power"))?;
-                    Ok(Value::quantity(Quantity {
-                        joule: 1,
-                        second: -1,
-                        ..Quantity::number(watts)
-                    }))
+                    Ok(Value::quantity(Quantity::new(
+                        Amount::Number(watts),
+                        None,
+                        -1,
+                        1,
+                        0,
+                    )))
                 }
             }
             Selector::Property(Property::Pollution) => {
@@ -722,14 +734,8 @@ impl Runner<'_> {
             Selector::Resource(resource) => {
                 let totals = process::totals(process, self.registry, self.settings, Rows::Net)
                     .ok_or_else(|| ValueError::new("a row has no rate"))?;
-                let selected = Quantity {
-                    amount: Amount::Resources(totals).canonicalize(),
-                    per: None,
-                    second: rate,
-                    joule: 0,
-                    craft: 0,
-                }
-                .select(&resource);
+                let selected = Quantity::new(Amount::Resources(totals), None, rate, 0, 0)
+                    .select(&resource);
                 Ok(Value::quantity(selected))
             }
             other => Err(ValueError::new(format!(
@@ -749,13 +755,7 @@ impl Runner<'_> {
     ) -> Result<Value, ValueError> {
         let totals = process::totals(process, self.registry, self.settings, Rows::Net)
             .ok_or_else(|| ValueError::new("a row has no rate"))?;
-        let quantity = Quantity {
-            amount: Amount::Resources(totals).canonicalize(),
-            per: None,
-            second: rate,
-            joule: 0,
-            craft: 0,
-        };
+        let quantity = Quantity::new(Amount::Resources(totals), None, rate, 0, 0);
         Ok(Value::quantity(quantity.select_medium(item)))
     }
 
@@ -767,13 +767,13 @@ impl Runner<'_> {
     ) -> Result<Value, ValueError> {
         let totals = process::totals(process, self.registry, self.settings, which)
             .ok_or_else(|| ValueError::new("a row has no rate"))?;
-        Ok(Value::quantity(Quantity {
-            amount: Amount::Resources(totals).canonicalize(),
-            per: None,
-            second: rate,
-            joule: 0,
-            craft: 0,
-        }))
+        Ok(Value::quantity(Quantity::new(
+            Amount::Resources(totals),
+            None,
+            rate,
+            0,
+            0,
+        )))
     }
 }
 
@@ -807,19 +807,15 @@ fn facets(value: &Value) -> String {
 fn unit_quantity(unit: super::lex::Unit) -> Quantity {
     match unit {
         super::lex::Unit::Second(seconds) => Quantity::time(seconds),
-        super::lex::Unit::Joule(joules) => Quantity {
-            joule: 1,
-            ..Quantity::number(joules)
-        },
-        super::lex::Unit::Watt(watts) => Quantity {
-            joule: 1,
-            second: -1,
-            ..Quantity::number(watts)
-        },
-        super::lex::Unit::Craft(crafts) => Quantity {
-            craft: 1,
-            ..Quantity::number(crafts)
-        },
+        super::lex::Unit::Joule(joules) => {
+            Quantity::new(Amount::Number(joules), None, 0, 1, 0)
+        }
+        super::lex::Unit::Watt(watts) => {
+            Quantity::new(Amount::Number(watts), None, -1, 1, 0)
+        }
+        super::lex::Unit::Craft(crafts) => {
+            Quantity::new(Amount::Number(crafts), None, 0, 0, 1)
+        }
     }
 }
 

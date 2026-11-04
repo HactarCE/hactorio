@@ -173,6 +173,15 @@ impl Amount {
         }
     }
 
+    /// Whether every coefficient is approximately zero, so the amount carries
+    /// no quantity at all.
+    pub fn is_zero(&self) -> bool {
+        match self {
+            Amount::Number(value) => is_zero(*value),
+            Amount::Resources(terms) => terms.values().all(|coefficient| is_zero(*coefficient)),
+        }
+    }
+
     /// Removes zero terms, collapsing an emptied bundle to the number zero.
     pub fn canonicalize(self) -> Self {
         match self {
@@ -241,31 +250,55 @@ pub struct Quantity {
 }
 
 impl Quantity {
-    pub fn number(value: f64) -> Self {
-        Self {
-            amount: Amount::Number(value),
-            per: None,
-            second: 0,
-            joule: 0,
-            craft: 0,
+    /// The one constructor. A zero numerator has no units, so `0:iron-plate:`
+    /// and `0/s` are both the number `0` (§5.3).
+    pub fn new(
+        amount: Amount,
+        per: Option<Resource>,
+        second: i32,
+        joule: i32,
+        craft: i32,
+    ) -> Self {
+        let amount = amount.canonicalize();
+        if amount.is_zero() {
+            return Self {
+                amount: Amount::Number(0.0),
+                per: None,
+                second: 0,
+                joule: 0,
+                craft: 0,
+            };
         }
+        Self {
+            amount,
+            per,
+            second,
+            joule,
+            craft,
+        }
+    }
+
+    /// Whether the quantity carries no amount at all.
+    pub fn is_zero(&self) -> bool {
+        self.amount.is_zero()
+    }
+
+    pub fn number(value: f64) -> Self {
+        Self::new(Amount::Number(value), None, 0, 0, 0)
     }
 
     pub fn resource(resource: Resource) -> Self {
-        Self {
-            amount: Amount::Resources(BTreeMap::from([(resource, 1.0)])),
-            per: None,
-            second: 0,
-            joule: 0,
-            craft: 0,
-        }
+        Self::new(
+            Amount::Resources(BTreeMap::from([(resource, 1.0)])),
+            None,
+            0,
+            0,
+            0,
+        )
     }
 
     pub fn time(seconds: f64) -> Self {
-        Self {
-            second: 1,
-            ..Self::number(seconds)
-        }
+        Self::new(Amount::Number(seconds), None, 1, 0, 0)
     }
 
     pub fn is_dimensionless_number(&self) -> Option<f64> {
@@ -283,6 +316,14 @@ impl Quantity {
     }
 
     pub fn add(&self, other: &Self) -> Result<Self> {
+        // A zero amount is the identity whatever shape it was written in, so
+        // `:iron-plate: + 0` is one iron plate (§5.3).
+        if self.is_zero() {
+            return Ok(other.clone());
+        }
+        if other.is_zero() {
+            return Ok(self.clone());
+        }
         if !self.same_units(other) {
             return Err(ValueError::new("quantities have different units"));
         }
@@ -301,10 +342,13 @@ impl Quantity {
                 ));
             }
         };
-        Ok(Self {
-            amount: amount.canonicalize(),
-            ..self.clone()
-        })
+        Ok(Self::new(
+            amount,
+            self.per,
+            self.second,
+            self.joule,
+            self.craft,
+        ))
     }
 
     pub fn sub(&self, other: &Self) -> Result<Self> {
@@ -312,10 +356,13 @@ impl Quantity {
     }
 
     pub fn negate(&self) -> Self {
-        Self {
-            amount: self.amount.negate(),
-            ..self.clone()
-        }
+        Self::new(
+            self.amount.negate(),
+            self.per,
+            self.second,
+            self.joule,
+            self.craft,
+        )
     }
 
     pub fn absolute(&self) -> Self {
@@ -328,10 +375,7 @@ impl Quantity {
                     .collect(),
             ),
         };
-        Self {
-            amount: amount.canonicalize(),
-            ..self.clone()
-        }
+        Self::new(amount, self.per, self.second, self.joule, self.craft)
     }
 
     /// Multiplies amounts, rejecting the two unrepresentable cases (§5.3).
@@ -405,13 +449,7 @@ impl Quantity {
             (None, None) => (Self::multiply_amounts(&self.amount, &other.amount)?, None),
         };
 
-        Ok(Self {
-            amount: amount.canonicalize(),
-            per,
-            second,
-            joule,
-            craft,
-        })
+        Ok(Self::new(amount, per, second, joule, craft))
     }
 
     pub fn reciprocal(&self) -> Result<Self> {
@@ -441,13 +479,13 @@ impl Quantity {
                 .checked_neg()
                 .ok_or_else(|| ValueError::new("exponent overflow"))
         };
-        Ok(Self {
-            amount: amount.canonicalize(),
+        Ok(Self::new(
+            amount,
             per,
-            second: negate(self.second)?,
-            joule: negate(self.joule)?,
-            craft: negate(self.craft)?,
-        })
+            negate(self.second)?,
+            negate(self.joule)?,
+            negate(self.craft)?,
+        ))
     }
 
     pub fn div(&self, other: &Self) -> Result<Self> {
@@ -482,13 +520,13 @@ impl Quantity {
                 "a denominator resource is only representable with exponent one",
             ));
         }
-        Ok(Self {
-            amount: Amount::Number(base.powi(power)),
-            per: self.per,
-            second: self.second * power,
-            joule: self.joule * power,
-            craft: self.craft * power,
-        })
+        Ok(Self::new(
+            Amount::Number(base.powi(power)),
+            self.per,
+            self.second * power,
+            self.joule * power,
+            self.craft * power,
+        ))
     }
 
     /// Applies a quality comparison to every item term (§5.3).
@@ -509,21 +547,10 @@ impl Quantity {
             ),
         };
         let per = match self.per {
-            Some(resource) if keep(resource) => Some(resource),
-            Some(_) => {
-                return Self {
-                    amount: Amount::Number(0.0),
-                    per: None,
-                    ..self.clone()
-                };
-            }
-            None => None,
+            Some(resource) if !keep(resource) => return Self::number(0.0),
+            per => per,
         };
-        Self {
-            amount: amount.canonicalize(),
-            per,
-            ..self.clone()
-        }
+        Self::new(amount, per, self.second, self.joule, self.craft)
     }
 
     /// Keeps the terms whose coefficient satisfies the comparison (§5.3).
@@ -547,10 +574,7 @@ impl Quantity {
                     .collect(),
             ),
         };
-        Self {
-            amount: amount.canonicalize(),
-            ..self.clone()
-        }
+        Self::new(amount, self.per, self.second, self.joule, self.craft)
     }
 
     /// Keeps the terms a reference selector matches (§5.3).
@@ -572,21 +596,10 @@ impl Quantity {
             ),
         };
         let per = match self.per {
-            Some(resource) if matches(resource) => Some(resource),
-            Some(_) => {
-                return Self {
-                    amount: Amount::Number(0.0),
-                    per: None,
-                    ..self.clone()
-                };
-            }
-            None => None,
+            Some(resource) if !matches(resource) => return Self::number(0.0),
+            per => per,
         };
-        Self {
-            amount: amount.canonicalize(),
-            per,
-            ..self.clone()
-        }
+        Self::new(amount, per, self.second, self.joule, self.craft)
     }
 
     /// Keeps only terms of one medium (§5.3).
@@ -605,11 +618,7 @@ impl Quantity {
             Some(resource) if matches!(resource, Resource::Item(_)) == item => Some(resource),
             _ => None,
         };
-        Self {
-            amount: amount.canonicalize(),
-            per,
-            ..self.clone()
-        }
+        Self::new(amount, per, self.second, self.joule, self.craft)
     }
 }
 
@@ -1424,9 +1433,14 @@ impl MultiValue {
     /// Scales by a dimensionless factor, dropping the reference facets (§5.1).
     pub fn scale(&self, factor: f64) -> Result<Self> {
         let result = Self {
-            quantity: self.quantity.as_ref().map(|quantity| Quantity {
-                amount: quantity.amount.scale(factor),
-                ..quantity.clone()
+            quantity: self.quantity.as_ref().map(|quantity| {
+                Quantity::new(
+                    quantity.amount.scale(factor),
+                    quantity.per,
+                    quantity.second,
+                    quantity.joule,
+                    quantity.craft,
+                )
             }),
             stack_rate: self.stack_rate.as_ref().map(|stacks| stacks.scale(factor)),
             stack_capacity: self
@@ -1445,12 +1459,16 @@ impl MultiValue {
 
     /// Applies the quality operand of §3.3.
     pub fn qualify(&self, quality: Quality) -> Result<Self> {
-        let quantity = self.quantity.as_ref().map(|quantity| Quantity {
-            amount: quantity
-                .amount
-                .map_resources(|resource| resource.with_quality(quality)),
-            per: quantity.per.map(|resource| resource.with_quality(quality)),
-            ..quantity.clone()
+        let quantity = self.quantity.as_ref().map(|quantity| {
+            Quantity::new(
+                quantity
+                    .amount
+                    .map_resources(|resource| resource.with_quality(quality)),
+                quantity.per.map(|resource| resource.with_quality(quality)),
+                quantity.second,
+                quantity.joule,
+                quantity.craft,
+            )
         });
         let resource = self.resource.map(|resource| ResourceRef {
             quality: if resource.is_fluid {
@@ -1566,13 +1584,13 @@ impl MultiValue {
             ));
         };
         Ok(Some(Self {
-            quantity: Some(Quantity {
-                amount: Amount::Resources(BTreeMap::from([(resource, amount)])).canonicalize(),
-                per: None,
-                second: if is_rate { -1 } else { 0 },
-                joule: 0,
-                craft: 0,
-            }),
+            quantity: Some(Quantity::new(
+                Amount::Resources(BTreeMap::from([(resource, amount)])),
+                None,
+                if is_rate { -1 } else { 0 },
+                0,
+                0,
+            )),
             ..Self::default()
         }))
     }
@@ -1945,17 +1963,17 @@ mod tests {
     #[test]
     fn quality_filters_keep_matching_items_and_drop_fluids() {
         let rare = iron().with_quality(Quality::Rare);
-        let quantity = Quantity {
-            amount: Amount::Resources(BTreeMap::from([
+        let quantity = Quantity::new(
+            Amount::Resources(BTreeMap::from([
                 (iron(), 1.0),
                 (rare, 2.0),
                 (Resource::Fluid(EntryId::from_index(3)), 5.0),
             ])),
-            per: None,
-            second: 0,
-            joule: 0,
-            craft: 0,
-        };
+            None,
+            0,
+            0,
+            0,
+        );
         let filtered = quantity.filter_quality(Comparison::GreaterEqual, Quality::Rare);
         assert_eq!(
             filtered.amount,

@@ -569,16 +569,9 @@ mod tests {
     #[test]
     fn energy_and_power_use_si_prefixes() {
         let registry = test_registry();
-        let energy = Quantity {
-            joule: 1,
-            ..Quantity::number(1500.0)
-        };
+        let energy = Quantity::new(Amount::Number(1500.0), None, 0, 1, 0);
         assert_eq!(format_quantity(&energy, &settings(), &registry), "1.5kJ");
-        let power = Quantity {
-            joule: 1,
-            second: -1,
-            ..Quantity::number(2e6)
-        };
+        let power = Quantity::new(Amount::Number(2e6), None, -1, 1, 0);
         assert_eq!(format_quantity(&power, &settings(), &registry), "2MW");
     }
 
@@ -592,10 +585,7 @@ mod tests {
         assert_eq!(format_quantity(&duration, &settings(), &registry), "180s");
         assert_eq!(format_quantity(&duration, &minute, &registry), "3m");
 
-        let rate = Quantity {
-            second: -1,
-            ..Quantity::number(15.0)
-        };
+        let rate = Quantity::new(Amount::Number(15.0), None, -1, 0, 0);
         assert_eq!(format_quantity(&rate, &settings(), &registry), "15/s");
         assert_eq!(format_quantity(&rate, &minute, &registry), "900/m");
     }

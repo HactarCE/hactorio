@@ -1290,14 +1290,42 @@ mod tests {
 
         // Items are both the ore consumed and the plates produced.
         assert_eq!(render("p.:item:"), format!("-1.25{ore} + 1.875{plate}/s"));
-        assert_eq!(render("p.:fluid:"), "0/s");
+        assert_eq!(render("p.:fluid:"), "0");
 
-        // A rare selection is empty, and quality renders as its own glyph.
-        assert_eq!(render("p.net.:rare: :iron-plate:"), "0/s");
+        // A rare selection is empty, and quality renders as its own glyph. A
+        // zero quantity carries no units (§5.3).
+        assert_eq!(render("p.net.:rare: :iron-plate:"), "0");
         let rare = hactorio_data::quality_by_id("rare").unwrap().glyph;
         assert_eq!(crate::new_eval::Quality::Rare.glyph(), rare);
         let legendary = hactorio_data::quality_by_id("legendary").unwrap().glyph;
         assert_ne!(rare, legendary);
+    }
+
+    #[test]
+    fn a_zero_amount_has_no_units_and_adds_to_anything() {
+        let registry = test_registry();
+        let settings = Settings::default();
+        let render = |text: &str| {
+            let outputs = evaluate(text, &registry, &settings, &|| false).outputs;
+            match &outputs[0] {
+                Output::Value(value) => format_value(value, &settings, &registry),
+                other => panic!("expected a value, got {other:?}"),
+            }
+        };
+        let plate = registry
+            .entry_by_index(registry.entry_id("iron-plate").unwrap())
+            .glyph;
+
+        // Zero is the additive identity whatever shape it was written in.
+        assert_eq!(render(":iron-plate: + 0"), format!("1{plate}"));
+        assert_eq!(render("0 + :iron-plate:"), format!("1{plate}"));
+        assert_eq!(render("3 kJ + 0"), "3kJ");
+
+        // A zero numerator erases every unit it was written with.
+        assert_eq!(render(":iron-plate: - :iron-plate:"), "0");
+        assert_eq!(render("0 :iron-plate:"), "0");
+        assert_eq!(render("0/s"), "0");
+        assert_eq!(render(":iron-plate: * 0"), "0");
     }
 
     #[test]

@@ -270,24 +270,20 @@ impl ResultsContext<'_> {
             }),
             PrototypeKind::Fluid => Resource::Fluid(id),
         };
-        let quantity = Quantity {
-            amount: Amount::Resources(BTreeMap::from([(resource, amount)])),
-            per: None,
-            second: 0,
-            joule: 0,
-            craft: 0,
-        };
+        let quantity = Quantity::new(
+            Amount::Resources(BTreeMap::from([(resource, amount)])),
+            None,
+            0,
+            0,
+            0,
+        );
         format_value(&Value::quantity(quantity), self.settings, self.registry)
     }
 }
 
 /// One watt, as a quantity.
 fn watts(value: f64) -> Value {
-    let quantity = Quantity {
-        joule: 1,
-        second: -1,
-        ..Quantity::number(value)
-    };
+    let quantity = Quantity::new(Amount::Number(value), None, -1, 1, 0);
     Value::quantity(quantity)
 }
 
