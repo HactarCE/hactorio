@@ -1256,14 +1256,17 @@ quantity, because addition requires matching exponents, so distributing the
 suffix cannot change the value. A denominator resource follows a `/`:
 `3:iron-plate:/:copper-plate:`.
 
-**Machine.** The count when it is not exactly one, the glyph, then the config
-in parentheses when the config is not empty. The parentheses are required, not
+**Machine.** The count whenever the machine carries one — `1:foundry:` is a
+counted machine and `:foundry:` is an uncounted one, and they are different
+values — then the glyph, then the config in parentheses when the config is not
+empty. The parentheses are required, not
 cosmetic: `+` binds looser than juxtaposition, so a config containing ` + `
 would otherwise be an addition to the machine rather than part of the config
 attached to it.
 
 ```text
 :foundry:
+1:foundry:
 2:foundry:
 2:foundry:(:efficiency-module-3:)
 :foundry:(:speed-module-3::speed-module-3:)
@@ -1366,7 +1369,10 @@ Facet-loss errors are the only place the facet inventory appears in a message,
 and they name the operands' facets because that is what explains the failure.
 The message also carries one reason per dropped facet, such as
 `a quantity cannot have two resources in the denominator`, so an operator that
-lost everything says why. The reasons are collected and shown only when every
+lost everything says why. A drop that depends on the values is explained — the
+same pair of facet kinds combines for some values and not for others, as with
+two machines whose configs differ — while a pair with no rule at all is only
+named in the facet list. The reasons are collected and shown only when every
 facet is gone: a partial drop is silent (P3), so no warning accompanies a value
 that lost a facet and kept the rest, and the panel simply shows the facets that
 remain.
