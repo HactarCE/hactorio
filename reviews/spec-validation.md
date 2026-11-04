@@ -13,13 +13,6 @@ cannot hold; **Major** = real ambiguity / divergence a user or implementer hits;
 
 ## §1 Design principles
 
-- **Major — P4 vs §6.6.** P4 (`SPEC.md:62-65`) promises "Adding a facet adds
-  rows to the operator matrix, not syntax", yet each facet contributes new
-  *tokens* in §6.6 (`SPEC.md:1050-1082`): `.machines`, `.crafts`, `.power`,
-  `.energy`, `.pollution`, `.productivity`, `.:speed:`, `.:time:`,
-  `.:electric:`, `.:module-slots:`. §4.4's token inventory
-  (`SPEC.md:529-550`) lists none of them; only the generic `.property` level
-  exists. `quantity` alone needs no property, `machine` needs four.
 - **Minor — P5 vs §6.3.** P5 says "Quality is never a distribution over
   outcomes" (`SPEC.md:66-72`); §6.3 says "Each product is split across those
   qualities, which is why `.out` reports one row per quality"
@@ -50,18 +43,6 @@ cannot hold; **Major** = real ambiguity / divergence a user or implementer hits;
 
 ## §4 Grammar
 
-- **Major — levels 3/4 cannot be composed.** `.property` is level 3 and `.`
-  with a resource operand is level 4 (`SPEC.md:453-455`), so postfix binds
-  tighter: `v.:iron-plate:.abs` parses as `v . (:iron-plate:.abs)`, handing the
-  `.` operator a quantity where §5.3:778 requires a resource — an error, though
-  `(v.:iron-plate:).abs` is the only sensible reading. Same for
-  `belt.:iron-plate:.rate`. No rule or example covers mixing levels 3 and 4,
-  and `.abs` is explicitly a property (`SPEC.md:1039`).
-- **Major — the justification for level 4 is void.** "binary `.` is looser than
-  juxtaposition so that `:common: :iron-plate:` groups into a single selector
-  operand" (`SPEC.md:468-470`) contradicts §4.5, where the pair is one token
-  "during lexing, so no precedence rule and no lookahead are involved"
-  (`SPEC.md:556-559`).
 - **Minor — `.5` vs the `.` operator.** "`.5` are numbers" (`SPEC.md:502-503`)
   plus `.` as punctuation means `v.5` lexes as `v` followed by `0.5`, i.e. a
   juxtaposition chain that silently scales `v` by 0.5. No maximal-munch rule
@@ -89,17 +70,6 @@ cannot hold; **Major** = real ambiguity / divergence a user or implementer hits;
 
 ## §5 Operator semantics
 
-- **Major — "the applied amount" is the whole rate→item conversion and is
-  undefined.** `SPEC.md:636` is the only rule turning a `stack_rate` into item
-  quantities. B.1's exact `540:iron-plate:/s` (`SPEC.md:1391`, "45 items/s …
-  times 4 … times 3") requires `Σ rate[limit] × min(limit, stack_size) ×
-  count`, which neither §5.2 nor §6.1 (`SPEC.md:879-890`) states. Relatedly,
-  §6.1 calls the belt rate "`belt speed * 60 * 8` **items** per second"
-  (`SPEC.md:883`) while `stack_rate` is "item **stacks** per second"
-  (`SPEC.md:205`); the two coincide only at `Limit(1)`.
-- **Major — "config that is one beacon and nothing else" is ambiguous.**
-  `SPEC.md:637`. One *group* vs count 1 decides `:foundry:(2:beacon:)
-  :speed-module-3:`: fill both beacons, or an error. Nothing says which.
 - **Minor — "the only common one" does not choose a quality.**
   `SPEC.md:853-856`. `2 :foundry: making :transport-belt:` yields five rows
   whose recipe differs only in quality (`SPEC.md:994-1000`), so "the only
@@ -119,13 +89,6 @@ cannot hold; **Major** = real ambiguity / divergence a user or implementer hits;
 
 ## §6 Facets in depth
 
-- **Major — `craft` is simultaneously an exponent and a row.** §3.1
-  (`SPEC.md:201`) and §5.3 (`SPEC.md:673-675`) make `craft` an integer exponent
-  of the quantity; §5.4:813 speaks of "a quantity of items, fluids, or crafts",
-  §6.6:1055 returns "the craft row", and §7.7:1275-1276 prints "net rows other
-  than `craft`". Nothing says what `.crafts` returns, whether `craft` can be
-  selected (`p.:craft:`?) or filtered, or how a quantity can carry both a
-  `craft` exponent and `craft` terms.
 - **Minor — empty config rendering.** "An empty config is present but empty. It
   renders as `0` only when it is the whole value (§7.5)"
   (`SPEC.md:918-919`); §7.5's config grammar has no empty production and no
@@ -142,37 +105,12 @@ cannot hold; **Major** = real ambiguity / divergence a user or implementer hits;
 
 ## §7 Display
 
-- **Major — the exponent rendering names values that cannot exist, and omits
-  the ones that can.** "A positive exponent other than one follows the term
-  (`:iron-plate:²`)" (`SPEC.md:1205`) — resource terms have coefficients, not
-  exponents (`SPEC.md:673-675`, D31 `SPEC.md:1489`), so no such quantity
-  exists; and `²`/`₁` are not tokens (`SPEC.md:545-550`). Conversely
-  `(2 s) ^ 2` = `4 s²` (`SPEC.md:736`) is a value that does exist and has no
-  stated rendering, so the round-trip claim (`SPEC.md:1184-1186`) fails for it.
-- **Major — machine count 1 round-trips to a different value.** "The count when
-  it is not exactly one" (`SPEC.md:1216`) prints `1:foundry:` as `:foundry:`,
-  but §6.3 makes absent-count distinct from count 1 (`SPEC.md:934-936`,
-  Unscaled vs `Machines(1)` after `making`) and §3.5 makes machine equality
-  exact (`SPEC.md:341-343`). Either round-trip fails or §6.3's distinction is
-  empty.
 - **Minor — an undefined row notation.** `288<foundry>` and
   `53.333s*<foundry>` (`SPEC.md:1284`) are defined nowhere and conflict
   with §7.5's machine syntax (`2:foundry:`). Also, "single-line result" is
   defined twice with different content: "the first facet present, then `…`"
   (`SPEC.md:1139`) and "the machine total, then the net rows"
   (`SPEC.md:1275`).
-
-## §8 Diagnostics
-
-- **Major — no rule maps a failure to one of the four kinds.** §8 lists four
-  kinds with one example each (`SPEC.md:1313-1319`), but every other "is an
-  error" in the document leaves the kind and message open: config promotion
-  (`SPEC.md:282`), `:iron-plate: q` (`SPEC.md:262`), `^` on a bundle
-  (`SPEC.md:739`), non-integer config scale (`SPEC.md:869`), `.productivity`
-  with disagreeing rows (`SPEC.md:1057`), `Limit(0)` (`SPEC.md:880`), beacon
-  profile length (`SPEC.md:921-923`). A conforming implementation cannot be
-  distinguished from a non-conforming one, and Appendix B asserts no error
-  behaviour at all.
 
 ## Appendix B — acceptance examples
 
@@ -217,20 +155,6 @@ cannot hold; **Major** = real ambiguity / divergence a user or implementer hits;
     facet; the operator is defined on quantity terms and process rows
     (`SPEC.md:778`, `SPEC.md:1003-1006`), and `p.out.:iron-plate:` has no
     `resource` facet at all.
-
-## Status / open markers
-
-- **Major — `[open]` is defined but never used, while several passages are
-  plainly undecided.** The header states that "[open]" marks undecided
-  sections (`SPEC.md:3-5`); a search finds zero occurrences. Undecided content
-  is instead hidden in prose: §3.4's MVP caveat (`SPEC.md:331-333`), the
-  operator/facet rows missing from §5 and Appendix A (see the coverage table
-  below), the approximate-zero threshold (`SPEC.md:345`), and "the only common
-  one" (`SPEC.md:854`). No `…` stub lines remain: the four `…`
-  occurrences (`SPEC.md:111`, `1470`, `1477`, `1481`) are ordinary ellipses
-  inside prose.
-
----
 
 ## Operator × facet coverage table
 
