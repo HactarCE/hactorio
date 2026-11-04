@@ -298,7 +298,15 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                     .map(|range| range.primary.index.0)
                     .unwrap_or(0);
                 let (word_start, word) = completion_word(&tab.text, cursor_char);
-                let after_dot = tab.text.chars().take(cursor_char).last() == Some('.');
+                // The dot may be separated from the caret by spaces.
+                let mut after_dot = false;
+                for ch in tab.text.chars().take(cursor_char) {
+                    if ch == '\n' {
+                        after_dot = false;
+                    } else if !ch.is_whitespace() {
+                        after_dot = ch == '.';
+                    }
+                }
                 let typed = text_edit.response.changed();
                 if !text_edit.response.has_focus() {
                     completion.items.clear();

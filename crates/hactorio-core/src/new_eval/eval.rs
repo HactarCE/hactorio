@@ -345,7 +345,9 @@ impl Runner<'_> {
                 let mut iter = values.into_iter().rev();
                 let mut acc = iter.next().expect("a chain has at least one operand");
                 for value in iter {
-                    acc = value.juxtapose(&acc, &stack_size, &validate_config)?;
+                    let is_beacon =
+                    |id: hactorio_data::EntryId| self.registry.entry_by_index(id).beacon.is_some();
+                acc = value.juxtapose(&acc, &stack_size, &is_beacon, &validate_config)?;
                 }
                 Ok(acc)
             }
@@ -1699,6 +1701,22 @@ mod tests {
         let evaluation = evaluate("1", &registry, &crate::Settings::default(), &|| true);
         assert!(evaluation.cancelled);
         assert!(evaluation.outputs.is_empty());
+    }
+
+    #[test]
+    fn a_total_drop_reports_why_each_facet_went() {
+        let registry = test_registry();
+        let settings = crate::Settings::default();
+        let message = |text: &str| {
+            let outputs = evaluate(text, &registry, &settings, &|| false).outputs;
+            match &outputs[0] {
+                Output::Error { message, .. } => message.clone(),
+                other => panic!("expected an error, got {other:?}"),
+            }
+        };
+        // The quantity is the only facet, so its reason is shown (§8).
+        assert!(message("1:iron-plate:/s * 2:copper-plate:/s").contains("bundle"));
+        assert!(message("(2:iron-plate:)^2").contains("raised to a power"));
     }
 
     #[test]

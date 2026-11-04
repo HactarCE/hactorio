@@ -632,6 +632,12 @@ mod tests {
             rendered(":beacon: 2 :speed-module-2:"),
             format!("{beacon}{module}{module}")
         );
+        // Filling a beacon keys on the prototype, not on a one-beacon config,
+        // so a counted beacon still takes its module list (§5.2).
+        assert_eq!(
+            rendered("2 :beacon: 2 :speed-module-2:"),
+            format!("2{beacon}{module}{module}")
+        );
         // A config with both modules and a beacon group needs `+`: a chain
         // would bind the count rightward (D21).
         assert_eq!(

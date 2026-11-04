@@ -892,9 +892,12 @@ impl Config {
 
     /// Modules attached to a config that is one beacon and nothing else (§5.2).
     ///
-    /// Juxtaposition may only build a module list or fill an empty beacon.
-    /// Everything else is a general config combination and needs `+`.
-    pub fn attach_modules(&self, modules: &Self) -> Option<Self> {
+    /// Fills the beacon prototype `beacon` with a module list (§5.2).
+    ///
+    /// Juxtaposition may only build a module list or fill a beacon that has no
+    /// modules yet. Everything else is a general config combination and needs
+    /// `+`.
+    pub fn fill_beacon(&self, beacon: EntryId, modules: &Self) -> Option<Self> {
         if !self.modules.is_empty() || !modules.beacons.is_empty() || modules.modules.is_empty() {
             return None;
         }
@@ -902,15 +905,11 @@ impl Config {
             return None;
         }
         let (group, count) = self.beacons.iter().next()?;
-        if !group.modules.is_empty() {
+        if group.beacon != beacon || !group.modules.is_empty() {
             return None;
         }
-        let mut merged = group.modules.clone();
-        for (module, module_count) in &modules.modules {
-            *merged.entry(*module).or_insert(0) += module_count;
-        }
         let group = BeaconGroup {
-            modules: merged,
+            modules: modules.modules.clone(),
             ..group.clone()
         };
         Some(Self {
@@ -1271,15 +1270,50 @@ impl MultiValue {
     }
 
     /// Drops every facet that did not combine, and reports total loss (P3).
-    fn or_dropped(self, operator: &str, left: &Self, right: &Self) -> Result<Self> {
+    /// Reports the facets an operator lost when it lost all of them (§8).
+    ///
+    /// A facet that drops beside a surviving one is silent; the reasons only
+    /// surface with a total loss.
+    fn or_dropped(
+        self,
+        operator: &str,
+        left: &Self,
+        right: &Self,
+        dropped: &[String],
+    ) -> Result<Self> {
         if self.is_empty() {
-            return Err(ValueError::new(format!(
+            let mut message = format!(
                 "`{operator}` dropped every facet (left: {}, right: {})",
                 left.facets(),
                 right.facets()
-            )));
+            );
+            if !dropped.is_empty() {
+                message.push_str(": ");
+                message.push_str(&dropped.join("; "));
+            }
+            return Err(ValueError::new(message));
         }
         Ok(self)
+    }
+
+    /// Combines two facets and keeps the reason when the combination is
+    /// unrepresentable, so a total loss can explain itself.
+    fn combine_dropped<T>(
+        left: &Option<T>,
+        right: &Option<T>,
+        op: impl Fn(&T, &T) -> Result<T, ValueError>,
+        dropped: &mut Vec<String>,
+    ) -> Option<T> {
+        match (left.as_ref(), right.as_ref()) {
+            (Some(left), Some(right)) => match op(left, right) {
+                Ok(value) => Some(value),
+                Err(error) => {
+                    dropped.push(error.message().to_string());
+                    None
+                }
+            },
+            _ => None,
+        }
     }
 
     fn combine<T>(
@@ -1294,30 +1328,39 @@ impl MultiValue {
     }
 
     pub fn add(&self, other: &Self) -> Result<Self> {
+        self.add_as("+", other)
+    }
+
+    pub fn sub(&self, other: &Self) -> Result<Self> {
+        self.add_as("-", &other.negate()?)
+    }
+
+    fn add_as(&self, operator: &str, other: &Self) -> Result<Self> {
+        let mut dropped = Vec::new();
         let result = Self {
-            quantity: Self::combine(&self.quantity, &other.quantity, |a, b| a.add(b).ok()),
+            quantity: Self::combine_dropped(
+                &self.quantity,
+                &other.quantity,
+                Quantity::add,
+                &mut dropped,
+            ),
             stack_rate: Self::combine(&self.stack_rate, &other.stack_rate, Stacks::add),
             stack_capacity: Self::combine(&self.stack_capacity, &other.stack_capacity, Stacks::add),
             machine: Self::combine(&self.machine, &other.machine, Machine::same),
             config: Self::combine(&self.config, &other.config, |a, b| Some(a.add(b))),
             ..Self::default()
         };
-        result.or_dropped("+", self, other)
-    }
-
-    pub fn sub(&self, other: &Self) -> Result<Self> {
-        let negated = other.negate()?;
-        self.add(&negated).map_err(|_| {
-            ValueError::new(format!(
-                "`-` dropped every facet (left: {}, right: {})",
-                self.facets(),
-                other.facets()
-            ))
-        })
+        result.or_dropped(operator, self, other, &dropped)
     }
 
     pub fn mul(&self, other: &Self) -> Result<Self> {
-        let quantity = Self::combine(&self.quantity, &other.quantity, |a, b| a.mul(b).ok());
+        let mut dropped = Vec::new();
+        let quantity = Self::combine_dropped(
+            &self.quantity,
+            &other.quantity,
+            Quantity::mul,
+            &mut dropped,
+        );
         let stack_capacity = self
             .stack_rate
             .as_ref()
@@ -1335,11 +1378,17 @@ impl MultiValue {
             stack_capacity,
             ..Self::default()
         }
-        .or_dropped("*", self, other)
+        .or_dropped("*", self, other, &dropped)
     }
 
     pub fn div(&self, other: &Self) -> Result<Self> {
-        let quantity = Self::combine(&self.quantity, &other.quantity, |a, b| a.div(b).ok());
+        let mut dropped = Vec::new();
+        let quantity = Self::combine_dropped(
+            &self.quantity,
+            &other.quantity,
+            Quantity::div,
+            &mut dropped,
+        );
         let stack_rate = self
             .stack_capacity
             .as_ref()
@@ -1350,16 +1399,22 @@ impl MultiValue {
             stack_rate,
             ..Self::default()
         }
-        .or_dropped("/", self, other)
+        .or_dropped("/", self, other, &dropped)
     }
 
     pub fn pow(&self, other: &Self) -> Result<Self> {
-        let quantity = Self::combine(&self.quantity, &other.quantity, |a, b| a.pow(b).ok());
+        let mut dropped = Vec::new();
+        let quantity = Self::combine_dropped(
+            &self.quantity,
+            &other.quantity,
+            Quantity::pow,
+            &mut dropped,
+        );
         Self {
             quantity,
             ..Self::default()
         }
-        .or_dropped("^", self, other)
+        .or_dropped("^", self, other, &dropped)
     }
 
     pub fn negate(&self) -> Result<Self> {
@@ -1421,7 +1476,12 @@ impl MultiValue {
             config: self.config.as_ref().and_then(|config| config.scale(factor)),
             ..Self::default()
         };
-        result.or_dropped("scaling", self, self)
+        let dropped = if self.config.is_some() && result.config.is_none() {
+            vec!["the config cannot be scaled by that factor".to_string()]
+        } else {
+            Vec::new()
+        };
+        result.or_dropped("scaling", self, self, &dropped)
     }
 
     /// Applies the quality operand of §3.3.
@@ -1730,6 +1790,7 @@ impl Value {
         &self,
         other: &Self,
         stack_size: &dyn Fn(Resource) -> Option<u32>,
+        is_beacon: &dyn Fn(EntryId) -> bool,
         validate: &dyn Fn(&MultiValue) -> Result<(), ValueError>,
     ) -> Result<Self> {
         if let Value::Quality(quality) = other {
@@ -1756,11 +1817,16 @@ impl Value {
         if let Some(applied) = left.apply_stacks(right, stack_size)? {
             return Ok(Value::Multi(applied));
         }
-        // Configs combine per facet: modules onto a beacon group, or two module
-        // lists merged; a machine absorbs a config (§5.2).
+        // Configs combine per facet: modules fill the beacon prototype the value
+        // names, or two module lists merge; a machine absorbs a config (§5.2).
+        let beacon = left
+            .resource
+            .filter(|resource| !resource.is_fluid)
+            .map(|resource| resource.id)
+            .filter(|id| is_beacon(*id));
         let config = match (&left.config, &right.config) {
-            (Some(left), Some(right)) => left
-                .attach_modules(right)
+            (Some(left), Some(right)) => beacon
+                .and_then(|beacon| left.fill_beacon(beacon, right))
                 .or_else(|| left.merge_modules(right)),
             _ => None,
         };
@@ -1946,7 +2012,12 @@ mod tests {
     #[test]
     fn a_quality_on_the_right_of_juxtaposition_is_an_error() {
         let error = Value::number(1.0)
-            .juxtapose(&Value::Quality(Quality::Rare), &|_| None, &|_| Ok(()))
+            .juxtapose(
+                &Value::Quality(Quality::Rare),
+                &|_| None,
+                &|_| false,
+                &|_| Ok(()),
+            )
             .unwrap_err();
         assert!(error.message().contains("left operand"));
     }

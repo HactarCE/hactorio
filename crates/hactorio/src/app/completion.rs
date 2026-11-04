@@ -607,11 +607,10 @@ fn assignment_rhs<'a>(line: &'a str, registry: &Registry) -> Option<&'a str> {
 /// value.
 fn value_before_dot(
     text: &str,
-    word_start: usize,
+    dot: usize,
     settings: &Settings,
     registry: &Registry,
 ) -> Option<Value> {
-    let dot = word_start.checked_sub(1)?;
     let prefix: String = text.chars().take(dot).collect();
     let mut lines: Vec<&str> = prefix.split('\n').collect();
     if let Some(rhs) = lines.last().and_then(|line| assignment_rhs(line, registry)) {
@@ -651,7 +650,16 @@ pub(super) fn completion_items(
     word: &str,
 ) -> Vec<CompletionItem> {
     let before: Vec<char> = text.chars().take(word_start).collect();
-    let context = if before.last() == Some(&'.') {
+    // A dot may be separated from what follows it by spaces, so the selector
+    // context is the last non-space character, not the last character.
+    let dot = before
+        .iter()
+        .rev()
+        .take_while(|ch| **ch != '\n')
+        .position(|ch| !ch.is_whitespace())
+        .map(|offset| before.len() - 1 - offset)
+        .filter(|index| before[*index] == '.');
+    let context = if dot.is_some() {
         CompletionContext::Property
     } else {
         match previous_word(&before).as_str() {
@@ -662,10 +670,9 @@ pub(super) fn completion_items(
         }
     };
     // Properties and unit selectors only exist for a value; resolve it once.
-    let value = if context == CompletionContext::Property {
-        value_before_dot(text, word_start, settings, registry)
-    } else {
-        None
+    let value = match dot {
+        Some(dot) => value_before_dot(text, dot, settings, registry),
+        None => None,
     };
     let needle = word.trim_start_matches(':').trim_end_matches(':');
     // An empty needle lists everything the context allows; the editor only asks

@@ -669,6 +669,28 @@ fn typing_a_dot_opens_property_completions() {
 }
 
 #[test]
+fn a_space_after_the_dot_still_opens_property_completions() {
+    let document = editor_document("# Main\n", 0, 6);
+    let (mut harness, dir) = completion_harness("dot-space", document);
+    harness.run();
+    type_into_editor(&mut harness, " x. ");
+    let app = harness.state().as_ref().expect("app");
+    assert!(
+        app.completion
+            .items
+            .iter()
+            .any(|item| item.insert == "rate"),
+        "{:?}",
+        app.completion
+            .items
+            .iter()
+            .map(|item| &item.insert)
+            .collect::<Vec<_>>()
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn accepting_an_alias_replaces_the_whole_alias() {
     let document = editor_document("# Main\n", 0, 6);
     let (mut harness, dir) = completion_harness("alias-accept", document);
