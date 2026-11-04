@@ -258,11 +258,12 @@ fn format_machine(machine: &Machine, settings: &Settings, registry: &Registry) -
         Quality::Normal => String::new(),
         quality => quality.glyph().to_string(),
     };
+    // An absent count means "one machine that was not counted", which is a
+    // different value from `1:foundry:` (§6.3), so a count is printed whenever
+    // it exists, one included.
     let count = match machine.count {
-        Some(count) if (count - 1.0).abs() > f64::EPSILON => {
-            format!("{}{quality}{glyph}", format_number_with(count, settings))
-        }
-        _ => format!("{quality}{glyph}"),
+        Some(count) => format!("{}{quality}{glyph}", format_number_with(count, settings)),
+        None => format!("{quality}{glyph}"),
     };
     if machine.config.is_empty() {
         count

@@ -984,6 +984,7 @@ impl Machine {
         {
             return None;
         }
+        // The caller reports the difference when this was the last facet.
         Some(Self {
             count: Some(left.count() + right.count()),
             ..left.clone()
@@ -1344,9 +1345,37 @@ impl MultiValue {
                 Quantity::add,
                 &mut dropped,
             ),
-            stack_rate: Self::combine(&self.stack_rate, &other.stack_rate, Stacks::add),
-            stack_capacity: Self::combine(&self.stack_capacity, &other.stack_capacity, Stacks::add),
-            machine: Self::combine(&self.machine, &other.machine, Machine::same),
+            stack_rate: Self::combine_dropped(
+                &self.stack_rate,
+                &other.stack_rate,
+                |a, b| {
+                    a.add(b)
+                        .ok_or_else(|| ValueError::new("the stack rates are of different media"))
+                },
+                &mut dropped,
+            ),
+            stack_capacity: Self::combine_dropped(
+                &self.stack_capacity,
+                &other.stack_capacity,
+                |a, b| {
+                    a.add(b).ok_or_else(|| {
+                        ValueError::new("the stack capacities are of different media")
+                    })
+                },
+                &mut dropped,
+            ),
+            machine: Self::combine_dropped(
+                &self.machine,
+                &other.machine,
+                |a, b| {
+                    Machine::same(a, b).ok_or_else(|| {
+                        ValueError::new(
+                            "the machines differ in prototype, quality, or config",
+                        )
+                    })
+                },
+                &mut dropped,
+            ),
             config: Self::combine(&self.config, &other.config, |a, b| Some(a.add(b))),
             ..Self::default()
         };
@@ -1824,10 +1853,20 @@ impl Value {
             .filter(|resource| !resource.is_fluid)
             .map(|resource| resource.id)
             .filter(|id| is_beacon(*id));
+        let mut dropped: Vec<String> = Vec::new();
         let config = match (&left.config, &right.config) {
-            (Some(left), Some(right)) => beacon
-                .and_then(|beacon| left.fill_beacon(beacon, right))
-                .or_else(|| left.merge_modules(right)),
+            (Some(left), Some(right)) => {
+                let filled = beacon.and_then(|beacon| left.fill_beacon(beacon, right));
+                let merged = left.merge_modules(right);
+                if filled.is_none() && merged.is_none() {
+                    dropped.push(if left.beacons.is_empty() && right.beacons.is_empty() {
+                        "the module lists could not be combined".to_string()
+                    } else {
+                        "a module list and a beacon group need `+`".to_string()
+                    });
+                }
+                filled.or(merged)
+            }
             _ => None,
         };
         let machine = match (&left.machine, &right.config) {
@@ -1843,11 +1882,16 @@ impl Value {
             validate(&produced)?;
             return Ok(Value::Multi(produced));
         }
-        Err(ValueError::new(format!(
+        let mut message = format!(
             "juxtaposition matched no rule (left: {}, right: {})",
             left.facets(),
             right.facets()
-        )))
+        );
+        if !dropped.is_empty() {
+            message.push_str(": ");
+            message.push_str(&dropped.join("; "));
+        }
+        Err(ValueError::new(message))
     }
 }
 
