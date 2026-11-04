@@ -11,26 +11,8 @@ cannot hold; **Major** = real ambiguity / divergence a user or implementer hits;
 
 ---
 
-## §0 Target questions
-
-- **Major — T3's machine-count half has no defined answer.** T3 (`SPEC.md:34`)
-  asks "how many recyclers are needed"; the only worked T3 document sizes from
-  an amount (`SPEC.md:1425`), which by `SPEC.md:845-846` yields
-  `MachineSeconds`, and `.machines` on a `MachineSeconds` process is an error
-  (`SPEC.md:1054`). The sole conversion is `MachineSeconds(τ) / time`
-  (`SPEC.md:858`) and no example uses it, so no target question is answered
-  end-to-end by an example in Appendix B.
-
 ## §1 Design principles
 
-- **Major — P3 vs §5.3's unconditional quantity errors.** P3 (`SPEC.md:56-61`)
-  says an operator "errors only when nothing survives", i.e. a facet it cannot
-  combine with is *dropped*. §5.3 instead declares errors that are not drops:
-  two `per`s (`SPEC.md:712-713`), bundle×bundle (`SPEC.md:710`), division by a
-  multi-term bundle (`SPEC.md:723-724`). Repro: `1:iron-plate:/s *
-  2:copper-plate:/s` — P3 implies "drop `quantity`, error only because nothing
-  survives"; §5.3:712-713 says error regardless. The same drop-vs-error gap appears
-  in §5.5 ("require a nonnegative integer factor", `SPEC.md:868`).
 - **Major — P4 vs §6.6.** P4 (`SPEC.md:62-65`) promises "Adding a facet adds
   rows to the operator matrix, not syntax", yet each facet contributes new
   *tokens* in §6.6 (`SPEC.md:1050-1082`): `.machines`, `.crafts`, `.power`,
@@ -46,14 +28,6 @@ cannot hold; **Major** = real ambiguity / divergence a user or implementer hits;
 
 ## §2 Program model
 
-- **Major — §2.2's "stored adjustment" has no representation.** "Assignment
-  works on the row's total: `=` replaces what the recipes produce, and the
-  stored adjustment is only the difference" (`SPEC.md:114-117`) requires a
-  per-(row, resource) adjustment, but `Process.rows` is
-  `BTreeMap<(MachineWithConfig, Recipe), f64>` — one scale per row, no
-  per-resource field (`SPEC.md:972-975`). Repro: `p.:iron-plate: = 100` on a
-  process whose row also outputs `:sludge:` — the only storable change (the row
-  scale) silently rescales the co-product.
 - **Minor — compound-assignment operand types.** `*=`/`/=` "take a
   dimensionless number" (`SPEC.md:112-114`), but `+=`/`-=` operands are
   unstated (rate, amount, or unit-bearing quantity), and the behaviour of any
@@ -88,11 +62,6 @@ cannot hold; **Major** = real ambiguity / divergence a user or implementer hits;
   operand" (`SPEC.md:468-470`) contradicts §4.5, where the pair is one token
   "during lexing, so no precedence rule and no lookahead are involved"
   (`SPEC.md:556-559`).
-- **Major — unary `-` at level 7 makes `^` and filter right-hand sides
-  unparseable.** Level 7 (`SPEC.md:458`) is looser than `^` (457) and the
-  filters (456), so `2 ^ -3` and `p.net > -5` have no parse; the documented
-  mirror case `-2 ^ 2` = `-(2 ^ 2)` (`SPEC.md:483-486`) works, but the
-  right-hand cases are unmentioned and require parentheses.
 - **Minor — `.5` vs the `.` operator.** "`.5` are numbers" (`SPEC.md:502-503`)
   plus `.` as punctuation means `v.5` lexes as `v` followed by `0.5`, i.e. a
   juxtaposition chain that silently scales `v` by 0.5. No maximal-munch rule
@@ -131,17 +100,6 @@ cannot hold; **Major** = real ambiguity / divergence a user or implementer hits;
 - **Major — "config that is one beacon and nothing else" is ambiguous.**
   `SPEC.md:637`. One *group* vs count 1 decides `:foundry:(2:beacon:)
   :speed-module-3:`: fill both beacons, or an error. Nothing says which.
-- **Major — is an empty module list a module list?** The row "a module list | a
-  module list | the merged module list" (`SPEC.md:638`) applies to the right
-  operand of `:speed-module-2: 2 :beacon:` (whose config has an empty module
-  list), which `SPEC.md:665-667` declares an error. Whether the empty list
-  participates decides the outcome.
-- **Major — non-integer config scaling: drop or error?** "`*` and `/` by a
-  number scale the module and beacon counts, and require a nonnegative integer
-  factor" (`SPEC.md:867-869`). P3 implies the `config` facet drops and the
-  rest survives; §5.5 implies an error. Repro:
-  `0.5 (:foundry: 2 :speed-module-3:)` — machine+quantity with a halved count
-  and dropped config, or an error?
 - **Minor — "the only common one" does not choose a quality.**
   `SPEC.md:853-856`. `2 :foundry: making :transport-belt:` yields five rows
   whose recipe differs only in quality (`SPEC.md:994-1000`), so "the only
@@ -149,10 +107,6 @@ cannot hold; **Major** = real ambiguity / divergence a user or implementer hits;
   quality the machines are counted at) is unstated.
 - **Minor — `-` and `.abs` are defined only for quantity and config.**
   `SPEC.md:742-745`. `T`, `K`, `M`, `P` are unstated (`-belt.rate`, `-p`).
-- **Minor — `^` coverage and drop-vs-error.** `SPEC.md:731-740` never mentions
-  `T`/`K`/`M` bases, and "A bundle base is an error" (`SPEC.md:739`) conflicts
-  with A.3's "Every other pair drops" (`SPEC.md:1365`). `(2:iron-plate:)^0`
-  and `(2:iron-plate:/s)^1` are undefined.
 - **Minor — self-cancelling division.** Dividing by a single-term bundle whose
   resource equals the numerator's term (`3:iron-plate:/:iron-plate:`) is
   unstated: cancel, `per`, or error (`SPEC.md:722-729`).
@@ -172,14 +126,6 @@ cannot hold; **Major** = real ambiguity / divergence a user or implementer hits;
   than `craft`". Nothing says what `.crafts` returns, whether `craft` can be
   selected (`p.:craft:`?) or filtered, or how a quantity can carry both a
   `craft` exponent and `craft` terms.
-- **Major — the quality-module split numbers do not follow from the rule.**
-  "Reaching `n` levels above the recipe's quality has probability `p^n`, and
-  the recipe's own quality takes the remainder" (`SPEC.md:949-951`) with
-  `p = 0.1` gives normal `0.9` (not `88.89%`) and exclusive shares
-  `0.09/0.009/0.0009/0.0001`; the listed `10%/1%/0.1%/0.01%`
-  (`SPEC.md:952-954`) are the cumulative `p^n` and double count the mass. The
-  five shares only sum to 1 if normal is `88.89%`, which neither the rule nor
-  `p` explains.
 - **Minor — empty config rendering.** "An empty config is present but empty. It
   renders as `0` only when it is the whole value (§7.5)"
   (`SPEC.md:918-919`); §7.5's config grammar has no empty production and no
@@ -193,12 +139,6 @@ cannot hold; **Major** = real ambiguity / divergence a user or implementer hits;
   with different wording — "the item terms only" (`SPEC.md:1074-1075`) and "the
   item rows" (`SPEC.md:1080-1081`); `.EXPR` (1079) overlaps `.` selection
   (1003-1006).
-- **Minor — no behaviour is stated for `Unspecified` in §6.6 or §7.7.** Every
-  row of the selector table (`SPEC.md:1050-1082`) and every process rendering
-  rule (`SPEC.md:1275-1290`) presumes one of `Unscaled`/`Machines`/
-  `MachineSeconds`; a process created by sizing with zero
-  (`SPEC.md:828-832`) matches none of them (`.machines`, `.crafts`, `.power`,
-  `.energy`, `.net`).
 
 ## §7 Display
 
@@ -215,11 +155,6 @@ cannot hold; **Major** = real ambiguity / divergence a user or implementer hits;
   Unscaled vs `Machines(1)` after `making`) and §3.5 makes machine equality
   exact (`SPEC.md:341-343`). Either round-trip fails or §6.3's distinction is
   empty.
-- **Major — the approximate-zero threshold is never defined.** It is normative
-  for canonicalization and display (`SPEC.md:345-347`, `SPEC.md:1153`) yet has
-  no value, no unit and no setting. §7.2's own example `0.0001234 → 0.000123`
-  (`SPEC.md:1162`) is only correct if the threshold is below `1.234e-4`;
-  `1e-12` is stated to print as `0` (`SPEC.md:1153-1155`, no number).
 - **Minor — an undefined row notation.** `288<foundry>` and
   `53.333s*<foundry>` (`SPEC.md:1284`) are defined nowhere and conflict
   with §7.5's machine syntax (`2:foundry:`). Also, "single-line result" is
@@ -239,29 +174,8 @@ cannot hold; **Major** = real ambiguity / divergence a user or implementer hits;
   distinguished from a non-conforming one, and Appendix B asserts no error
   behaviour at all.
 
-## Appendix A — operator matrix
-
-- **Minor — "drops" vs "is an error" is never reconciled in A.** A.3 "Every
-  other pair drops" (`SPEC.md:1365`) vs §5.3's "A bundle base is an error"
-  (`SPEC.md:739`); A.1's `C, C` "`-` drops the config" (`SPEC.md:1348`) vs §8's
-  facet-loss error (`SPEC.md:1318`). Whether a drop inside a multi-facet value
-  is silent (P3) or fatal is the same unresolved question as P3 versus §5.3's
-  explicit arithmetic errors.
-
 ## Appendix B — acceptance examples
 
-- **Blocker — B.4's `a == b` has no semantics.** `SPEC.md:1449`. `==` exists
-  only as a quantity filter whose result is a filtered quantity, not a boolean
-  (`SPEC.md:747-752`, `SPEC.md:761-775`); §3.5 defines structural equality
-  (`SPEC.md:334-347`) but gives it no operator, and no rule implements `==` for
-  machines, processes, configs or qualities. Repro: `2:iron-plate: == 2`
-  yields `2:iron-plate:`, so `a == b` cannot mean "equal".
-- **Major — B.3 (and §2.6) may fail config validation.** `R = :recycler:
-  (4 :quality-module-2:)` (`SPEC.md:1423`; also `SPEC.md:175`) puts four
-  quality modules in a recycler, and §5.2 requires "module slot counts"
-  validation on every machine-config juxtaposition (`SPEC.md:659-661`). If the
-  recycler has three module slots in the game data, both documents fail at
-  parse-to-value time. Not checkable in this repo (no registry dump).
 - **Minor — B.1's exact number depends on a setting.** "exactly
   `540:iron-plate:/s`" (`SPEC.md:1391`) requires `belt_stacking = 4`
   (`SPEC.md:884-886`, `SPEC.md:1304`), whereas Appendix B's framing says the
@@ -338,10 +252,9 @@ six it does list read or rewrite them instead.
 | `+` | ✓ | ✓ | ✓ | ✓ | ✓ | ↓ | ↓ | ✓ | ✗ | 1340-1349 |
 | `-` | ✓ | ✓ | ✓ | ✓ | ↓ | ↓ | ↓ | ✓ | ✗ | 1340-1349 |
 | `*` | ✓ | ✓ | ✓ | ✓ | ✓ | ↓ | ↓ | ✓ | ✗ | 1351-1360 |
-| `/` | ✓ | ↓ | ✓ | ✓ | ✓/? | ↓ | ↓ | ✓ | ✗ | 1351-1360 |
+| `/` | ✓ | ↓ | ✓ | ✓ | ✓ | ↓ | ↓ | ✓ | ✗ | 1351-1360 |
 | `^` | ✓ | ↓ | ↓ | ↓ | ↓ | ↓ | ↓ | ? | ✗ | 1363-1365 |
 | filter, quality RHS | ✓ | ? | ? | ? | ? | ? | ? | ? | ✗ | 613, 761-775 |
-| filter, number RHS | ✓ | ? | ? | ? | ? | ↓ | ↓ | ? | ✗ | 758-763 |
 | unary `-` | ✓ | ? | ? | ? | ↓ | ↓ | ↓ | ? | ✗ | 742-745 |
 | `.abs` | ✓ | ✓ | ✓ | ✓ | ↓ | ↓ | ↓ | ✗ | ✗ | 742-745, 1072 |
 | `.` resource | ✓ | ? | ? | ? | ? | ? | ? | ✓ | ✗ | 610, 777-786, 1003-1006 |
@@ -352,7 +265,7 @@ six it does list read or rewrite them instead.
 | `:recycling:` | ? | ? | ? | ? | ? | ✓ | ↓ (writes) | ? | ✗ | 611 |
 | `making` | ✗ | ✗ | ✗ | ✓ | ✓ | ↓ | ✓ | ✗ | ✗ | 792-808 |
 | `in` / `into` / `from` | ✓ | ? | ? | ✓ (RHS) | ? | ↓ | ↓ | ✓ (Unscaled only) | ✗ | 811-847 |
-| process properties | · | · | · | · | · | · | · | ✓/? | · | 1050-1082 |
+| process properties | · | · | · | · | · | · | · | ✓ | · | 1050-1082 |
 | quality operand | ✓ | ↓ | ↓ | ✓ | ✓ | ✓ | ✓ | ✗ | ? | 257-303 |
 
 ### `?` cells: combinations no rule covers
@@ -387,14 +300,12 @@ six it does list read or rewrite them instead.
 - **`in`/`into`/`from` with `Machines(n)`, `MachineSeconds`, or `Unspecified`
   on the right**: `SPEC.md:812-813` lists only `Unscaled` or a machine; the
   other three are neither allowed nor declared errors.
-- **Every process property on `Unspecified`**: see §6 finding.
 
 ### Conflict cells the table cannot express
 
 | Cell | Conflict |
 |---|---|
 | `+`/`-`/`*` with `Unspecified` | `SPEC.md:831-832` (identity) vs `SPEC.md:850-851` (same extent kind required) |
-| `C` under `/` | `SPEC.md:1360` ("nonnegative integer factors only") — `3 modules / 2` is neither an error nor a drop by any stated rule |
 | `.` resource with Q vs R | `SPEC.md:610` (reads `resource`) vs `SPEC.md:778` (matches terms) — the two disagree for any quantity that has terms but no reference facet |
 | `:stack-size:` on Q | `SPEC.md:619-620` (error when `resource` was destroyed by scaling) vs `SPEC.md:616-618` (scaling destroys it silently) — the error is a *consequence*, which no P3 rule authorises |
 
@@ -432,10 +343,6 @@ six it does list read or rewrite them instead.
 
 ## Could not verify
 
-- Whether a recycler has four module slots (`SPEC.md:175`, `SPEC.md:1423`). The
-  repository contains no dump data (no `*.json` dump anywhere; only loader code
-  under `crates/hactorio-data/src`), so the slot-count invalidation of both
-  documents is [UNVERIFIED].
 - `SPEC.md:883`'s belt constant (`belt speed * 60 * 8` = 45 items/s) and
   `SPEC.md:892-896`'s inserter capacities are game-data claims; only their
   internal consistency with B.1's arithmetic was checked here.
