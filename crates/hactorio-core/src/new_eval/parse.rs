@@ -2,7 +2,7 @@
 
 use hactorio_data::Registry;
 
-use super::lex::{Keyword, Signal, Token, Unit, lex};
+use super::lex::{Keyword, Signal, Token, Unit, is_reserved_word, lex};
 use super::value::{Comparison, Quality, ResourceRef};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -187,6 +187,13 @@ impl AssignOp {
 pub struct Place {
     pub name: String,
     pub selector: Option<Selector>,
+}
+
+fn reserved_target(name: &str, span: Span) -> ParseError {
+    ParseError::new(
+        span,
+        format!("`{name}` is a reserved word and cannot be a variable name"),
+    )
 }
 
 /// One parsed line, before loops are assembled (§2.1).
@@ -537,6 +544,7 @@ impl Parser<'_> {
             return Ok(None);
         };
         let name = name.clone();
+        let name_span = self.tokens[self.pos].1;
         let after = self.tokens.get(self.pos + 1).map(|(token, _)| token);
         let is_assign = |token: Option<&Token>| {
             matches!(
@@ -549,6 +557,9 @@ impl Parser<'_> {
             )
         };
         if is_assign(after) {
+            if is_reserved_word(&name) {
+                return Err(reserved_target(&name, name_span));
+            }
             self.pos += 1;
             return Ok(Some(Place {
                 name,
@@ -564,6 +575,9 @@ impl Parser<'_> {
                 return Ok(None);
             };
             if is_assign(self.peek()) {
+                if is_reserved_word(&name) {
+                    return Err(reserved_target(&name, name_span));
+                }
                 return Ok(Some(Place {
                     name,
                     selector: Some(selector),
@@ -696,6 +710,18 @@ mod tests {
                 assert!(place.selector.is_none());
             }
             other => panic!("expected a definition, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reserved_words_are_not_definition_targets() {
+        for line in ["M = 1", "k += 1", "G -= 1", "T = 1", "M.in = 1"] {
+            let error = parse_line(line, &test_registry()).unwrap_err();
+            assert!(
+                error.message.contains("reserved"),
+                "{line}: {}",
+                error.message
+            );
         }
     }
 

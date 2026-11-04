@@ -8,7 +8,7 @@ use hactorio_core::new_eval::{
     Item, Output, Quality, Resource, Value, definition_value_span, evaluate, process_resources,
     property_is_available,
 };
-use hactorio_data::{EMPTY_GLYPH, Entry, EntryId, QUALITIES, Registry, SIGNALS};
+use hactorio_data::{EMPTY_GLYPH, Entry, EntryId, Registry, SIGNALS};
 
 /// Maximum height of the autocomplete popup, before it scrolls.
 pub(super) const COMPLETION_MAX_HEIGHT: f32 = 240.0;
@@ -186,6 +186,18 @@ const ALIASES: &[(&str, &[&str])] = &[
     ("turbo-splitter", &["green-splitter"]),
     ("atomic-bomb", &["nuclear-bomb", "nuke"]),
     ("lubricant", &["lube"]),
+    (
+        "firearm-magazine",
+        &["yellow-ammo", "yellow-rounds-magazine"],
+    ),
+    (
+        "piercing-rounds-magazine",
+        &["red-ammo", "red-rounds-magazine", "piercing-ammo"],
+    ),
+    (
+        "uranium-rounds-magazine",
+        &["green-ammo", "green-rounds-magazine"],
+    ),
     ("speed-module", &["speed-mod-1"]),
     ("speed-module-2", &["speed-mod-2"]),
     ("speed-module-3", &["speed-mod-3"]),
@@ -338,6 +350,44 @@ fn reforms_id(id: &str, name: &str) -> bool {
     letters(id).eq(letters(name))
 }
 
+/// Scores `name` against `needle`, including the exact and first-character
+/// bonuses every spelling of a symbol competes for.
+fn name_match(name: &str, needle: &str) -> Option<(isize, Vec<usize>)> {
+    let (score, matched) = fuzzy_match(name, needle)?;
+    let score = score
+        + if name.eq_ignore_ascii_case(needle) {
+            COMPLETION_EXACT_MATCH_BONUS
+        } else {
+            0
+        }
+        + if first_char_matches(name, needle) {
+            COMPLETION_FIRST_CHAR_BONUS
+        } else {
+            0
+        };
+    Some((score, matched))
+}
+
+/// The spelling in `names` that best matches `needle`, with its matched indices.
+fn best_spelling<'a>(
+    names: impl IntoIterator<Item = &'a str>,
+    needle: &str,
+) -> Option<(isize, &'a str, Vec<usize>)> {
+    names
+        .into_iter()
+        .filter_map(|name| {
+            let (score, matched) = name_match(name, needle)?;
+            Some((score, name, matched))
+        })
+        .reduce(|best, candidate| {
+            if candidate.0 > best.0 {
+                candidate
+            } else {
+                best
+            }
+        })
+}
+
 /// The name of `entry` that best matches `needle`, with the matched char indices
 /// and whether the localized display name was the best match.
 pub(super) fn best_name_match<'a>(
@@ -354,18 +404,7 @@ pub(super) fn best_name_match<'a>(
         .chain(display_name)
         .chain(aliases_for(&entry.id).iter().copied())
         .filter_map(|name| {
-            let (score, matched) = fuzzy_match(name, needle)?;
-            let score = score
-                + if name.eq_ignore_ascii_case(needle) {
-                    COMPLETION_EXACT_MATCH_BONUS
-                } else {
-                    0
-                }
-                + if first_char_matches(name, needle) {
-                    COMPLETION_FIRST_CHAR_BONUS
-                } else {
-                    0
-                };
+            let (score, matched) = name_match(name, needle)?;
             Some((score, name, matched, Some(name) == display_name))
         })
         .reduce(|best, candidate| {
@@ -484,23 +523,34 @@ fn exact_rank(label: &str, insert: &str, needle: &str) -> u8 {
     }
 }
 
-/// Every spelling of every quality, so `q1` … `q5` and `common` find theirs.
+/// Every quality once, labelled by its best-matching spelling (§4.6).
+///
+/// A quality has one glyph and several spellings, so the aliases compete for a
+/// single row like a prototype's names do: `q1`, `quality-1`, and `normal` all
+/// complete the same inline quality glyph.
 fn push_qualities(items: &mut Vec<(u8, f64, CompletionItem)>, needle: &str) {
-    for quality in &QUALITIES {
-        let Some(quality) = hactorio_core::new_eval::Quality::from_name(quality.id) else {
-            continue;
+    for quality in Quality::ALL {
+        let glyph = quality.glyph().to_string();
+        let (score, label, matched) = if needle.is_empty() {
+            (0, quality.name(), Vec::new())
+        } else {
+            let Some(best) = best_spelling(quality.aliases().iter().copied(), needle) else {
+                continue;
+            };
+            best
         };
-        for alias in quality.aliases() {
-            if let Some(item) = word_completion(
-                alias,
-                quality.glyph().to_string(),
-                quality.glyph().to_string(),
-                needle,
-                COMPLETION_ALIAS_BONUS,
-            ) {
-                items.push(item);
-            }
-        }
+        items.push((
+            exact_rank(label, &glyph, needle),
+            score as f64 + COMPLETION_ALIAS_BONUS,
+            CompletionItem {
+                insert: glyph.clone(),
+                glyphs: glyph,
+                label: label.to_string(),
+                matched,
+                name: None,
+                name_matched: Vec::new(),
+            },
+        ));
     }
 }
 
@@ -743,7 +793,8 @@ pub(super) fn completion_items(
         CompletionContext::Normal | CompletionContext::Recipe
     ) {
         // A quality qualifies a prototype, filters a quantity, and can precede
-        // a recipe after `making`, so every spelling is offered (§4.6).
+        // a recipe after `making`, so every quality is offered (§4.6). Its
+        // spellings all match the one glyph row.
         push_qualities(&mut items, needle);
     }
 
@@ -814,7 +865,6 @@ pub(super) fn completion_items(
                 items.push(item);
             }
         }
-        push_qualities(&mut items, needle);
         if let Some(stacked) = SIGNALS.iter().find(|signal| signal.id == "stacked-belt") {
             for (label, belt_id) in STACKED_BELTS {
                 let Some(belt) = registry.entry(belt_id) else {

@@ -397,6 +397,17 @@ fn keyword(word: &str) -> Option<Keyword> {
     })
 }
 
+/// Whether `word` is reserved and therefore not a variable name (§4.4).
+///
+/// Unit keywords and control keywords never lex as identifiers, but the
+/// numeric scale suffixes do, so a definition such as `M = 3` would otherwise
+/// create a variable that can never be written in an expression.
+pub fn is_reserved_word(word: &str) -> bool {
+    matches!(word, "k" | "M" | "G" | "T")
+        || Unit::from_keyword(word).is_some()
+        || keyword(word).is_some()
+}
+
 fn starts_number(rest: &str) -> bool {
     let mut chars = rest.chars();
     chars.next() == Some('.') && chars.next().is_some_and(|c| c.is_ascii_digit())

@@ -1185,6 +1185,11 @@ const AUTOCOMPLETE_FIXTURE: &str = r#"{
     "petroleum-gas-barrel": {"type": "item", "name": "petroleum-gas-barrel", "stack_size": 10},
     "atomic-bomb": {"type": "item", "name": "atomic-bomb", "stack_size": 10}
   },
+  "ammo": {
+    "firearm-magazine": {"type": "ammo", "name": "firearm-magazine", "stack_size": 100},
+    "piercing-rounds-magazine": {"type": "ammo", "name": "piercing-rounds-magazine", "stack_size": 100},
+    "uranium-rounds-magazine": {"type": "ammo", "name": "uranium-rounds-magazine", "stack_size": 100}
+  },
   "fluid": {
     "lubricant": {"type": "fluid", "name": "lubricant"}
   },
@@ -1271,7 +1276,7 @@ fn a_quantity_offers_items_after_a_dot() {
     assert!(labels.iter().any(|label| label == "water"), "{labels:?}");
     assert!(labels.iter().any(|label| label == ".item"), "{labels:?}");
     // A selector can be qualified, so the qualities are offered here too.
-    for quality in ["common", "rare", "quality-2"] {
+    for quality in ["normal", "rare", "uncommon"] {
         assert!(labels.iter().any(|label| label == quality), "{labels:?}");
     }
 }
@@ -1292,7 +1297,7 @@ fn making_offers_qualities_alongside_recipes() {
         labels.iter().any(|label| label == "electronic-circuit"),
         "{labels:?}"
     );
-    for quality in ["common", "quality-3", "legendary"] {
+    for quality in ["normal", "rare", "legendary"] {
         assert!(labels.iter().any(|label| label == quality), "{labels:?}");
     }
     // Hidden recipes are reachable by name but never suggested.
@@ -1328,6 +1333,22 @@ fn a_process_offers_its_signals_after_a_dot() {
             labels.iter().any(|label| label == expected),
             "{expected} missing from {labels:?}"
         );
+    }
+}
+
+#[test]
+fn quality_spellings_share_one_completion_row() {
+    let registry = autocomplete_registry();
+    let items = completion_items(&registry, &Settings::default(), "", 0, "");
+    for quality in hactorio_core::new_eval::Quality::ALL {
+        let glyph = quality.glyph().to_string();
+        let rows: Vec<&str> = items
+            .iter()
+            .filter(|item| item.insert == glyph)
+            .map(|item| item.label.as_str())
+            .collect();
+        assert_eq!(rows.len(), 1, "{}: {rows:?}", quality.name());
+        assert_eq!(rows[0], quality.name(), "{}", quality.name());
     }
 }
 
@@ -1468,6 +1489,28 @@ fn color_aliases_name_underground_belts_and_splitters() {
         assert_eq!(
             item.insert,
             registry.entry(canonical).unwrap().glyph.to_string()
+        );
+    }
+}
+
+#[test]
+fn ammo_aliases_name_their_magazines() {
+    let registry = autocomplete_registry();
+    for (alias, canonical) in [
+        ("yellow-ammo", "firearm-magazine"),
+        ("yellow-rounds-magazine", "firearm-magazine"),
+        ("red-ammo", "piercing-rounds-magazine"),
+        ("red-rounds-magazine", "piercing-rounds-magazine"),
+        ("piercing-ammo", "piercing-rounds-magazine"),
+        ("green-ammo", "uranium-rounds-magazine"),
+        ("green-rounds-magazine", "uranium-rounds-magazine"),
+    ] {
+        let item = first_completion(&registry, alias);
+        assert_eq!(item.label, alias);
+        assert_eq!(
+            item.insert,
+            registry.entry(canonical).unwrap().glyph.to_string(),
+            "{alias}"
         );
     }
 }
