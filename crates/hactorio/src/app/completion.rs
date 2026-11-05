@@ -480,7 +480,7 @@ const COMPLETION_PRESENT_ITEM_BONUS: f64 = 50.0;
 ///
 /// A quality has one glyph and several spellings, so the alias rows have to
 /// outrank the near misses a short needle like `q1` also fuzzily matches.
-const COMPLETION_ALIAS_BONUS: f64 = 120.0;
+const COMPLETION_QUALITY_ALIAS_BONUS: f64 = 10.0;
 
 const KEYWORDS: &[&str] = &[
     "in", "into", "from", "making", "s", "second", "m", "minute", "h", "hour", "joule", "J", "kJ",
@@ -555,7 +555,7 @@ fn push_qualities(items: &mut Vec<(u8, f64, CompletionItem)>, needle: &str) {
         };
         items.push((
             exact_rank(label, &glyph, needle),
-            score as f64 + COMPLETION_ALIAS_BONUS,
+            score as f64 + COMPLETION_QUALITY_ALIAS_BONUS,
             CompletionItem {
                 insert: glyph.clone(),
                 glyphs: glyph,
