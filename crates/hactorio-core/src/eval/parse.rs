@@ -633,7 +633,7 @@ impl Parser<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::new_eval::test_registry;
+    use crate::eval::test_registry;
 
     fn expr(line: &str) -> Expr {
         match parse_line(line, &test_registry()).expect("parses") {

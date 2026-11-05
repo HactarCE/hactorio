@@ -6,7 +6,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
 use hactorio_core::Settings;
-use hactorio_core::new_eval::{Evaluation, evaluate};
+use hactorio_core::eval::{Evaluation, evaluate};
 use hactorio_data::Registry;
 
 /// Owns evaluation off the UI thread. Latest request wins, and a request that

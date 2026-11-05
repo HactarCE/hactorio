@@ -1318,10 +1318,10 @@ fn a_comparison_offers_only_qualities() {
         let labels = completion_labels(&registry, text);
         assert_eq!(
             labels.len(),
-            hactorio_core::new_eval::Quality::ALL.len(),
+            hactorio_core::eval::Quality::ALL.len(),
             "{text}: {labels:?}"
         );
-        for quality in hactorio_core::new_eval::Quality::ALL {
+        for quality in hactorio_core::eval::Quality::ALL {
             assert!(
                 labels.iter().any(|label| label == quality.name()),
                 "{text}: {labels:?}"
@@ -1333,7 +1333,7 @@ fn a_comparison_offers_only_qualities() {
     let item = first_completion(&registry, ":iron-plate: > q3");
     assert_eq!(
         item.insert,
-        hactorio_core::new_eval::Quality::Rare.glyph().to_string()
+        hactorio_core::eval::Quality::Rare.glyph().to_string()
     );
     assert_eq!(item.label, "quality-3");
 }
@@ -1361,7 +1361,7 @@ fn typing_a_comparison_opens_quality_completions() {
         .iter()
         .map(|item| item.insert.clone())
         .collect();
-    let expected: Vec<String> = hactorio_core::new_eval::Quality::ALL
+    let expected: Vec<String> = hactorio_core::eval::Quality::ALL
         .iter()
         .map(|quality| quality.glyph().to_string())
         .collect();
@@ -1432,7 +1432,7 @@ fn a_process_offers_its_signals_after_a_dot() {
 fn quality_spellings_share_one_completion_row() {
     let registry = autocomplete_registry();
     let items = completion_items(&registry, &Settings::default(), "", 0, "");
-    for quality in hactorio_core::new_eval::Quality::ALL {
+    for quality in hactorio_core::eval::Quality::ALL {
         let glyph = quality.glyph().to_string();
         let rows: Vec<&str> = items
             .iter()
@@ -1468,7 +1468,7 @@ fn quality_shortcuts_rank_their_quality_first() {
     ] {
         let item = first_completion(&registry, query);
         assert_eq!(item.label, id, "{query}: got {:?}", item.label);
-        let quality = hactorio_core::new_eval::Quality::from_name(id).unwrap();
+        let quality = hactorio_core::eval::Quality::from_name(id).unwrap();
         assert_eq!(item.insert, quality.glyph().to_string(), "{query}");
     }
 
@@ -1477,7 +1477,7 @@ fn quality_shortcuts_rank_their_quality_first() {
     assert_eq!(item.label, "common");
     assert_eq!(
         item.insert,
-        hactorio_core::new_eval::Quality::Normal.glyph().to_string()
+        hactorio_core::eval::Quality::Normal.glyph().to_string()
     );
 }
 
@@ -1745,7 +1745,7 @@ fn completion_after_dot_reads_the_operand_of_a_reassignment() {
     assert!(labels.iter().any(|label| label == ".crafts"), "{labels:?}");
     assert!(!labels.iter().any(|label| label == ".rate"), "{labels:?}");
     // Qualities are selectors too, so skip them when looking for the unit.
-    let qualifiers: Vec<&str> = hactorio_core::new_eval::Quality::ALL
+    let qualifiers: Vec<&str> = hactorio_core::eval::Quality::ALL
         .iter()
         .flat_map(|quality| quality.aliases().iter().copied())
         .collect();

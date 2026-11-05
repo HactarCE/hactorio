@@ -4,7 +4,7 @@
 
 pub mod approx;
 pub mod belt;
-pub mod new_eval;
+pub mod eval;
 mod settings;
 mod syntax;
 mod text;

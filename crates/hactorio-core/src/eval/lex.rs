@@ -483,7 +483,7 @@ fn scan_token_body(line: &str, start: usize) -> Result<(String, usize), ParseErr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::new_eval::test_registry;
+    use crate::eval::test_registry;
 
     fn tokens(line: &str) -> Vec<Token> {
         lex(line, &test_registry())

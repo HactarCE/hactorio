@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use egui::{Key, Modifiers, TextStyle, Ui};
 use hactorio_core::Settings;
-use hactorio_core::new_eval::{
+use hactorio_core::eval::{
     Item, Output, Quality, Resource, Value, definition_value_span, evaluate, process_resources,
     property_is_available,
 };

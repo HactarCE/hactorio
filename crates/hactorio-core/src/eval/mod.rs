@@ -1,9 +1,4 @@
-//! The replacement expression language specified by `SPEC.md`.
-//!
-//! Scope: this is the MVP of `SPEC.md` D6 — the full grammar, the `quantity`
-//! facet, and the two reference facets. Values carrying a stack rate, a
-//! machine, a config, or a process arrive with their increments, and the
-//! process value kind is added by `making`.
+//! The expression language specified by `SPEC.md`.
 //!
 //! Evaluation never blocks: a document is evaluated line by line, an error
 //! attaches to the line that produced it, and a definition that fails poisons
@@ -209,10 +204,10 @@ pub(crate) fn test_registry() -> hactorio_data::Registry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::new_eval::format::format_process_panel;
+    use crate::eval::format::format_process_panel;
 
     use crate::Settings;
-    use crate::new_eval::value::{StackLimit, Stacks};
+    use crate::eval::value::{StackLimit, Stacks};
     use crate::settings::IdlePower;
     use hactorio_data::STACK_SIZE_GLYPH;
 
@@ -1081,7 +1076,7 @@ mod tests {
             unreachable!()
         };
         assert!(process.rows.is_empty());
-        assert_eq!(process.extent, super::value::Extent::Unspecified);
+        assert_eq!(process.extent, crate::eval::value::Extent::Unspecified);
         assert_eq!(process.machines(), 0.0);
 
         // An empty process is the identity, so a loop accumulator survives it.
@@ -1437,7 +1432,7 @@ mod tests {
         // zero quantity carries no units (§5.3).
         assert_eq!(render("p.net.:rare: :iron-plate:"), "0");
         let rare = hactorio_data::quality_by_id("rare").unwrap().glyph;
-        assert_eq!(crate::new_eval::Quality::Rare.glyph(), rare);
+        assert_eq!(crate::eval::Quality::Rare.glyph(), rare);
         let legendary = hactorio_data::quality_by_id("legendary").unwrap().glyph;
         assert_ne!(rare, legendary);
     }
@@ -1729,14 +1724,14 @@ mod tests {
         assert!(multi.recipe.is_some());
     }
 
-    fn facets_of(text: &str) -> Vec<crate::new_eval::Output> {
+    fn facets_of(text: &str) -> Vec<crate::eval::Output> {
         let registry = test_registry();
         evaluate(text, &registry, &Settings::default(), &|| false).outputs
     }
 
-    fn error_of(outputs: &[crate::new_eval::Output], index: usize) -> (String, super::parse::Span) {
+    fn error_of(outputs: &[crate::eval::Output], index: usize) -> (String, super::parse::Span) {
         match &outputs[index] {
-            crate::new_eval::Output::Error { message, span } => (message.clone(), *span),
+            crate::eval::Output::Error { message, span } => (message.clone(), *span),
             other => panic!("expected an error, got {other:?}"),
         }
     }
@@ -1749,19 +1744,19 @@ mod tests {
         let outputs = evaluate("k = 1\nk", &registry, &settings, &|| false).outputs;
         assert_eq!(
             outputs[1],
-            crate::new_eval::Output::Value(Box::new(Value::number(1.0)))
+            crate::eval::Output::Value(Box::new(Value::number(1.0)))
         );
         let outputs = evaluate("k = 2\n1k", &registry, &settings, &|| false).outputs;
         assert_eq!(
             outputs[1],
-            crate::new_eval::Output::Value(Box::new(Value::number(1000.0)))
+            crate::eval::Output::Value(Box::new(Value::number(1000.0)))
         );
     }
 
     #[test]
     fn negation_drops_the_reference_facets() {
         let outputs = facets_of("-:iron-plate:");
-        let crate::new_eval::Output::Value(value) = &outputs[0] else {
+        let crate::eval::Output::Value(value) = &outputs[0] else {
             panic!("expected facets, got {:?}", outputs[0]);
         };
         let Value::Multi(multi) = &**value else {
@@ -1774,7 +1769,7 @@ mod tests {
     #[test]
     fn abs_drops_the_config() {
         let outputs = facets_of("(2 :speed-module-2:).abs");
-        let crate::new_eval::Output::Value(value) = &outputs[0] else {
+        let crate::eval::Output::Value(value) = &outputs[0] else {
             panic!("expected facets, got {:?}", outputs[0]);
         };
         let Value::Multi(multi) = &**value else {
@@ -1792,11 +1787,11 @@ mod tests {
         // A second item term would make the reciprocal unrepresentable.
         assert!(matches!(
             facets_of("(2:iron-plate: + 1:copper-plate:)^-1")[0],
-            crate::new_eval::Output::Error { .. }
+            crate::eval::Output::Error { .. }
         ));
         assert!(matches!(
             facets_of("(2:iron-plate:)^2")[0],
-            crate::new_eval::Output::Error { .. }
+            crate::eval::Output::Error { .. }
         ));
     }
 
@@ -1804,7 +1799,7 @@ mod tests {
     fn an_unscaled_process_cannot_be_timed() {
         assert!(matches!(
             facets_of("1 m * (:foundry: making (:normal: :iron-plate:))")[0],
-            crate::new_eval::Output::Error { .. }
+            crate::eval::Output::Error { .. }
         ));
     }
 
@@ -1821,7 +1816,7 @@ mod tests {
     #[test]
     fn a_zero_factor_does_not_scale_a_config() {
         let outputs = facets_of("0 (2 :speed-module-2:)");
-        let crate::new_eval::Output::Value(value) = &outputs[0] else {
+        let crate::eval::Output::Value(value) = &outputs[0] else {
             panic!("expected facets, got {:?}", outputs[0]);
         };
         let Value::Multi(multi) = &**value else {
@@ -1844,7 +1839,7 @@ mod tests {
             &|| false,
         )
         .outputs;
-        let crate::new_eval::Output::Value(value) = &outputs[1] else {
+        let crate::eval::Output::Value(value) = &outputs[1] else {
             panic!("expected a process, got {:?}", outputs[1]);
         };
         let panel = format_facets(value, &settings, &registry).join("\n");
@@ -1857,7 +1852,7 @@ mod tests {
         let outputs = facets_of("x = 1:iron-plate: + 1s\ny = x");
         let (message, span) = error_of(&outputs, 1);
         assert_eq!(message, "`x` has error from line 1");
-        assert_eq!(span, super::parse::Span::new(4, 5));
+        assert_eq!(span, crate::eval::parse::Span::new(4, 5));
     }
 
     #[test]
@@ -1869,7 +1864,7 @@ mod tests {
             "loop aborted after 1 iteration due to error on line 2"
         );
         // The statement after the loop still runs (§2.5).
-        assert!(matches!(outputs[3], crate::new_eval::Output::Value(_)));
+        assert!(matches!(outputs[3], crate::eval::Output::Value(_)));
     }
 
     #[test]
@@ -1888,7 +1883,7 @@ mod tests {
         let render = |settings: &Settings| {
             let outputs = evaluate("15 :iron-plate:/s", &registry, settings, &|| false).outputs;
             match &outputs[0] {
-                crate::new_eval::Output::Value(value) => format_value(value, settings, &registry),
+                crate::eval::Output::Value(value) => format_value(value, settings, &registry),
                 other => panic!("expected a value, got {other:?}"),
             }
         };
@@ -1919,11 +1914,8 @@ mod tests {
         assert!(message.contains("machine-seconds"), "{message}");
     }
 
-    fn extent_of(
-        outputs: &[crate::new_eval::Output],
-        index: usize,
-    ) -> crate::new_eval::value::Extent {
-        let crate::new_eval::Output::Value(value) = &outputs[index] else {
+    fn extent_of(outputs: &[crate::eval::Output], index: usize) -> crate::eval::value::Extent {
+        let crate::eval::Output::Value(value) = &outputs[index] else {
             panic!("expected a process, got {:?}", outputs[index]);
         };
         let Value::Process(process) = &**value else {
@@ -1951,7 +1943,7 @@ mod tests {
         ] {
             let outputs = run(line);
             assert!(
-                matches!(outputs[1], crate::new_eval::Output::Value(_)),
+                matches!(outputs[1], crate::eval::Output::Value(_)),
                 "{line}: {:?}",
                 outputs[1]
             );
@@ -1965,7 +1957,7 @@ mod tests {
         ] {
             let outputs = run(line);
             assert!(
-                matches!(outputs[1], crate::new_eval::Output::Error { .. }),
+                matches!(outputs[1], crate::eval::Output::Error { .. }),
                 "{line}: {:?}",
                 outputs[1]
             );
@@ -1985,7 +1977,7 @@ mod tests {
         for line in ["p.:iron-plate: += 5", "p.:iron-plate: += 5 :iron-plate:"] {
             let outputs = run(line);
             assert!(
-                matches!(outputs[1], crate::new_eval::Output::Value(_)),
+                matches!(outputs[1], crate::eval::Output::Value(_)),
                 "{line}: {:?}",
                 outputs[1]
             );
@@ -1997,7 +1989,7 @@ mod tests {
         ] {
             let outputs = run(line);
             assert!(
-                matches!(outputs[1], crate::new_eval::Output::Error { .. }),
+                matches!(outputs[1], crate::eval::Output::Error { .. }),
                 "{line}: {:?}",
                 outputs[1]
             );
@@ -2031,15 +2023,15 @@ mod tests {
         };
         assert_eq!(
             extent_of(&run("z.:iron-plate: += 5/s"), 1),
-            crate::new_eval::value::Extent::Machines
+            crate::eval::value::Extent::Machines
         );
         assert_eq!(
             extent_of(&run("z.:iron-plate: += 5"), 1),
-            crate::new_eval::value::Extent::MachineSeconds
+            crate::eval::value::Extent::MachineSeconds
         );
         assert!(matches!(
             run("z.:iron-plate: += :transport-belt:")[1],
-            crate::new_eval::Output::Error { .. }
+            crate::eval::Output::Error { .. }
         ));
     }
 
@@ -2056,7 +2048,7 @@ mod tests {
         let settings = Settings::default();
         let outputs = evaluate(text, &registry, &settings, &|| false).outputs;
         match &outputs[0] {
-            crate::new_eval::Output::Value(value) => format_value(value, &settings, &registry),
+            crate::eval::Output::Value(value) => format_value(value, &settings, &registry),
             other => panic!("expected a value, got {other:?}"),
         }
     }

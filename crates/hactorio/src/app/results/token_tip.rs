@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use egui::{RichText, Sense, TextStyle, Ui};
 use hactorio_core::Settings;
-use hactorio_core::new_eval::{
+use hactorio_core::eval::{
     Amount, Item, Output, Quality, Quantity, Resource, Value, format_facets, format_number,
     format_value, is_zero, line_hash,
 };

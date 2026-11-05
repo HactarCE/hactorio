@@ -153,7 +153,7 @@ fn token_tip_for_a_prototype_lists_its_information() {
             let results = ResultsContext {
                 tabs: &[],
                 active_tab: 0,
-                outputs: &hactorio_core::new_eval::Evaluation::empty(),
+                outputs: &hactorio_core::eval::Evaluation::empty(),
                 settings: &settings,
                 registry: &registry,
             };
@@ -187,7 +187,7 @@ fn token_tip_for_a_variable_shows_its_value() {
     let settings = Settings::default();
     let text = "# Main\nrate = 3 :iron-plate: / second\n";
     let tabs = vec![Tab::from_text(text)];
-    let outputs = hactorio_core::new_eval::evaluate(text, &registry, &settings, &|| false);
+    let outputs = hactorio_core::eval::evaluate(text, &registry, &settings, &|| false);
     let mut harness = Harness::builder()
         .with_size(egui::vec2(500.0, 400.0))
         .with_accessibility_check(false)
@@ -220,7 +220,7 @@ fn token_tip_for_a_variable_shows_the_latest_definition() {
     let settings = Settings::default();
     let text = "# Main\nrate = 3 :iron-plate: / second\nrate = 5 :iron-plate: / second\n";
     let tabs = vec![Tab::from_text(text)];
-    let outputs = hactorio_core::new_eval::evaluate(text, &registry, &settings, &|| false);
+    let outputs = hactorio_core::eval::evaluate(text, &registry, &settings, &|| false);
     let mut harness = Harness::builder()
         .with_size(egui::vec2(500.0, 400.0))
         .with_accessibility_check(false)

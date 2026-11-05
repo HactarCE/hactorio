@@ -1692,7 +1692,7 @@ fn infer_recipe(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::new_eval::{Amount, test_registry};
+    use crate::eval::{Amount, test_registry};
 
     fn run(document: &str) -> Vec<Output> {
         let registry = test_registry();
@@ -1824,7 +1824,7 @@ mod tests {
         let render = |text: &str| {
             let outputs = evaluate(text, &registry, &settings, &|| false).outputs;
             match &outputs[0] {
-                Output::Value(value) => crate::new_eval::format_value(value, &settings, &registry),
+                Output::Value(value) => crate::eval::format_value(value, &settings, &registry),
                 other => panic!("expected a value, got {other:?}"),
             }
         };
