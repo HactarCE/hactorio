@@ -1189,9 +1189,9 @@ impl Process {
     }
 
     /// `Machines · seconds` gives machine-seconds (§5.4).
-    pub fn times_seconds(&self, seconds: f64) -> Option<Self> {
+    pub fn times_seconds(&self, seconds: f64) -> Result<Self, ValueError> {
         match self.extent {
-            Extent::Machines => Some(Self {
+            Extent::Machines => Ok(Self {
                 extent: Extent::MachineSeconds,
                 rows: self
                     .rows
@@ -1204,14 +1204,21 @@ impl Process {
                     .map(|(resource, amount)| (*resource, amount * seconds))
                     .collect(),
             }),
-            Extent::Unscaled | Extent::MachineSeconds | Extent::Unspecified => None,
+            // An empty process stays empty.
+            Extent::Unspecified => Ok(self.clone()),
+            Extent::Unscaled => Err(ValueError::new(
+                "an unscaled process cannot be multiplied by a time; count the machine first",
+            )),
+            Extent::MachineSeconds => Err(ValueError::new(
+                "a machine-seconds process cannot be multiplied by a time",
+            )),
         }
     }
 
     /// `MachineSeconds ÷ seconds` gives machines (§5.4).
-    pub fn divided_by_seconds(&self, seconds: f64) -> Option<Self> {
+    pub fn divided_by_seconds(&self, seconds: f64) -> Result<Self, ValueError> {
         match self.extent {
-            Extent::MachineSeconds => Some(Self {
+            Extent::MachineSeconds => Ok(Self {
                 extent: Extent::Machines,
                 rows: self
                     .rows
@@ -1224,7 +1231,13 @@ impl Process {
                     .map(|(resource, amount)| (*resource, amount / seconds))
                     .collect(),
             }),
-            _ => None,
+            Extent::Unspecified => Ok(self.clone()),
+            Extent::Unscaled => Err(ValueError::new(
+                "an unscaled process cannot be divided by a time; count the machine first",
+            )),
+            Extent::Machines => Err(ValueError::new(
+                "a machines process is a rate, so it has no duration to divide by",
+            )),
         }
     }
 
@@ -1234,7 +1247,7 @@ impl Process {
     }
 }
 
-/// The facets of one value (§3.1). The MVP implements five of the eight.
+/// The facets of one value (§3.1).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct MultiValue {
     pub quantity: Option<Quantity>,
@@ -1762,20 +1775,10 @@ impl Value {
         }
         // Machines multiplied by a time become machine-seconds (§5.4).
         if let (Some(process), Some(seconds)) = (self.as_process(), other.pure_time()) {
-            return process
-                .times_seconds(seconds)
-                .map(Value::Process)
-                .ok_or_else(|| {
-                    ValueError::new("a machine-seconds process cannot be multiplied by a time")
-                });
+            return process.times_seconds(seconds).map(Value::Process);
         }
         if let (Some(seconds), Some(process)) = (self.pure_time(), other.as_process()) {
-            return process
-                .times_seconds(seconds)
-                .map(Value::Process)
-                .ok_or_else(|| {
-                    ValueError::new("a machine-seconds process cannot be multiplied by a time")
-                });
+            return process.times_seconds(seconds).map(Value::Process);
         }
         Ok(Value::Multi(self.as_multi("*")?.mul(other.as_multi("*")?)?))
     }
@@ -1785,12 +1788,7 @@ impl Value {
             return self.scale_value(self, 1.0 / factor);
         }
         if let (Some(process), Some(seconds)) = (self.as_process(), other.pure_time()) {
-            return process
-                .divided_by_seconds(seconds)
-                .map(Value::Process)
-                .ok_or_else(|| {
-                    ValueError::new("only a machine-seconds process can be divided by a time")
-                });
+            return process.divided_by_seconds(seconds).map(Value::Process);
         }
         Ok(Value::Multi(self.as_multi("/")?.div(other.as_multi("/")?)?))
     }

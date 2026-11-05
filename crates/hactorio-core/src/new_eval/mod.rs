@@ -1755,6 +1755,20 @@ mod tests {
         assert_eq!(&line[span.start..span.end], "1:iron-plate: + 1s");
     }
 
+    #[test]
+    fn timing_names_the_extent_that_cannot_be_timed() {
+        // An unscaled process is the problem, not machine-seconds.
+        let outputs = facets_of("1m * (:foundry: making (:normal: :iron-plate:))");
+        let (message, _) = error_of(&outputs, 0);
+        assert!(message.contains("unscaled"), "{message}");
+        // A machine-seconds process cannot be timed twice.
+        let outputs = facets_of(
+            "p = 1 :foundry: making (:normal: :iron-plate:)\np * 1s * 1s",
+        );
+        let (message, _) = error_of(&outputs, 1);
+        assert!(message.contains("machine-seconds"), "{message}");
+    }
+
     fn registry_glyph(id: &str) -> String {
         let registry = test_registry();
         registry
