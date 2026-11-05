@@ -795,5 +795,9 @@ Note: the §6.6 table lists `.:item:` and `.:fluid:` twice (`SPEC.md:1075-1076` 
   content, completion popup ordering in situ) were verified by reading
   `app/results/*`, `app/editor.rs`, `app/completion.rs` and their tests, not by driving the
   GUI.
-- **`item_rate_belt` / `stacked_belts`**: nothing to run; absent from the codebase
-  (F7.8.1).
+- **Belt-count display**: no setting of its own. Belt stacking is research-driven —
+  the dump carries the stacking research table (`postprocess.rs:309`), the registry
+  exposes it (`registry.rs:481`), and `Settings::belt_stacking` (`settings.rs:65`) is
+  read by `:stacked-belt:` (`eval.rs:914`). What is missing is the display path that
+  turns an item rate into belt counts; `format_quantity`/`format_process` never
+  consult a belt tier (F7.8.1).
