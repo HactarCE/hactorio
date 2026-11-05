@@ -1553,7 +1553,7 @@ mod tests {
 
         // An unspecified quality means normal, so the same row is written.
         let mut document = String::from("p = 1 :foundry: making (:normal: :iron-plate:)\n");
-        document.push_str("p.:iron-plate: += 5 :iron-plate:\n");
+        document.push_str("p.:iron-plate: += 5 :iron-plate:/s\n");
         document.push_str("p.net.:iron-plate:");
         let outputs = evaluate(&document, &registry, &settings, &|| false).outputs;
         let Output::Value(value) = &outputs[2] else {
@@ -1767,6 +1767,126 @@ mod tests {
         );
         let (message, _) = error_of(&outputs, 1);
         assert!(message.contains("machine-seconds"), "{message}");
+    }
+
+    fn extent_of(outputs: &[crate::new_eval::Output], index: usize) -> crate::new_eval::value::Extent {
+        match &outputs[index] {
+            crate::new_eval::Output::Value(Value::Process(process)) => process.extent,
+            other => panic!("expected a process, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compound_assignment_needs_the_rows_unit_and_item() {
+        let registry = test_registry();
+        let settings = Settings::default();
+        let run = |line: &str| {
+            let document = format!(
+                "p = 1 :foundry: making (:normal: :iron-plate:)\n{line}"
+            );
+            evaluate(&document, &registry, &settings, &|| false).outputs
+        };
+
+        // A machines row takes a rate, with no item or the row's own item at
+        // normal quality.
+        for line in [
+            "p.:iron-plate: += 5/s",
+            "p.:iron-plate: += 5 :iron-plate:/s",
+            "p.:iron-plate: += 5 :normal: :iron-plate:/s",
+            "p.:iron-plate: += :transport-belt: :iron-plate:",
+        ] {
+            let outputs = run(line);
+            assert!(
+                matches!(outputs[1], crate::new_eval::Output::Value(_)),
+                "{line}: {:?}",
+                outputs[1]
+            );
+        }
+
+        for line in [
+            "p.:iron-plate: += 5 :iron-plate:",
+            "p.:iron-plate: += 5 :rare: :iron-plate:/s",
+            "p.:iron-plate: += 5",
+            "p.:iron-plate: += :transport-belt:",
+        ] {
+            let outputs = run(line);
+            assert!(
+                matches!(outputs[1], crate::new_eval::Output::Error { .. }),
+                "{line}: {:?}",
+                outputs[1]
+            );
+        }
+    }
+
+    #[test]
+    fn a_machine_seconds_row_takes_an_amount() {
+        let registry = test_registry();
+        let settings = Settings::default();
+        let run = |line: &str| {
+            let document = format!(
+                "p = 100 :iron-ore: into (:foundry: making (:normal: :iron-plate:))\n{line}"
+            );
+            evaluate(&document, &registry, &settings, &|| false).outputs
+        };
+        for line in ["p.:iron-plate: += 5", "p.:iron-plate: += 5 :iron-plate:"] {
+            let outputs = run(line);
+            assert!(
+                matches!(outputs[1], crate::new_eval::Output::Value(_)),
+                "{line}: {:?}",
+                outputs[1]
+            );
+        }
+        for line in [
+            "p.:iron-plate: += 5/s",
+            "p.:iron-plate: += :transport-belt:",
+            "p.:iron-plate: += :transport-belt: :iron-plate:",
+        ] {
+            let outputs = run(line);
+            assert!(
+                matches!(outputs[1], crate::new_eval::Output::Error { .. }),
+                "{line}: {:?}",
+                outputs[1]
+            );
+        }
+    }
+
+    #[test]
+    fn an_unscaled_process_cannot_be_assigned() {
+        let registry = test_registry();
+        let settings = Settings::default();
+        let outputs = evaluate(
+            "p = :foundry: making (:normal: :iron-plate:)\np.:iron-plate: += 5/s",
+            &registry,
+            &settings,
+            &|| false,
+        )
+        .outputs;
+        let (message, _) = error_of(&outputs, 1);
+        assert!(message.contains("unscaled"), "{message}");
+    }
+
+    #[test]
+    fn assigning_an_unspecified_process_sizes_it() {
+        let registry = test_registry();
+        let settings = Settings::default();
+        let run = |line: &str| {
+            let document = format!(
+                "z = 0 :iron-plate: into (:foundry: making (:normal: :iron-plate:))\n{line}"
+            );
+            evaluate(&document, &registry, &settings, &|| false).outputs
+        };
+        assert_eq!(
+            extent_of(&run("z.:iron-plate: += 5/s"), 1),
+            crate::new_eval::value::Extent::Machines
+        );
+        assert_eq!(
+            extent_of(&run("z.:iron-plate: += 5"), 1),
+            crate::new_eval::value::Extent::MachineSeconds
+        );
+        assert!(matches!(
+            run("z.:iron-plate: += :transport-belt:")[1],
+            crate::new_eval::Output::Error { .. }
+        ));
     }
 
     fn registry_glyph(id: &str) -> String {

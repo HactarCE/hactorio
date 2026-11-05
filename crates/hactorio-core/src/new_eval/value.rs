@@ -285,7 +285,19 @@ impl Quantity {
         joule: i32,
         craft: i32,
     ) -> Self {
-        let amount = amount.canonicalize();
+        // A single numerator term equal to the denominator cancels it, so
+        // `3:iron-plate:/:iron-plate:` is the number `3` (§5.3).
+        let (amount, per) = match (amount.canonicalize(), per) {
+            (Amount::Resources(terms), Some(below)) if terms.len() == 1 => {
+                let (resource, coefficient) = terms.iter().next().expect("one term");
+                if *resource == below {
+                    (Amount::Number(*coefficient), None)
+                } else {
+                    (Amount::Resources(terms), Some(below))
+                }
+            }
+            (amount, per) => (amount, per),
+        };
         if amount.is_zero() {
             return Self {
                 amount: Amount::Number(0.0),
@@ -2062,6 +2074,19 @@ mod tests {
             filtered.amount,
             Amount::Resources(BTreeMap::from([(rare, 2.0)]))
         );
+    }
+
+    #[test]
+    fn a_single_numerator_item_cancels_the_denominator() {
+        let quantity = Quantity::new(
+            Amount::Resources(BTreeMap::from([(iron(), 3.0)])),
+            Some(iron()),
+            0,
+            0,
+            0,
+        );
+        assert_eq!(quantity.amount, Amount::Number(3.0));
+        assert_eq!(quantity.per, None);
     }
 
     #[test]

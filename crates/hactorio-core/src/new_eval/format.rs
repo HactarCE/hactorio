@@ -37,7 +37,7 @@ fn format_multi(multi: &MultiValue, settings: &Settings, registry: &Registry) ->
     }
     if let Some(config) = &multi.config {
         if config.is_empty() {
-            return "0".to_string();
+            return "(empty config)".to_string();
         }
         return format_config(config, registry);
     }
@@ -89,7 +89,7 @@ pub fn format_facets(value: &Value, settings: &Settings, registry: &Registry) ->
             }
             if let Some(config) = &multi.config {
                 lines.push(if config.is_empty() {
-                    "0".to_string()
+                    "(empty config)".to_string()
                 } else {
                     format_config(config, registry)
                 });

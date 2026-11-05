@@ -285,7 +285,7 @@ impl Runner<'_> {
                 .lookup(&place.name)
                 .and_then(|current| Ok((current, self.eval(value)?)))
                 .and_then(|(current, rhs)| {
-                    assign_resource(&current, resource, op, &rhs)
+                    assign_resource(&current, resource, op, &rhs, self.registry)
                 }),
             Some(other) => Err(ValueError::new(format!(
                 "`{}` is not assignable; only resources are",
@@ -1047,6 +1047,7 @@ fn assign_resource(
     resource: &ResourceRef,
     op: AssignOp,
     rhs: &Value,
+    registry: &Registry,
 ) -> Result<Value, ValueError> {
     let Value::Process(process) = current else {
         return Err(ValueError::new(format!(
@@ -1054,6 +1055,12 @@ fn assign_resource(
             facets(current)
         )));
     };
+    if process.extent == Extent::Unscaled {
+        return Err(ValueError::new(
+            "an unscaled process has no sized rows to assign; count the machine first",
+        ));
+    }
+    let name = registry.entry_by_index(resource.id).id.to_string();
     let target = if resource.is_fluid {
         Resource::Fluid(resource.id)
     } else {
@@ -1066,50 +1073,81 @@ fn assign_resource(
     let Value::Multi(multi) = rhs else {
         return Err(ValueError::new("a resource row takes a quantity"));
     };
+    if multi.stack_rate.is_some() || multi.stack_capacity.is_some() {
+        return Err(ValueError::new(format!(
+            "a resource row takes a quantity, not a stack rate or capacity, for `:{name}:`"
+        )));
+    }
     let Some(quantity) = &multi.quantity else {
-        return Err(ValueError::new("a resource row takes a quantity"));
+        return Err(ValueError::new(format!(
+            "a resource row takes a quantity of `:{name}:`"
+        )));
     };
+    if quantity.per.is_some() || quantity.joule != 0 || quantity.craft != 0 {
+        return Err(ValueError::new(format!(
+            "`:{name}:` takes a time rate: no denominator, energy, or craft"
+        )));
+    }
     let coefficient = match &quantity.amount {
         Amount::Number(value) => *value,
         Amount::Resources(terms) => {
             if terms.len() != 1 {
-                return Err(ValueError::new(
-                    "a resource row takes one resource, not a bundle",
-                ));
+                return Err(ValueError::new(format!(
+                    "`:{name}:` takes one resource, not a bundle"
+                )));
             }
             let (assigned, coefficient) = terms.iter().next().expect("one term");
             if *assigned != target {
                 return Err(ValueError::new(format!(
-                    "assigning `:{}:` needs a quantity of it",
-                    resource.id.index()
+                    "assigning `:{name}:` needs a quantity of `:{name}:`"
                 )));
             }
             *coefficient
         }
     };
 
-    let rate = !matches!(process.extent, Extent::MachineSeconds);
-    match op {
+    // Scaling is dimensionless on every extent; the other operators need the
+    // extent's own unit (§2.2).
+    let extent = match op {
         AssignOp::Mul | AssignOp::Div => {
-            if quantity.second != 0 || quantity.joule != 0 || quantity.craft != 0 {
-                return Err(ValueError::new(
-                    "scaling a row needs a dimensionless number",
-                ));
-            }
-        }
-        _ if rate => {
-            if quantity.second != 0 && quantity.second != -1 {
-                return Err(ValueError::new(
-                    "a machines process takes a rate or a dimensionless amount",
-                ));
-            }
-        }
-        _ => {
             if quantity.second != 0 {
-                return Err(ValueError::new("a machine-seconds process takes an amount"));
+                return Err(ValueError::new("scaling a row needs a dimensionless number"));
             }
+            process.extent
         }
-    }
+        _ => match process.extent {
+            Extent::Machines => {
+                if quantity.second != -1 {
+                    return Err(ValueError::new(format!(
+                        "a machines process takes a rate for `:{name}:`, such as 5/s"
+                    )));
+                }
+                Extent::Machines
+            }
+            Extent::MachineSeconds => {
+                if quantity.second != 0 {
+                    return Err(ValueError::new(format!(
+                        "a machine-seconds process takes an amount for `:{name}:`"
+                    )));
+                }
+                Extent::MachineSeconds
+            }
+            // A row assigned a rate sizes the process in machines, an amount in
+            // machine-seconds (§2.2).
+            Extent::Unspecified => {
+                if quantity.second == -1 {
+                    Extent::Machines
+                } else if quantity.second == 0 {
+                    Extent::MachineSeconds
+                } else {
+                    return Err(ValueError::new(format!(
+                        "`:{name}:` takes a rate or an amount"
+                    )));
+                }
+            }
+            Extent::Unscaled => unreachable!("rejected above"),
+        },
+    };
 
     // The stored net is the row's total, so assignment replaces it in place.
     let total = process.net.get(&target).copied().unwrap_or(0.0);
@@ -1127,6 +1165,7 @@ fn assign_resource(
         net.insert(target, total);
     }
     Ok(Value::Process(Process {
+        extent,
         net,
         ..process.clone()
     }))
