@@ -230,8 +230,11 @@ mod tests {
     fn coefficient(text: &str) -> f64 {
         let registry = test_registry();
         let outputs = evaluate(text, &registry, &Settings::default(), &|| false).outputs;
-        let Output::Value(Value::Multi(multi)) = &outputs[0] else {
+        let Output::Value(value) = &outputs[0] else {
             panic!("expected facets, got {:?}", outputs[0]);
+        };
+        let Value::Multi(multi) = &**value else {
+            unreachable!()
         };
         let quantity = multi.quantity.clone().expect("a quantity");
         match quantity.amount {
@@ -260,8 +263,8 @@ mod tests {
     #[test]
     fn a_document_evaluates_line_by_line() {
         let outputs = document("x = 2\nx * 3");
-        assert_eq!(outputs[0], Output::Value(Value::number(2.0)));
-        assert_eq!(outputs[1], Output::Value(Value::number(6.0)));
+        assert_eq!(outputs[0], Output::Value(Box::new(Value::number(2.0))));
+        assert_eq!(outputs[1], Output::Value(Box::new(Value::number(6.0))));
     }
 
     #[test]
@@ -269,7 +272,7 @@ mod tests {
         let outputs = document("\n# note\n1");
         assert_eq!(outputs[0], Output::Blank);
         assert_eq!(outputs[1], Output::Blank);
-        assert_eq!(outputs[2], Output::Value(Value::number(1.0)));
+        assert_eq!(outputs[2], Output::Value(Box::new(Value::number(1.0))));
     }
 
     #[test]
@@ -492,8 +495,11 @@ mod tests {
         let _ = &registry;
         let bundle = |text: &str| {
             let outputs = evaluate(text, &registry, &Settings::default(), &|| false).outputs;
-            let Output::Value(Value::Multi(multi)) = &outputs[0] else {
+            let Output::Value(value) = &outputs[0] else {
                 panic!("expected facets, got {:?}", outputs[0]);
+            };
+            let Value::Multi(multi) = &**value else {
+                unreachable!()
             };
             multi.quantity.clone().expect("a quantity")
         };
@@ -592,8 +598,11 @@ mod tests {
             &|| false,
         )
         .outputs;
-        let Output::Value(Value::Multi(multi)) = &outputs[0] else {
+        let Output::Value(value) = &outputs[0] else {
             panic!("expected facets, got {:?}", outputs[0]);
+        };
+        let Value::Multi(multi) = &**value else {
+            unreachable!()
         };
         assert_eq!(
             multi.stack_rate,
@@ -665,8 +674,11 @@ mod tests {
             &|| false,
         )
         .outputs;
-        let Output::Value(Value::Multi(multi)) = &outputs[0] else {
+        let Output::Value(value) = &outputs[0] else {
             panic!("expected facets, got {:?}", outputs[0]);
+        };
+        let Value::Multi(multi) = &**value else {
+            unreachable!()
         };
         let config = multi.config.clone().expect("a config");
         assert_eq!(config.modules.len(), 1);
@@ -911,8 +923,11 @@ mod tests {
             &|| false,
         )
         .outputs;
-        let Output::Value(Value::Multi(multi)) = &outputs[0] else {
+        let Output::Value(value) = &outputs[0] else {
             panic!("expected facets, got {:?}", outputs[0]);
+        };
+        let Value::Multi(multi) = &**value else {
+            unreachable!()
         };
         let quantity = multi.quantity.clone().expect("a quantity");
         let super::value::Amount::Resources(terms) = &quantity.amount else {
@@ -993,8 +1008,11 @@ mod tests {
         let settings = Settings::default();
         let document = "r = (:foundry: making (:normal: :iron-plate:)) + (:foundry: making (:normal: :copper-plate:))\n100 :iron-plate:/s + 50 :copper-plate:/s from r";
         let outputs = evaluate(document, &registry, &settings, &|| false).outputs;
-        let Output::Value(Value::Process(process)) = &outputs[1] else {
+        let Output::Value(value) = &outputs[1] else {
             panic!("expected a process, got {:?}", outputs[1]);
+        };
+        let Value::Process(process) = &**value else {
+            unreachable!()
         };
         assert_eq!(process.rows.len(), 2, "one row per resource");
         // Each recipe is 3.2 s at speed 4 with the foundry's +50%, so 1.875/s
@@ -1009,8 +1027,11 @@ mod tests {
         let settings = Settings::default();
         let document = "0 :iron-plate:/s from :foundry:";
         let outputs = evaluate(document, &registry, &settings, &|| false).outputs;
-        let Output::Value(Value::Process(process)) = &outputs[0] else {
+        let Output::Value(value) = &outputs[0] else {
             panic!("expected a process, got {:?}", outputs[0]);
+        };
+        let Value::Process(process) = &**value else {
+            unreachable!()
         };
         assert!(process.rows.is_empty());
         assert_eq!(process.extent, super::value::Extent::Unspecified);
@@ -1037,10 +1058,13 @@ mod tests {
             &|| false,
         )
         .outputs;
-        match &making[0] {
-            Output::Value(Value::Process(process)) => assert_eq!(process.rows.len(), 1),
-            other => panic!("expected a process, got {other:?}"),
-        }
+        let Output::Value(value) = &making[0] else {
+            panic!("expected a process, got {:?}", making[0]);
+        };
+        let Value::Process(process) = &**value else {
+            unreachable!()
+        };
+        assert_eq!(process.rows.len(), 1);
 
         // There is no rare iron plate to be had from it.
         let outputs = evaluate(
@@ -1077,8 +1101,11 @@ mod tests {
         let settings = Settings::default();
         let machines = |text: &str| {
             let outputs = evaluate(text, &registry, &settings, &|| false).outputs;
-            let Output::Value(Value::Process(process)) = &outputs[0] else {
+            let Output::Value(value) = &outputs[0] else {
                 panic!("expected a process, got {:?}", outputs[0]);
+            };
+            let Value::Process(process) = &**value else {
+                unreachable!()
             };
             (process.rows.len(), process.machines())
         };
@@ -1122,8 +1149,11 @@ mod tests {
             &|| false,
         )
         .outputs;
-        let Output::Value(Value::Process(process)) = &one[0] else {
+        let Output::Value(value) = &one[0] else {
             panic!("expected a process, got {:?}", one[0]);
+        };
+        let Value::Process(process) = &**value else {
+            unreachable!()
         };
         // 1 craft per 2 s at speed 1 is 0.5 carbon/s, so 200 machines.
         assert!(
@@ -1140,12 +1170,13 @@ mod tests {
         // The recycler only makes hidden recipes, so inference has to see them.
         let document = ":iron-plate: into :recycler:";
         let outputs = evaluate(document, &registry, &settings, &|| false).outputs;
-        match &outputs[0] {
-            Output::Value(Value::Process(process)) => {
-                assert_eq!(process.rows.len(), 1);
-            }
-            other => panic!("expected a process, got {other:?}"),
-        }
+        let Output::Value(value) = &outputs[0] else {
+            panic!("expected a process, got {:?}", outputs[0]);
+        };
+        let Value::Process(process) = &**value else {
+            unreachable!()
+        };
+        assert_eq!(process.rows.len(), 1);
     }
 
     #[test]
@@ -1155,8 +1186,11 @@ mod tests {
         let document =
             "p = 1 :foundry: :quality-module-2: making (:normal: :iron-plate:)\np.out.:iron-plate:";
         let outputs = evaluate(document, &registry, &settings, &|| false).outputs;
-        let Output::Value(Value::Multi(multi)) = &outputs[1] else {
+        let Output::Value(value) = &outputs[1] else {
             panic!("expected facets, got {:?}", outputs[1]);
+        };
+        let Value::Multi(multi) = &**value else {
+            unreachable!()
         };
         let quantity = multi.quantity.clone().expect("a quantity");
         let super::value::Amount::Resources(terms) = &quantity.amount else {
@@ -1523,8 +1557,11 @@ mod tests {
         let settings = Settings::default();
         let panel = |text: &str| {
             let outputs = evaluate(text, &registry, &settings, &|| false).outputs;
-            let Output::Value(Value::Process(process)) = &outputs[0] else {
+            let Output::Value(value) = &outputs[0] else {
                 panic!("expected a process, got {:?}", outputs[0]);
+            };
+            let Value::Process(process) = &**value else {
+                unreachable!()
             };
             format_process_panel(process, &settings, &registry)
         };
@@ -1636,8 +1673,11 @@ mod tests {
             &|| false,
         )
         .outputs;
-        let Output::Value(Value::Multi(multi)) = &outputs[0] else {
+        let Output::Value(value) = &outputs[0] else {
             panic!("expected facets, got {:?}", outputs[0]);
+        };
+        let Value::Multi(multi) = &**value else {
+            unreachable!()
         };
         assert!(multi.recipe.is_some());
     }
@@ -1662,20 +1702,23 @@ mod tests {
         let outputs = evaluate("k = 1\nk", &registry, &settings, &|| false).outputs;
         assert_eq!(
             outputs[1],
-            crate::new_eval::Output::Value(Value::number(1.0))
+            crate::new_eval::Output::Value(Box::new(Value::number(1.0)))
         );
         let outputs = evaluate("k = 2\n1k", &registry, &settings, &|| false).outputs;
         assert_eq!(
             outputs[1],
-            crate::new_eval::Output::Value(Value::number(1000.0))
+            crate::new_eval::Output::Value(Box::new(Value::number(1000.0)))
         );
     }
 
     #[test]
     fn negation_drops_the_reference_facets() {
         let outputs = facets_of("-:iron-plate:");
-        let crate::new_eval::Output::Value(Value::Multi(multi)) = &outputs[0] else {
+        let crate::new_eval::Output::Value(value) = &outputs[0] else {
             panic!("expected facets, got {:?}", outputs[0]);
+        };
+        let Value::Multi(multi) = &**value else {
+            unreachable!()
         };
         assert!(multi.quantity.is_some());
         assert!(multi.resource.is_none(), "resource: {:?}", multi.resource);
@@ -1684,8 +1727,11 @@ mod tests {
     #[test]
     fn abs_drops_the_config() {
         let outputs = facets_of("(2 :speed-module-2:).abs");
-        let crate::new_eval::Output::Value(Value::Multi(multi)) = &outputs[0] else {
+        let crate::new_eval::Output::Value(value) = &outputs[0] else {
             panic!("expected facets, got {:?}", outputs[0]);
+        };
+        let Value::Multi(multi) = &**value else {
+            unreachable!()
         };
         assert!(multi.config.is_none(), "config: {:?}", multi.config);
     }
@@ -1728,8 +1774,11 @@ mod tests {
     #[test]
     fn a_zero_factor_does_not_scale_a_config() {
         let outputs = facets_of("0 (2 :speed-module-2:)");
-        let crate::new_eval::Output::Value(Value::Multi(multi)) = &outputs[0] else {
+        let crate::new_eval::Output::Value(value) = &outputs[0] else {
             panic!("expected facets, got {:?}", outputs[0]);
+        };
+        let Value::Multi(multi) = &**value else {
+            unreachable!()
         };
         assert!(multi.config.is_none(), "config: {:?}", multi.config);
     }
@@ -1737,8 +1786,10 @@ mod tests {
     #[test]
     fn the_panel_uses_the_configured_time_unit_for_crafts() {
         let registry = test_registry();
-        let mut settings = Settings::default();
-        settings.time_unit = crate::TimeUnit::Minute;
+        let settings = Settings {
+            time_unit: crate::TimeUnit::Minute,
+            ..Settings::default()
+        };
         let outputs = evaluate(
             "p = 1 :foundry: making (:normal: :iron-plate:)\np",
             &registry,
@@ -1783,8 +1834,10 @@ mod tests {
         let plate = registry
             .entry_by_index(registry.entry_id("iron-plate").unwrap())
             .glyph;
-        let mut settings = Settings::default();
-        settings.item_rate_belt_display = Some(crate::belt::BeltTier::Yellow);
+        let mut settings = Settings {
+            item_rate_belt_display: Some(crate::belt::BeltTier::Yellow),
+            ..Settings::default()
+        };
         let render = |settings: &Settings| {
             let outputs = evaluate("15 :iron-plate:/s", &registry, settings, &|| false).outputs;
             match &outputs[0] {
@@ -1823,10 +1876,13 @@ mod tests {
         outputs: &[crate::new_eval::Output],
         index: usize,
     ) -> crate::new_eval::value::Extent {
-        match &outputs[index] {
-            crate::new_eval::Output::Value(Value::Process(process)) => process.extent,
-            other => panic!("expected a process, got {other:?}"),
-        }
+        let crate::new_eval::Output::Value(value) = &outputs[index] else {
+            panic!("expected a process, got {:?}", outputs[index]);
+        };
+        let Value::Process(process) = &**value else {
+            unreachable!()
+        };
+        process.extent
     }
 
     #[test]

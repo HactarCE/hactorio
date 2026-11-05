@@ -1703,7 +1703,7 @@ mod tests {
 
     fn value(document: &str) -> Value {
         match run(document).pop().expect("an output") {
-            Output::Value(value) => value,
+            Output::Value(value) => *value,
             other => panic!("expected a value, got {other:?}"),
         }
     }
@@ -1745,8 +1745,8 @@ mod tests {
     #[test]
     fn definitions_report_their_value() {
         let outputs = run("x = 2\nx * 3");
-        assert_eq!(outputs[0], Output::Value(Value::number(2.0)));
-        assert_eq!(outputs[1], Output::Value(Value::number(6.0)));
+        assert_eq!(outputs[0], Output::Value(Box::new(Value::number(2.0))));
+        assert_eq!(outputs[1], Output::Value(Box::new(Value::number(6.0))));
     }
 
     #[test]
@@ -1754,27 +1754,27 @@ mod tests {
         let outputs = run("x = :nope:\ny = x + 1\nz = 1");
         assert!(matches!(outputs[0], Output::Error { .. }));
         assert!(matches!(outputs[1], Output::Error { .. }));
-        assert_eq!(outputs[2], Output::Value(Value::number(1.0)));
+        assert_eq!(outputs[2], Output::Value(Box::new(Value::number(1.0))));
     }
 
     #[test]
     fn a_redefinition_clears_the_poison() {
         let outputs = run("x = :nope:\nx = 1\nx");
         assert!(matches!(outputs[0], Output::Error { .. }));
-        assert_eq!(outputs[2], Output::Value(Value::number(1.0)));
+        assert_eq!(outputs[2], Output::Value(Box::new(Value::number(1.0))));
     }
 
     #[test]
     fn errors_do_not_stop_later_statements() {
         let outputs = run("1 / 0 * 0\n2");
         assert!(matches!(outputs[0], Output::Value(_)));
-        assert_eq!(outputs[1], Output::Value(Value::number(2.0)));
+        assert_eq!(outputs[1], Output::Value(Box::new(Value::number(2.0))));
     }
 
     #[test]
     fn loops_mutate_the_global_environment() {
         let outputs = run("x = 0\nloop 3 {\n  x += 2\n}\nx");
-        assert_eq!(outputs[4], Output::Value(Value::number(6.0)));
+        assert_eq!(outputs[4], Output::Value(Box::new(Value::number(6.0))));
     }
 
     #[test]
@@ -1783,7 +1783,7 @@ mod tests {
         // The iteration completes, so `x` is 1, and the loop reports the abort
         // on its own line.
         assert!(matches!(outputs[2], Output::Error { .. }));
-        assert_eq!(outputs[5], Output::Value(Value::number(1.0)));
+        assert_eq!(outputs[5], Output::Value(Box::new(Value::number(1.0))));
     }
 
     #[test]
