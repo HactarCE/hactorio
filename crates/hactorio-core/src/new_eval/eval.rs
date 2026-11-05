@@ -19,7 +19,7 @@ use crate::Settings;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Output {
     Blank,
-    Value(Value),
+    Value(Box<Value>),
     /// An error with the span it should be underlined at.
     Error {
         message: String,
@@ -153,7 +153,7 @@ impl Runner<'_> {
                 Ok(Line::Blank | Line::Comment) => self.outputs[line] = Output::Blank,
                 Ok(Line::Expression(expr)) => {
                     self.outputs[line] = match self.eval(expr) {
-                        Ok(value) => Output::Value(value),
+                        Ok(value) => Output::Value(Box::new(value)),
                         Err(error) => Output::Error {
                             message: error.to_string(),
                             span: error.span().unwrap_or_else(|| self.line_span(line)),
@@ -162,7 +162,7 @@ impl Runner<'_> {
                 }
                 Ok(Line::Definition { place, op, value }) => {
                     self.outputs[line] = match self.define(place, *op, value, line) {
-                        Ok(value) => Output::Value(value),
+                        Ok(value) => Output::Value(Box::new(value)),
                         Err(error) => Output::Error {
                             message: error.to_string(),
                             span: error.span().unwrap_or_else(|| self.line_span(line)),
@@ -325,7 +325,7 @@ impl Runner<'_> {
             ExprKind::StackedBelt(inner) => {
                 let value = self.eval(inner)?;
                 match value {
-                    Value::Multi(multi) => Ok(Value::Multi(
+                    Value::Multi(multi) => Ok(Value::multi(
                         multi.stacked(belt_stacking_level(self.settings, self.registry))?,
                     )),
                     Value::Process(_) => Err(ValueError::new(
@@ -476,7 +476,7 @@ impl Runner<'_> {
                 entry.id
             )));
         }
-        Ok(Value::Multi(multi))
+        Ok(Value::multi(multi))
     }
 
     fn stack_size(&self, value: &Value) -> Result<Value, ValueError> {
@@ -538,7 +538,7 @@ impl Runner<'_> {
                 entry.id
             )));
         };
-        Ok(Value::Multi(MultiValue {
+        Ok(Value::multi(MultiValue {
             recipe: Some(RecipeRef {
                 id,
                 quality: resource.quality,
@@ -565,12 +565,12 @@ impl Runner<'_> {
             return Err(ValueError::new("`.` needs a value, not a quality"));
         };
         match selector {
-            Selector::Resource(resource) => Ok(Value::Multi(multi.select(&resource)?)),
+            Selector::Resource(resource) => Ok(Value::multi(multi.select(&resource)?)),
             Selector::Signal(super::lex::Signal::Item) => {
-                Ok(Value::Multi(multi.select_medium(true)?))
+                Ok(Value::multi(multi.select_medium(true)?))
             }
             Selector::Signal(super::lex::Signal::Fluid) => {
-                Ok(Value::Multi(multi.select_medium(false)?))
+                Ok(Value::multi(multi.select_medium(false)?))
             }
             Selector::Signal(super::lex::Signal::StackSize) => {
                 self.stack_size(&Value::Multi(multi.clone()))
@@ -583,7 +583,7 @@ impl Runner<'_> {
                 ))),
             },
             Selector::Property(Property::Rate) => match &multi.stack_rate {
-                Some(stacks) => Ok(Value::Multi(MultiValue {
+                Some(stacks) => Ok(Value::multi(MultiValue {
                     stack_rate: Some(stacks.clone()),
                     ..MultiValue::default()
                 })),
@@ -593,7 +593,7 @@ impl Runner<'_> {
                 ))),
             },
             Selector::Property(Property::Capacity) => match &multi.stack_capacity {
-                Some(stacks) => Ok(Value::Multi(MultiValue {
+                Some(stacks) => Ok(Value::multi(MultiValue {
                     stack_capacity: Some(stacks.clone()),
                     ..MultiValue::default()
                 })),
@@ -621,7 +621,7 @@ impl Runner<'_> {
                     )));
                 }
                 let watts = self
-                    .item_amount(&multi, |item| item.power_w)
+                    .item_amount(multi, |item| item.power_w)
                     .ok_or_else(|| {
                         ValueError::new(format!(
                             "`.power` needs a machine facet or an item with a `power_w` ({})",
@@ -638,7 +638,7 @@ impl Runner<'_> {
             }
             Selector::Property(Property::Energy) => {
                 let joules = self
-                    .item_amount(&multi, |item| item.stored_energy_j)
+                    .item_amount(multi, |item| item.stored_energy_j)
                     .ok_or_else(|| {
                         ValueError::new(format!(
                             "`.energy` needs a machine-seconds process or a stored energy ({})",
@@ -654,7 +654,7 @@ impl Runner<'_> {
                 )))
             }
             Selector::Signal(super::lex::Signal::Electric) => {
-                if let Some(watts) = self.item_amount(&multi, |item| item.power_w) {
+                if let Some(watts) = self.item_amount(multi, |item| item.power_w) {
                     return Ok(Value::quantity(Quantity::new(
                         Amount::Number(watts),
                         None,
@@ -664,7 +664,7 @@ impl Runner<'_> {
                     )));
                 }
                 let joules = self
-                    .item_amount(&multi, |item| item.stored_energy_j)
+                    .item_amount(multi, |item| item.stored_energy_j)
                     .ok_or_else(|| {
                         ValueError::new(format!(
                             "`.:electric:` needs a machine, a `power_w`, or a stored energy ({})",
@@ -717,7 +717,7 @@ impl Runner<'_> {
                     .ok_or_else(|| ValueError::new(format!("`:{}:` is not a machine", entry.id)))?;
                 Ok(Value::number(f64::from(slots)))
             }
-            Selector::Property(Property::Abs) => Ok(Value::Multi(multi.absolute()?)),
+            Selector::Property(Property::Abs) => Ok(Value::multi(multi.absolute()?)),
             other => Err(ValueError::new(format!(
                 "`{}` needs a facet this value does not have ({})",
                 describe_selector(other),
@@ -1032,7 +1032,7 @@ fn binary_values(
             // Only a quality is comparable (§5.3); a number or a quantity is
             // not a filter, it is a mistake.
             let quality = quality_of(right)?;
-            Ok(Value::Multi(multi.filter_quality(comparison, quality)?))
+            Ok(Value::multi(multi.filter_quality(comparison, quality)?))
         }
         BinaryOp::Make => make_value(left, right, registry, settings),
         BinaryOp::In | BinaryOp::Into | BinaryOp::From => {

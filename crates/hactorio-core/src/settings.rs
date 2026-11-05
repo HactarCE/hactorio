@@ -66,16 +66,6 @@ pub enum IdlePower {
     RoundedUp,
 }
 
-impl IdlePower {
-    pub fn name(self) -> &'static str {
-        match self {
-            IdlePower::Ignored => "Ignored",
-            IdlePower::Fractional => "Fractional",
-            IdlePower::RoundedUp => "Rounded up",
-        }
-    }
-}
-
 /// Global display and evaluation settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

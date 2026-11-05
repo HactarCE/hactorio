@@ -242,6 +242,7 @@ fn settings_bar<T: Copy>(
                             .show(ui, |ui| {
                                 ui.set_min_height(glyph_button_height(ui));
                                 ui.with_layout(egui::Layout::left_to_right(Align::Center), |ui| {
+                                    #[expect(clippy::needless_range_loop)]
                                     for index in start..end {
                                         if index > start {
                                             ui.add(

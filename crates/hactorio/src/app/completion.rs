@@ -618,7 +618,7 @@ fn value_before_dot(
     }
     let evaluation = evaluate(&lines.join("\n"), registry, settings, &|| false);
     match evaluation.outputs.last()? {
-        Output::Value(value) => Some(value.clone()),
+        Output::Value(value) => Some((**value).clone()),
         _ => None,
     }
 }

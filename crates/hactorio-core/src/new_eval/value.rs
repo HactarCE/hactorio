@@ -673,8 +673,6 @@ impl Comparison {
         }
     }
 
-    /// The same comparison on plain numbers.
-
     pub fn symbol(self) -> &'static str {
         match self {
             Comparison::Less => "<",
@@ -1690,18 +1688,18 @@ impl MultiValue {
 /// A value: facets, or a quality operand (§3.4).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
-    Multi(MultiValue),
+    Multi(Box<MultiValue>),
     Process(Process),
     Quality(Quality),
 }
 
 impl Value {
     pub fn multi(value: MultiValue) -> Self {
-        Value::Multi(value)
+        Value::Multi(Box::new(value))
     }
 
     pub fn quantity(quantity: Quantity) -> Self {
-        Value::Multi(MultiValue::quantity(quantity))
+        Value::multi(MultiValue::quantity(quantity))
     }
 
     pub fn number(value: f64) -> Self {
@@ -1742,14 +1740,14 @@ impl Value {
                 .map(Value::Process)
                 .ok_or_else(|| ValueError::new("processes add only when their extents agree"));
         }
-        Ok(Value::Multi(self.as_multi("+")?.add(other.as_multi("+")?)?))
+        Ok(Value::multi(self.as_multi("+")?.add(other.as_multi("+")?)?))
     }
 
     pub fn sub(&self, other: &Self) -> Result<Self> {
         if let Some(right) = other.as_process() {
             return self.add(&Value::Process(right.negate()));
         }
-        Ok(Value::Multi(self.as_multi("-")?.sub(other.as_multi("-")?)?))
+        Ok(Value::multi(self.as_multi("-")?.sub(other.as_multi("-")?)?))
     }
 
     pub fn mul(&self, other: &Self) -> Result<Self> {
@@ -1768,7 +1766,7 @@ impl Value {
         if let (Some(seconds), Some(process)) = (self.pure_time(), other.as_process()) {
             return process.times_seconds(seconds).map(Value::Process);
         }
-        Ok(Value::Multi(self.as_multi("*")?.mul(other.as_multi("*")?)?))
+        Ok(Value::multi(self.as_multi("*")?.mul(other.as_multi("*")?)?))
     }
 
     pub fn div(&self, other: &Self) -> Result<Self> {
@@ -1778,7 +1776,7 @@ impl Value {
         if let (Some(process), Some(seconds)) = (self.as_process(), other.pure_time()) {
             return process.divided_by_seconds(seconds).map(Value::Process);
         }
-        Ok(Value::Multi(self.as_multi("/")?.div(other.as_multi("/")?)?))
+        Ok(Value::multi(self.as_multi("/")?.div(other.as_multi("/")?)?))
     }
 
     fn scale_value(&self, target: &Self, factor: f64) -> Result<Self> {
@@ -1790,7 +1788,7 @@ impl Value {
                     )
                 })
             }
-            _ => Ok(Value::Multi(target.as_multi("*")?.scale(factor)?)),
+            _ => Ok(Value::multi(target.as_multi("*")?.scale(factor)?)),
         }
     }
 
@@ -1803,13 +1801,13 @@ impl Value {
     }
 
     pub fn pow(&self, other: &Self) -> Result<Self> {
-        Ok(Value::Multi(self.as_multi("^")?.pow(other.as_multi("^")?)?))
+        Ok(Value::multi(self.as_multi("^")?.pow(other.as_multi("^")?)?))
     }
 
     pub fn negate(&self) -> Result<Self> {
         match self {
             Value::Process(process) => Ok(Value::Process(process.negate())),
-            _ => Ok(Value::Multi(self.as_multi("-")?.negate()?)),
+            _ => Ok(Value::multi(self.as_multi("-")?.negate()?)),
         }
     }
 
@@ -1817,7 +1815,7 @@ impl Value {
         if self.as_process().is_some() {
             return Err(ValueError::new("`.abs` refuses a process"));
         }
-        Ok(Value::Multi(self.as_multi(".abs")?.absolute()?))
+        Ok(Value::multi(self.as_multi(".abs")?.absolute()?))
     }
 
     /// Juxtaposition (§5.2). The chain has already been folded to the right by
@@ -1836,7 +1834,7 @@ impl Value {
             )));
         }
         if let Value::Quality(quality) = self {
-            return Ok(Value::Multi(
+            return Ok(Value::multi(
                 other.as_multi("juxtaposition")?.qualify(*quality)?,
             ));
         }
@@ -1851,7 +1849,7 @@ impl Value {
             other.as_multi("juxtaposition")?,
         );
         if let Some(applied) = left.apply_stacks(right, stack_size)? {
-            return Ok(Value::Multi(applied));
+            return Ok(Value::multi(applied));
         }
         // Configs combine per facet: modules fill the beacon prototype the value
         // names, or two module lists merge; a machine absorbs a config (§5.2).
@@ -1887,7 +1885,7 @@ impl Value {
                 ..MultiValue::default()
             };
             validate(&produced)?;
-            return Ok(Value::Multi(produced));
+            return Ok(Value::multi(produced));
         }
         let mut message = format!(
             "juxtaposition matched no rule (left: {}, right: {})",
