@@ -3,9 +3,6 @@
 Status: agreed in design dialog. Section numbers are stable from this point
 on.
 
-This document specifies the language from scratch. `EXPRESSION_LANGUAGE.md`
-describes the implementation being replaced and is not normative.
-
 ```text
 0  Target questions
 1  Design principles
@@ -106,8 +103,8 @@ ASSIGNOP   := '=' | '+=' | '-=' | '*=' | '/='
 - `+=`, `-=`, `*=`, `/=` read the current binding, apply the corresponding
   binary operator, and store the result.
 - The selector must be one the specification marks assignable: a process's
-  resource row. Other selectors, chained selectors, and non-variable places are
-  parse errors.
+  resource row. Other selectors are evaluation errors, which is why they can
+  name a value only the evaluation knows.
 - Only a process's resource rows are assignable, written as `p.:iron-plate: = …`
   or with a compound operator. An unspecified quality means normal. The value
   is a rate for a machines process and an amount for a machine-seconds one, and
@@ -115,7 +112,6 @@ ASSIGNOP   := '=' | '+=' | '-=' | '*=' | '/='
   in the stored net: `=` replaces what the recipes produce minus what they
   consume for that resource, and the process stores that total rather than
   recomputing it from the rows.
-- A prototype id is not a variable name.
 
 A definition is a **statement**, not an operator. `=` has no precedence and
 cannot appear inside an expression, so expressions are never effectful and
@@ -137,9 +133,9 @@ including those made inside loop bodies.
 
 No error stops evaluation. Every statement is evaluated; an error is attached
 to the statement that produced it, and evaluation continues with the next
-statement. This holds inside loop bodies: a failing statement does not prevent
-the remaining statements of that iteration from running, nor the following
-iterations.
+statement. Inside a loop body a failing statement does not prevent the remaining
+statements of that iteration from running, but the loop stops after that
+iteration (§2.6).
 
 | Situation | Result |
 |---|---|
@@ -163,7 +159,11 @@ loop N { statement* }
   `0` runs the body zero times.
 - Each iteration runs the body's statements in order against the global
   environment, so mutations accumulate across iterations.
-- A failing statement inside the body affects only that statement (§2.5).
+- A failing statement inside the body affects only that statement, and the
+  iteration runs to its end (§2.5). The loop then aborts and reports, on the
+  line with `loop`, `loop aborted after N iterations due to error on line L`,
+  where `N` counts the iterations that ran and `L` is the first failing line
+  inside the body, both one-based and `iteration` singular at `N = 1`.
 - The loop produces no value.
 
 Loops exist because iterated production has no closed form *in the language*.
@@ -274,20 +274,14 @@ silently ignoring it would hide the mistake.
   `q (:foundry: 4 :speed-module-3:)` promotes the foundry and keeps its modules,
   which is the question "what if my machines were epic?".
 - A `config` facet may only be re-keyed when it names exactly one identity:
-  - one module entry whose count is exactly one, and no beacon groups, has that
+  - one module entry whose count is exactly one, with no beacon groups, has that
     module's quality set;
-  - one beacon group with beacon count exactly one has that beacon's quality
-    set. The group's modules are untouched;
+  - one beacon group has that beacon's quality set, whatever the beacon count
+    and whichever modules the group already holds. The modules are untouched;
   - anything else is an error, because there is no single thing to promote.
-- Both counts must be one, and for the same reason. `q 2 :beacon:` reads badly;
-  the natural spelling is `2 q :beacon:`, which promotes a single beacon and
-  then scales it. Allowing the counted form would make the operator's meaning
-  depend on which side of the quality the count was written.
-- The count restriction is what keeps the two spellings from disagreeing. The
-  qualified-token form `:rare: :speed-module-3: :speed-module-3:` promotes only
-  the first module, since only the first pair is an atom, so a value form that
-  promoted both would silently mean something else. Erroring is the only safe
-  answer.
+- A counted beacon is therefore promoted whole: `q 2 :beacon:` raises both
+  beacons. The qualified-token spelling still promotes only its own prototype,
+  because `:rare: :beacon: :beacon:` is one qualified token and one plain one.
 - Fluid terms and the non-resource units (`second`, `joule`, `craft`) are
   unaffected; fluids have no quality.
 - A value with no item terms is unchanged. This is a no-op, not an error.
@@ -328,9 +322,6 @@ asserted invariant cannot be checked by the compiler.
 A machine that has been given a recipe is **not** a fourth kind: it is a
 `Process` whose extent is `Unscaled`. `MachineMakingRecipe` is a process map
 key, not a value type.
-
-The MVP implements the first and third variants. `Process` arrives with
-`making`, because nothing can construct one before then.
 
 ### 3.5 Identity and equality
 
@@ -509,8 +500,9 @@ recipe cannot be attached before the machine is configured.
 so `12`, `12.5`, and `.5` are numbers. A trailing dot is an error (`3.`). No
 exponent notation and no sign inside the literal: `-3` is unary minus applied
 to `3`. An optional scale suffix may follow the digits immediately: `k`, `M`,
-`G`, `T` for 1e3, 1e6, 1e9, 1e12. Case matters, so `1k` is 1000 and `1K` is a
-number followed by the identifier `K`.
+`G`, `T` for 1e3, 1e6, 1e9, 1e12. Case matters, so `1k` is 1000 while `1K` is
+an error: a word that is neither a scale suffix nor a unit cannot follow a
+number.
 
 **Unit keywords.** Each is a token carrying its magnitude:
 
@@ -549,7 +541,9 @@ and `in` is a keyword.
 before ordinary prototypes, and may be followed by a prototype to form a
 qualified token (§4.5).
 
-**Identifiers.** `[A-Za-z_][A-Za-z0-9_]*`. Hyphens are not allowed. Reserved
+**Identifiers.** `[A-Za-z_][A-Za-z0-9_]*`. Hyphens are not allowed. The scale
+suffixes `k`, `M`, `G`, and `T` are not reserved: they only occur after a
+number or before a unit, so `k` is an ordinary variable name. Reserved
 words are the unit keywords above plus `in`, `into`, `from`, `making`, and
 `loop`. An identifier that names an existing prototype id is not a valid
 definition target.
@@ -762,7 +756,10 @@ and no units.
 - A base with unit exponents requires an integer exponent, which multiplies
   every exponent: `(2 s) ^ 2` is `4 s²`.
 - A `per` is allowed only with exponent `1`.
-- A bundle base drops the quantity facet except with exponent `1`.
+- A bundle base is representable only at exponent `1` and `0`; exponent `-1`
+  is allowed when the numerator has at most one resource term, since the
+  reciprocal moves that term to the denominator. Anything else drops the
+  quantity facet.
 
 Every failure above drops the `quantity` facet; the operator errors only when
 no facet survives.
@@ -789,7 +786,8 @@ operator: it filters the terms whose quality is the given one.
 - A dimensionless amount has no terms to filter, so the result is `0`.
 - `per` is filtered the same way; if it does not satisfy the comparison the
   result is `0`.
-- Exponents and other facets are unchanged.
+- Exponents are unchanged, and the filter returns only the `quantity` facet:
+  every other facet drops (§5.1).
 
 ```text
 p.out.:iron-plate: < :rare:     # the rows below rare quality
@@ -863,8 +861,7 @@ needing, since it drops fluids.
 - Inference from a machine considers the recipes the machine can make whose
   relevant coefficient for the selected resource is positive, after category
   and productivity filtering. One candidate is used; zero candidates is an
-  error; several candidates are an error that asks for `making`, unless exactly
-  one of them has the selected resource's id.
+  error; several candidates are an error that asks for `making`.
 - Hidden items and hidden recipes are excluded from autocomplete; they stay in
   the registry, so naming them (`:recycling:`) or inferring them from a machine
   still works.
@@ -889,9 +886,10 @@ needing, since it drops fluids.
 - `+` merges: module counts add per (module, quality), and beacon-group counts
   add per (beacon, beacon quality, module list).
 - `-` always drops the config facet: counts are not signed.
-- `*` and `/` by a number scale the module and beacon counts. A non-integer or
-  negative factor drops the config facet; the operator errors only when no facet
+- `*` by a positive integer scales the module and beacon counts. Any other
+  factor drops the config facet; the operator errors only when no facet
   survives. This is how `2 :beacon: 4 :speed-module-3:` becomes two beacons.
+- `/` drops the config facet: a configuration has no division.
 
 ## 6. Facets in depth
 
@@ -967,7 +965,7 @@ A machine is displayed before its quantity, because a machine token carries
 both and the quantity is the redundant one: rendering the quantity would print
 `1:foundry:` for `:foundry:`, which parses back with a count attached.
 
-Machine modifiers follow the old implementation, which matches the game:
+Machine modifiers:
 
 - Module effects are summed and filtered by the machine's allowed effects.
 - Beacon effects are summed per beacon, multiplied by the beacon count and the
@@ -994,8 +992,12 @@ Machine modifiers follow the old implementation, which matches the game:
   productivity when a recipe is in play, capped at `+300%`. A recipe that
   disallows productivity contributes none.
 - The consumption multiplier is `1 + consumption effects`, clamped to at least
-  `0.2`. Active power is `energy_usage × multiplier`; idle power is included
-  and rounded up to whole machines for a machine count.
+  `0.2`. Active power is `energy_usage × multiplier`.
+
+> **TODO — idle draw is not specified.** A machine also draws its `idle` energy
+> when it is not crafting, and a machine count is rounded up to whole machines
+> for the power total. Neither is modelled yet; `.power` and `.:electric:`
+> currently report active draw only. Do not treat the current numbers as final.
 - Pollution per minute is base pollution × consumption multiplier ×
   `(1 + pollution effects)`.
 
@@ -1121,8 +1123,8 @@ never a silent zero.
 
 Notes:
 
-- `.productivity` returns the multiplier `1 + bonus`. The old implementation
-  returned the bonus; the multiplier is what a caller multiplies output by.
+- `.productivity` returns the multiplier `1 + bonus`, which is what a caller
+  multiplies output by.
 - `.:electric:` exists because it is short and because it works whatever the
   extent: it selects power or energy, whichever the operand has. `.power` and
   `.energy` remain the explicit forms.
@@ -1148,14 +1150,12 @@ named per the UI vocabulary in `AGENTS.md`:
 | multiline result panel | the same value expanded, one facet per line |
 | token tip | the plaintext name and details of the prototype under the pointer |
 
-The old implementation shows only the first present facet, in the order item,
-machine, process, config, rate, capacity, recipe, and hides the rest until it
-is read with a selector. Facets are the point of the language, so the panel
-shows all of them.
-
 ### 7.1 Canonical facet order
 
-`machine`, `quantity`, `config`, `stack_rate`, `stack_capacity`, `recipe`.
+The panel lists `machine`, `quantity`, `config`, `stack_rate`, `stack_capacity`,
+`resource`, `recipe`. The single-line result takes the first facet present in
+the order `machine`, `quantity`, `stack_rate`, `stack_capacity`, `config`,
+`resource`, `recipe`.
 
 Machine first because a machine token carries both facets and its quantity is
 the redundant one: rendering the quantity would print `1:foundry:` for
@@ -1164,11 +1164,8 @@ the redundant one: rendering the quantity would print `1:foundry:` for
 A `process` is exclusive (§3.4), so it replaces the whole result rather than
 joining the list.
 
-A `resource` facet never renders on its own: it is shown by the quantity terms
-that name it. A `recipe` renders only when it is a value's sole facet, which
-happens for a recipe token that is neither an item nor a fluid. That is the
-only value that renders a reference facet, and it is why reference rendering is
-rare.
+A `recipe` renders only when it is a value's sole facet, which happens for a
+recipe token that is neither an item nor a fluid.
 
 Because a reference facet distinguishes an unspecified quality from a normal
 one, a reference facet renders `:common:` explicitly when its quality is
@@ -1176,13 +1173,13 @@ one, a reference facet renders `:common:` explicitly when its quality is
 
 | Surface | Content |
 |---|---|
-| single-line | the first facet present, then `…` if any other facet is present |
+| single-line | the first facet present |
 | panel | every facet present, in canonical order, one labelled line each |
 
 The single-line result is deliberately lossy: the results column is a fixed
 column, and a belt's full rendering
-`:transport-belt: · 15:stack-size:/s · 8:stack-size:` does not fit. The `…`
-makes the loss visible rather than hiding it.
+`:transport-belt: · 15:stack-size:/s · 8:stack-size:` does not fit. The panel
+shows the facets the single line leaves out.
 
 ### 7.2 Numbers
 
@@ -1346,17 +1343,20 @@ time unit for a `Machines` process, machine-seconds and craft totals for a
 | `max_decimals` | rounding precision (§7.2) |
 | `metric_prefixes` | `k`/`M`/`G`/`T` on item and fluid amounts and rates (§7.3) |
 | `time_unit` | the unit for time quantities and rates (§7.4) |
-| `item_rate_belt` | when set, item rates are rendered as belt counts of this tier |
-| `stacked_belts` | whether those belt counts use the stacked form |
-| `belt_stacking` | the stacking level; also read by the `:stacked-belt:` prefix during evaluation |
+| `item_rate_belt_display` | the belt tier item rates are rendered as, or `None` for items per second |
+| `stacked_belts_display` | whether those belt counts use the stacked form |
+| `belt_stacking` | the belt-stacking research level, one through four; also read by the `:stacked-belt:` prefix during evaluation |
 
-`item_rate_belt` and `stacked_belts` apply to item rates in the `quantity`
-facet and in process input, output, and net rows. The `stack_rate` and
+`item_rate_belt_display` and `stacked_belts_display` apply to item rates in the
+`quantity` facet and in process input, output, and net rows. A rate renders as
+a count, the tier's belt icon, and the item's icon, and the stacked form puts
+the stack-size glyph in front of the belt icon. The `stack_rate` and
 `stack_capacity` facets are already measured in stacks and are never converted.
 
 ## 8. Diagnostics
 
-Every error carries a span and a message. Four kinds:
+Every error carries a span and a message. An evaluation error is underlined
+at the subexpression that produced it, not at the whole statement. Four kinds:
 
 | Kind | Example |
 |---|---|
@@ -1377,9 +1377,10 @@ facet is gone: a partial drop is silent (P3), so no warning accompanies a value
 that lost a facet and kept the rest, and the panel simply shows the facets that
 remain.
 
-A definition that fails binds its name to the error. Reading the name re-raises
-the original error with its original span, so the message points at the line
-that failed rather than the line that read it.
+A definition that fails poisons its name. Reading the name reports
+`` `x` has error from line L ``, underlined at the read itself, where `L` is
+the line that failed. The original message is not repeated, so the pointer is
+at the use and the cause is one hop away.
 
 An error never stops evaluation (§2.5). A cancelled evaluation (§2.7) reports
 nothing at all.
@@ -1526,7 +1527,7 @@ equality for quantities, configs, machines, and qualities (§7.5).
 | D3 | A single `resource` facet, not sibling `item` and `fluid` facets. | Makes item/fluid exclusivity structural. Item-only sites use `.item()` / `.fluid()` helpers. |
 | D4 | Redundant facets are retained rather than derived on demand. | P1. Operators never reach across facets. |
 | D5 | Quality: concrete in quantity terms, optional in reference facets. | P2, §3.2. Enables `v.:iron-plate:` to span qualities. |
-| D6 | MVP is the full grammar plus the `quantity` and its reference facets; each further facet adds a slot and its operator rows. | P4. Precedence is cheap to fix now and expensive later, so the grammar is complete from the start while the value model grows facet by facet. |
+| D6 | The grammar is complete before the value model is. | P4. Precedence is cheap to fix now and expensive later, so the grammar is complete from the start while the value model grows facet by facet. |
 | D7 | Deliverables: this specification, an operator matrix, and an executable example table. | Implementation target plus regression corpus. |
 | D8 | The quality operand rewrites all item terms including the denominator, leaves non-item terms alone, is a no-op with no items, and is an error on a process. | §3.3. Process quality is machine- and recipe-determined, so relabeling it would be a lie. |
 | D9 | The quality operand rewrites the identity a value names, per facet: every quantity item term, the resource and recipe references, a machine's prototype, and a config only when it names one identity with count one — a single module of count one, or a single beacon of count one, whose beacon is promoted and whose modules are untouched. | P1. Rewriting the quantity while leaving identity behind would leave the two disagreeing. The count-one restriction exists because a qualified token promotes only its own prototype, so promoting a counted or repeated entry from the value form would mean something different from the token form. |
@@ -1542,12 +1543,12 @@ equality for quantities, configs, machines, and qualities (§7.5).
 | D19 | Quality names accept `:common:` and `:quality-N:` as aliases, and autocomplete offers them. | `normal` is easy to mistake for "no quality"; `q1`…`q5` are the natural thing to type. |
 | D20 | `-` binds tighter than `+` and `/` tighter than `*`. | The `/` inversion is required for readable ratios; the `-` inversion follows it for symmetry, and is unobservable because a `Quantity` is an additive bundle so grouping cannot change a result. |
 | D21 | Juxtaposition is right-associative; there is no number-before-token production. | Makes `:beacon: n :speed-module-3:` agree with `:beacon: 2 :speed-module-3:`. Accepted cost: `2 :speed-module-2: 3 :productivity-module-2:` doubles the productivity count (§4.1). |
-| D22 | Config juxtaposition needs no rule about item facets; they drop by P3 because `item × item` has no rule. | The old implementation's "retain the left item" was a special case, and it is what produced the beacon bug. |
-| D23 | The single-line result shows the first facet plus `…` when others exist; the panel shows every facet. | The results column is fixed width and the projection is already defined as lossy; the `…` makes the loss visible. |
+| D22 | Config juxtaposition needs no rule about item facets; they drop by P3 because `item × item` has no rule. | A rule to retain the left item would be a special case, and it is what produced the beacon bug. |
+| D23 | The single-line result shows the first facet; the panel shows every facet. | The results column is fixed width and the projection is already defined as lossy; the panel is where the rest are read. |
 | D24 | Round to `max_decimals` fraction digits at or above 1 and significant digits below 1. | Counts stay exact, and small values do not collapse to `0` before the `1e-9` threshold is reached. |
 | D25 | Quantities, qualities, configs, and machines render round-trippably; stack limits do not. | A result can be pasted back into the document to check it. Subscripts would need parser support for no benefit. |
 | D26 | Time applies to rates too: `15/s` renders as `900/m` in minute mode. | The configured unit is what the user reads; mixing `m` for durations and `/s` for rates is inconsistent. |
-| D27 | `item_rate_belt` and `stacked_belts` remain display settings. | Item rates in the `quantity` facet and in process rows are items per second, and rendering them as belts is the point of those settings. |
+| D27 | `item_rate_belt_display` and `stacked_belts_display` are display settings. | Item rates in the `quantity` facet and in process rows are items per second, and rendering them as belts is the point of those settings. |
 | D28 | Scaling drops the `resource` facet, so `:stack-size: (3:iron-plate:)` is an error. | "Stack of three iron plates" is not what the phrase means; `3 :stack-size: :iron-plate:` is the correct grouping and already works. |
 | D29 | Configs render with no coefficients on modules, beacon-group counts as coefficients, groups joined by `+` with no spaces, and a machine's config always in parentheses. | Repetition gives a config exactly one spelling; the beacon count has no repetition form, since repeating a beacon would not say how many modules each holds. The parentheses keep `+` inside the config instead of turning it into an addition to the machine. |
 | D30 | `:common:` renders in reference facets and in quality values, but not in quantity terms. | A reference facet distinguishes `Some(Common)` from `None`; a quantity term always has a concrete quality, so normal is the default there. |
@@ -1559,7 +1560,7 @@ equality for quantities, configs, machines, and qualities (§7.5).
 | D36 | A config may hold several beacon types, and qualities of one beacon are distinct types. | The game permits it and the distribution profile depends only on the total beacon count; the old restriction existed only because the old `Config` could not represent it. |
 | D37 | `.:item:` and `.:fluid:` select by medium. | A quality filter drops fluids, so there must be a way to take the fluid half of a mixed quantity. |
 | D38 | `Unscaled` and `Machines` processes report rates; `MachineSeconds` reports totals; a property with no meaning for its extent is an error. | Extent is the honest distinction: a sized machine count produces continuously, machine-seconds are finished work. |
-| D39 | `.productivity` returns the multiplier `1 + bonus`. | It is what a caller multiplies output by; the old implementation's bonus was one step short of useful. |
+| D39 | `.productivity` returns the multiplier `1 + bonus`. | It is what a caller multiplies output by; the bonus is one step short of useful. |
 | D40 | `.:electric:` is kept and selects power or energy by what the operand has; `.:time:` is kept for count processes. | `.:electric:` is short and extent-independent, which is what the UI needs. `.:time:` is the only way to read a count process's extent as a time. |
 | D41 | A quantity with several resource terms scales one process row per term, and two terms selecting the same recipe is an error. | T3 filters to a set of qualities, and each quality is its own recipe; the same recipe twice would double count. |
 | D42 | There is no `belt` facet. | No operator reads one. A belt token carries `quantity`, `stack_rate`, and `stack_capacity`, and `:stacked-belt:` works on any non-fluid `stack_rate`. |
