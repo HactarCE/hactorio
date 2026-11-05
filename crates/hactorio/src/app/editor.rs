@@ -4,7 +4,7 @@ use egui::{
     Color32, Context, CursorIcon, Key, Modifiers, Rect, ScrollArea, Sense, TextEdit, TextStyle, Ui,
 };
 use hactorio_core::Settings;
-use hactorio_core::eval::{Evaluation, line_hash};
+use hactorio_core::lang::{Evaluation, line_hash};
 use hactorio_data::Registry;
 
 use super::completion::{self, CompletionState, completion_items, completion_word};

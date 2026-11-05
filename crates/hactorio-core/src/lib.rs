@@ -4,7 +4,7 @@
 
 pub mod approx;
 pub mod belt;
-pub mod eval;
+pub mod lang;
 mod settings;
 mod syntax;
 mod text;

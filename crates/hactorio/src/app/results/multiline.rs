@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use egui::{Color32, RichText, Ui};
 use hactorio_core::Settings;
-use hactorio_core::eval::{Output, format_facets, line_hash};
+use hactorio_core::lang::{Output, format_facets, line_hash};
 use hactorio_data::Registry;
 
 use super::token_tip::value_line;

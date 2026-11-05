@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::belt::BeltTier;
-use crate::eval::value::Quality;
+use crate::lang::value::Quality;
 
 /// The unit used to display time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

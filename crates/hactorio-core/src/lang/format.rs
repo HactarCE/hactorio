@@ -11,7 +11,7 @@ use super::value::{
     Amount, Config, Extent, Machine, MultiValue, Process, Quality, Quantity, Resource, ResourceRef,
     Stacks, Value,
 };
-use crate::{Settings, TimeUnit, eval};
+use crate::{Settings, TimeUnit, lang};
 
 pub fn format_value(value: &Value, settings: &Settings, registry: &Registry) -> String {
     match value {
@@ -73,7 +73,7 @@ pub fn format_facets(value: &Value, settings: &Settings, registry: &Registry) ->
                     lines.push(format!(
                         "power {}",
                         format_si(
-                            eval::process::draw(
+                            lang::process::draw(
                                 &modifiers,
                                 machine.count(),
                                 settings.idle_power,
@@ -607,7 +607,7 @@ fn format_si(value: f64, unit: &str, settings: &Settings) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::eval::test_registry;
+    use crate::lang::test_registry;
 
     fn settings() -> Settings {
         Settings::default()

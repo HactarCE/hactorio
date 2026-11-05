@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use egui::{Align, Context, RichText, TextStyle, Ui};
 use hactorio_core::belt::BeltTier;
-use hactorio_core::eval::{Evaluation, Quality};
+use hactorio_core::lang::{Evaluation, Quality};
 use hactorio_core::{IdlePower, Settings, TimeUnit, from_plaintext, to_plaintext};
 use hactorio_data::{GameInstall, Registry, locate};
 

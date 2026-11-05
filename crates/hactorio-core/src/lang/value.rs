@@ -1238,7 +1238,7 @@ impl Process {
 
     /// The machine total, treating recipe qualities of one row as alternatives.
     pub fn machines(&self) -> f64 {
-        crate::eval::process::machines(&self.rows)
+        crate::lang::process::machines(&self.rows)
     }
 }
 

@@ -124,17 +124,17 @@ fn max_quality_selector_sets_the_research_cap() {
     let quality = |harness: &Harness<'_, Option<HactorioApp>>| {
         harness.state().as_ref().expect("app").settings.max_quality
     };
-    assert_eq!(quality(&harness), hactorio_core::eval::Quality::Legendary);
+    assert_eq!(quality(&harness), hactorio_core::lang::Quality::Legendary);
 
-    let rare = hactorio_core::eval::Quality::Rare.glyph().to_string();
+    let rare = hactorio_core::lang::Quality::Rare.glyph().to_string();
     harness.get_by_label(&rare).click();
     harness.run();
-    assert_eq!(quality(&harness), hactorio_core::eval::Quality::Rare);
+    assert_eq!(quality(&harness), hactorio_core::lang::Quality::Rare);
 
-    let epic = hactorio_core::eval::Quality::Epic.glyph().to_string();
+    let epic = hactorio_core::lang::Quality::Epic.glyph().to_string();
     harness.get_by_label(&epic).click();
     harness.run();
-    assert_eq!(quality(&harness), hactorio_core::eval::Quality::Epic);
+    assert_eq!(quality(&harness), hactorio_core::lang::Quality::Epic);
 
     std::fs::remove_dir_all(dir).unwrap();
 }

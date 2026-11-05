@@ -14,7 +14,7 @@
 //! reserved for the completion dropdown.
 
 use hactorio_core::Settings;
-use hactorio_core::eval::{Evaluation, Output, format_value};
+use hactorio_core::lang::{Evaluation, Output, format_value};
 use hactorio_data::Registry;
 
 mod multiline;

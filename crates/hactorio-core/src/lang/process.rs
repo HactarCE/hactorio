@@ -483,7 +483,7 @@ pub fn crafts(
 #[cfg(test)]
 mod tests {
     use super::quality_shares;
-    use crate::eval::value::Quality;
+    use crate::lang::value::Quality;
 
     /// The quality chance of four quality module 3s, matching
     /// `1 craft in :assembling-machine-3:4:quality-module-3:`.
