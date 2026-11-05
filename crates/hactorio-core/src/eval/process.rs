@@ -64,8 +64,11 @@ pub fn row_rates(key: &RowKey, registry: &Registry, settings: &Settings) -> Opti
             PrototypeKind::Item => {
                 // Quality modules spread each product over the qualities above
                 // the recipe's own (§6.3).
-                for (quality, share) in quality_shares(key.recipe_quality, modifiers.quality_chance)
-                {
+                for (quality, share) in quality_shares(
+                    key.recipe_quality,
+                    modifiers.quality_chance,
+                    settings.max_quality,
+                ) {
                     *outputs
                         .entry(Resource::Item(Item { id, quality }))
                         .or_insert(0.0) += amount * share;
@@ -380,15 +383,22 @@ pub enum Rows {
 /// The first roll upgrades by one level with the machine's quality chance; every
 /// further level is a constant 10% roll. The share that reaches at least `n`
 /// levels is therefore `Q · 0.1^(n-1)`, and the recipe's own quality takes
-/// `1 - Q`. A legendary recipe has nowhere to go, so it stays put.
-pub fn quality_shares(base: Quality, chance: f64) -> Vec<(Quality, f64)> {
+/// `1 - Q`. Only qualities up to `max` are part of the distribution: whatever
+/// would have rolled past the highest researched quality stays at that quality.
+/// A recipe already at the highest quality has nowhere to go, so it stays put.
+pub fn quality_shares(base: Quality, chance: f64, max: Quality) -> Vec<(Quality, f64)> {
     let levels = Quality::ALL;
     let Some(base_index) = levels.iter().position(|quality| *quality == base) else {
         return vec![(base, 1.0)];
     };
     let chance = chance.clamp(0.0, 1.0);
-    let above = &levels[base_index + 1..];
-    let mut shares = vec![(base, 1.0 - chance)];
+    let top_index = levels
+        .iter()
+        .position(|quality| *quality == max)
+        .unwrap_or(levels.len() - 1)
+        .max(base_index);
+    let above = &levels[base_index + 1..top_index + 1];
+    let mut shares = vec![(base, if above.is_empty() { 1.0 } else { 1.0 - chance })];
     for (offset, quality) in above.iter().enumerate() {
         let level = offset + 1;
         let at_least =
@@ -458,4 +468,82 @@ pub fn crafts(
         .iter()
         .map(|(key, scale)| Some(row_rates(key, registry, settings)?.craft_per_second * scale))
         .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::quality_shares;
+    use crate::eval::value::Quality;
+
+    /// The quality chance of four quality module 3s, matching
+    /// `1 craft in :assembling-machine-3:4:quality-module-3:`.
+    const CHANCE: f64 = 0.1;
+
+    fn assert_split(shares: &[(Quality, f64)], expected: &[(Quality, f64)]) {
+        assert_eq!(shares.len(), expected.len(), "{shares:?}");
+        for (quality, expected) in expected {
+            let actual = shares
+                .iter()
+                .find(|(share_quality, _)| share_quality == quality)
+                .map_or(0.0, |(_, share)| *share);
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "{}: {actual} != {expected}",
+                quality.name()
+            );
+        }
+        let total: f64 = shares.iter().map(|(_, share)| share).sum();
+        assert!(
+            (total - 1.0).abs() < 1e-12,
+            "the shares must total 1: {total}"
+        );
+    }
+
+    #[test]
+    fn max_quality_legendary_uses_every_quality() {
+        let shares = quality_shares(Quality::Normal, CHANCE, Quality::Legendary);
+        assert_split(
+            &shares,
+            &[
+                (Quality::Normal, 0.9),
+                (Quality::Uncommon, 0.09),
+                (Quality::Rare, 0.009),
+                (Quality::Epic, 0.0009),
+                (Quality::Legendary, 0.0001),
+            ],
+        );
+    }
+
+    #[test]
+    fn max_quality_epic_folds_legendary_into_epic() {
+        let shares = quality_shares(Quality::Normal, CHANCE, Quality::Epic);
+        assert_split(
+            &shares,
+            &[
+                (Quality::Normal, 0.9),
+                (Quality::Uncommon, 0.09),
+                (Quality::Rare, 0.009),
+                (Quality::Epic, 0.001),
+            ],
+        );
+    }
+
+    #[test]
+    fn max_quality_rare_folds_epic_and_legendary_into_rare() {
+        let shares = quality_shares(Quality::Normal, CHANCE, Quality::Rare);
+        assert_split(
+            &shares,
+            &[
+                (Quality::Normal, 0.9),
+                (Quality::Uncommon, 0.09),
+                (Quality::Rare, 0.01),
+            ],
+        );
+    }
+
+    #[test]
+    fn a_recipe_at_the_max_quality_has_nowhere_to_go() {
+        let shares = quality_shares(Quality::Rare, CHANCE, Quality::Rare);
+        assert_split(&shares, &[(Quality::Rare, 1.0)]);
+    }
 }

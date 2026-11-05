@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use egui::{Align, Context, RichText, TextStyle, Ui};
 use hactorio_core::belt::BeltTier;
-use hactorio_core::eval::Evaluation;
+use hactorio_core::eval::{Evaluation, Quality};
 use hactorio_core::{IdlePower, Settings, TimeUnit, from_plaintext, to_plaintext};
 use hactorio_data::{GameInstall, Registry, locate};
 
@@ -119,13 +119,15 @@ const DISPLAY_SETTINGS: &[DisplaySetting] = &[
 enum ResearchSetting {
     BeltStacking,
     InserterCapacity,
+    MaxQuality,
     Productivity,
 }
 
 const RESEARCH_SETTINGS: &[ResearchSetting] = &[
-    ResearchSetting::BeltStacking,
-    ResearchSetting::InserterCapacity,
     ResearchSetting::Productivity,
+    ResearchSetting::InserterCapacity,
+    ResearchSetting::BeltStacking,
+    ResearchSetting::MaxQuality,
 ];
 
 #[derive(Clone, Copy)]
@@ -759,6 +761,14 @@ impl HactorioApp {
                     &mut self.settings.inserter_capacity,
                     0..=7,
                 ));
+            }
+            ResearchSetting::MaxQuality => {
+                ui.label("Max quality");
+                for quality in [Quality::Rare, Quality::Epic, Quality::Legendary] {
+                    let label = RichText::new(quality.glyph().to_string()).size(GLYPH_SIZE);
+                    ui.selectable_value(&mut self.settings.max_quality, quality, label)
+                        .on_hover_text(format!("Up to {}", quality.name()));
+                }
             }
             ResearchSetting::Productivity => {
                 ui.add_enabled_ui(!researches.is_empty(), |ui| {

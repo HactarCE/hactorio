@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::belt::BeltTier;
+use crate::eval::value::Quality;
 
 /// The unit used to display time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,6 +86,11 @@ pub struct Settings {
     pub inserter_capacity: u32,
     /// How idle draw enters reported power.
     pub idle_power: IdlePower,
+    /// The highest quality research unlocks.
+    ///
+    /// Recipes and machine outputs never name a quality above this one; the
+    /// chance of rolling higher goes to this quality instead (§6.3).
+    pub max_quality: Quality,
     /// Completed levels of each productivity research, keyed by technology id.
     #[serde(default)]
     pub research_levels: BTreeMap<Box<str>, u32>,
@@ -101,6 +107,7 @@ impl Default for Settings {
             belt_stacking: 4,
             inserter_capacity: 0,
             idle_power: IdlePower::Ignored,
+            max_quality: Quality::Legendary,
             research_levels: BTreeMap::new(),
         }
     }
@@ -110,5 +117,16 @@ impl Settings {
     /// Completed levels of `research`, or zero if it was never set.
     pub fn research_level(&self, research: &str) -> u32 {
         self.research_levels.get(research).copied().unwrap_or(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_settings_file_without_max_quality_keeps_every_quality_researched() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.max_quality, Quality::Legendary);
     }
 }

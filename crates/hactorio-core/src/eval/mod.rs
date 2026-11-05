@@ -1263,6 +1263,77 @@ mod tests {
     }
 
     #[test]
+    fn recipe_expansion_only_includes_researched_qualities() {
+        let registry = test_registry();
+        let mut settings = Settings::default();
+        let qualities = |settings: &Settings| {
+            let outputs = evaluate(
+                ":foundry: making :iron-plate:",
+                &registry,
+                settings,
+                &|| false,
+            )
+            .outputs;
+            let Output::Value(value) = &outputs[0] else {
+                panic!("expected a process, got {:?}", outputs[0]);
+            };
+            let Value::Process(process) = &**value else {
+                unreachable!()
+            };
+            process
+                .rows
+                .keys()
+                .map(|key| key.recipe_quality)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(qualities(&settings), Quality::ALL.to_vec());
+        settings.max_quality = Quality::Rare;
+        assert_eq!(
+            qualities(&settings),
+            vec![Quality::Normal, Quality::Uncommon, Quality::Rare]
+        );
+    }
+
+    #[test]
+    fn max_quality_folds_higher_quality_into_the_highest_researched() {
+        let registry = test_registry();
+        let settings = Settings {
+            max_quality: Quality::Rare,
+            ..Settings::default()
+        };
+        let document =
+            "p = 1 :foundry: :quality-module-2: making (:normal: :iron-plate:)\np.out.:iron-plate:";
+        let outputs = evaluate(document, &registry, &settings, &|| false).outputs;
+        let Output::Value(value) = &outputs[1] else {
+            panic!("expected facets, got {:?}", outputs[1]);
+        };
+        let Value::Multi(multi) = &**value else {
+            unreachable!()
+        };
+        let quantity = multi.quantity.clone().expect("a quantity");
+        let super::value::Amount::Resources(terms) = &quantity.amount else {
+            panic!("expected a bundle");
+        };
+
+        let iron = registry.entry_id("iron-plate").unwrap();
+        let rate = |quality| {
+            terms
+                .get(&Resource::Item(Item { id: iron, quality }))
+                .copied()
+                .unwrap_or(0.0)
+        };
+        // A 25% chance: normal 75%, uncommon 22.5%, and rare keeps everything
+        // that would have rolled epic or legendary.
+        assert_eq!(terms.len(), 3);
+        let total: f64 = terms.values().sum();
+        assert!((total - 1.875).abs() < 1e-9, "{total}");
+        assert!((rate(Quality::Normal) - 1.875 * 0.75).abs() < 1e-9);
+        assert!((rate(Quality::Uncommon) - 1.875 * 0.225).abs() < 1e-9);
+        assert!((rate(Quality::Rare) - 1.875 * 0.025).abs() < 1e-9);
+    }
+
+    #[test]
     fn a_process_answers_in_out_and_net() {
         let registry = test_registry();
         let settings = Settings::default();

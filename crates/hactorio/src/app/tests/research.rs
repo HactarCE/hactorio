@@ -114,3 +114,27 @@ fn popup_rect(harness: &Harness<'_, Option<HactorioApp>>, point: egui::Pos2) -> 
             .expect("popup area under the label")
     })
 }
+
+#[test]
+fn max_quality_selector_sets_the_research_cap() {
+    let document = editor_document("# Main\n", 0, 0);
+    let (mut harness, dir) = completion_harness("max-quality", document);
+    harness.run();
+
+    let quality = |harness: &Harness<'_, Option<HactorioApp>>| {
+        harness.state().as_ref().expect("app").settings.max_quality
+    };
+    assert_eq!(quality(&harness), hactorio_core::eval::Quality::Legendary);
+
+    let rare = hactorio_core::eval::Quality::Rare.glyph().to_string();
+    harness.get_by_label(&rare).click();
+    harness.run();
+    assert_eq!(quality(&harness), hactorio_core::eval::Quality::Rare);
+
+    let epic = hactorio_core::eval::Quality::Epic.glyph().to_string();
+    harness.get_by_label(&epic).click();
+    harness.run();
+    assert_eq!(quality(&harness), hactorio_core::eval::Quality::Epic);
+
+    std::fs::remove_dir_all(dir).unwrap();
+}

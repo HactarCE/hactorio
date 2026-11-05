@@ -859,10 +859,11 @@ needing, since it drops fluids.
 - The right operand must have a `recipe` facet. Its other facets are ignored.
 - The result is a `Process` with extent `Unscaled`, or `Machines(n)` when the
   machine carried a count.
-- The recipe's quality `None` expands to every quality, giving one row per
-  quality — but only for a recipe with an item ingredient. A recipe fed only by
-  fluids cannot be made above normal quality, so it has one row at normal and
-  naming a higher quality is an error.
+- The recipe's quality `None` expands to every researched quality — every
+  quality up to the `max_quality` setting (§7.8) — giving one row per quality,
+  but only for a recipe with an item ingredient. A recipe fed only by fluids
+  cannot be made above normal quality, so it has one row at normal and naming
+  a higher quality is an error.
 - Validation: the recipe's categories must intersect the machine's, and
   productivity modules are permitted only when the recipe allows productivity.
 - Every other facet of both operands drops.
@@ -1027,7 +1028,10 @@ Machine modifiers:
   are `90%` normal, `9%` uncommon, `0.9%` rare, `0.09%` epic, and `0.01%`
   legendary. Each product is split across those qualities, which is why `.out`
   reports one row per quality. A recipe made at a quality starts its upgrades
-  from there.
+  from there. Products never take a quality above the `max_quality` setting
+  (§7.8): the shares above it are folded into the highest researched quality,
+  so at `Q = 10%` a `max_quality` of rare gives `90%` normal, `9%` uncommon,
+  and `1%` rare. A recipe at the highest researched quality stays there.
 - Quality multiplies a machine's speed, a beacon's transmitted share, and the
   one effect a module exists for: a speed module's speed, a productivity
   module's productivity, an efficiency module's consumption, a quality
@@ -1398,6 +1402,7 @@ time unit for a `Machines` process, machine-seconds and craft totals for a
 | `item_rate_belt_display` | the belt tier item rates are rendered as, or `None` for items per second |
 | `stacked_belts_display` | whether those belt counts use the stacked form |
 | `belt_stacking` | the belt-stacking research level, one through four; also read by the `:stacked-belt:` prefix during evaluation |
+| `max_quality` | the highest researched quality: rare, epic, or legendary; caps recipe expansion and machine output quality (§5.4, §6.3) |
 | `idle_power` | whether idle draw enters machine and process power, and whether the machine count is rounded up for it (§6.3) |
 
 `item_rate_belt_display` and `stacked_belts_display` apply to item rates in the

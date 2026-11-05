@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use hactorio_data::{EntryId, RecipeId};
+use serde::{Deserialize, Serialize};
 
 /// Coefficients smaller than this are treated as zero (§7.2).
 pub const APPROX_ZERO: f64 = 1e-9;
@@ -67,7 +68,10 @@ impl std::error::Error for ValueError {}
 pub type Result<T, E = ValueError> = std::result::Result<T, E>;
 
 /// Item quality (§4.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum Quality {
     #[default]
     Normal,

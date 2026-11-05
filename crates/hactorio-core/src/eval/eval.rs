@@ -1397,7 +1397,10 @@ fn build_process(
             }
             vec![quality]
         }
-        None if upgradable => Quality::ALL.to_vec(),
+        None if upgradable => Quality::ALL
+            .into_iter()
+            .take_while(|quality| *quality <= settings.max_quality)
+            .collect(),
         None => vec![Quality::Normal],
     };
     let scale = machine.count();
