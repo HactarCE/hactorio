@@ -212,6 +212,7 @@ mod tests {
     use crate::new_eval::format::format_process_panel;
 
     use crate::Settings;
+    use crate::settings::IdlePower;
     use crate::new_eval::value::{StackLimit, Stacks};
     use hactorio_data::STACK_SIZE_GLYPH;
 
@@ -1222,6 +1223,58 @@ mod tests {
             Output::Value(value) => assert_eq!(value.dimensionless(), Some(4.0)),
             other => panic!("expected a value, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn idle_power_follows_the_setting() {
+        let registry = test_registry();
+        let render = |text: &str, idle_power| {
+            let settings = Settings {
+                idle_power,
+                ..Settings::default()
+            };
+            let outputs = evaluate(text, &registry, &settings, &|| false).outputs;
+            match &outputs[0] {
+                Output::Value(value) => format_value(value, &settings, &registry),
+                other => panic!("expected a value, got {other:?}"),
+            }
+        };
+
+        // The foundry draws 2 MW active and a thirtieth more when idle.
+        assert_eq!(render("(2 :foundry:).power", IdlePower::Ignored), "4MW");
+        assert_eq!(
+            render("(2 :foundry:).power", IdlePower::Fractional),
+            "4.133MW"
+        );
+        assert_eq!(
+            render("(2 :foundry:).power", IdlePower::RoundedUp),
+            "4.133MW"
+        );
+
+        // A fractional count scales the active draw but not the whole machines
+        // that idle draw is charged for.
+        assert_eq!(
+            render("(2.5 :foundry:).power", IdlePower::Fractional),
+            "5.167MW"
+        );
+        assert_eq!(
+            render("(2.5 :foundry:).power", IdlePower::RoundedUp),
+            "5.2MW"
+        );
+        // A count within the approximate threshold is already whole.
+        assert_eq!(
+            render("(2.0000000001 :foundry:).power", IdlePower::RoundedUp),
+            "4.133MW"
+        );
+
+        // The process reports the same sum as its rows.
+        assert_eq!(
+            render(
+                "(2.5 :foundry: making (:normal: :iron-plate:)).power",
+                IdlePower::RoundedUp
+            ),
+            "5.2MW"
+        );
     }
 
     #[test]

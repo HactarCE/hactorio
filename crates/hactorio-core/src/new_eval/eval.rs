@@ -609,7 +609,12 @@ impl Runner<'_> {
                         process::machine_modifiers(machine, self.registry, self.settings)
                             .ok_or_else(|| ValueError::new("that machine has no modifiers"))?;
                     return Ok(Value::quantity(Quantity::new(
-                        Amount::Number(modifiers.power_w * machine.count()),
+                        Amount::Number(process::draw(
+                            &modifiers,
+                            machine.count(),
+                            self.settings.idle_power,
+                            false,
+                        )),
                         None,
                         -1,
                         1,

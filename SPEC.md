@@ -1027,11 +1027,16 @@ Machine modifiers:
   disallows productivity contributes none.
 - The consumption multiplier is `1 + consumption effects`, clamped to at least
   `0.2`. Active power is `energy_usage × multiplier`.
-
-> **TODO — idle draw is not specified.** A machine also draws its `idle` energy
-> when it is not crafting, and a machine count is rounded up to whole machines
-> for the power total. Neither is modelled yet; `.power` and `.:electric:`
-> currently report active draw only. Do not treat the current numbers as final.
+- Idle draw is the prototype's `energy_source.drain`. An electric crafting
+  machine without an explicit drain draws `energy_usage ÷ 30`, which is the
+  game's default; a machine with another energy source draws nothing. Idle draw
+  is not affected by modules, beacons, or the consumption multiplier.
+- Reported power is active power plus idle draw, as the `idle_power` setting
+  chooses (§7.8). `Ignored` adds nothing, `Fractional` adds the idle draw for
+  the fractional machine count, and `Rounded up` adds it for the count rounded
+  up to whole machines, using the count itself when it is within `1e-9` of an
+  integer. A machine-seconds process has no machine count, so its idle part
+  always uses the fractional scale.
 - Pollution per minute is base pollution × consumption multiplier ×
   `(1 + pollution effects)`.
 
@@ -1132,7 +1137,7 @@ never a silent zero.
 | `.productivity`, `.prod` | process | the shared value; error when rows disagree |
 | `.pollution` | `machine` | pollution per minute after config effects, not multiplied by the count |
 | `.pollution` | process | per minute for `Unscaled`/`Machines`, total for `MachineSeconds` |
-| `.power` | `machine` | machine power × count |
+| `.power` | `machine` | machine power × count, plus idle draw per §6.3 |
 | `.power` | process, `Unscaled` or `Machines` | total watts |
 | `.power` | process, `MachineSeconds` | error |
 | `.power` | item | the prototype's `power_w` × coefficient |
@@ -1164,6 +1169,9 @@ Notes:
   `.machines` does not apply to it, and machine-seconds is not a unit (§6.4).
 - `.energy` on a `machine` is an error: a machine has no stored energy. Only an
   accumulator-like item and a `MachineSeconds` process do.
+- `idle_power` chooses whether `.power` and `.:electric:` include idle draw
+  (§6.3). `.energy` on a machine-seconds process adds idle energy at the
+  fractional scale, because that extent has no machine count to round.
 - A bare machine has no recipe, so `.power`, `.speed`, and `.productivity` on it
   take module and beacon effects only: no productivity research applies and no
   recipe gate can forbid productivity modules.
@@ -1378,6 +1386,7 @@ time unit for a `Machines` process, machine-seconds and craft totals for a
 | `item_rate_belt_display` | the belt tier item rates are rendered as, or `None` for items per second |
 | `stacked_belts_display` | whether those belt counts use the stacked form |
 | `belt_stacking` | the belt-stacking research level, one through four; also read by the `:stacked-belt:` prefix during evaluation |
+| `idle_power` | whether idle draw enters machine and process power, and whether the machine count is rounded up for it (§6.3) |
 
 `item_rate_belt_display` and `stacked_belts_display` apply to item rates in the
 `quantity` facet and in process input, output, and net rows. A rate renders as

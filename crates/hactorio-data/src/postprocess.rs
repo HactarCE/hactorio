@@ -514,6 +514,7 @@ fn machine_from(proto: &Value) -> Option<Machine> {
     if crafting.is_empty() && resource.is_empty() {
         return None;
     }
+    let is_crafting = !crafting.is_empty();
 
     let speed = if crafting.is_empty() {
         proto
@@ -535,15 +536,35 @@ fn machine_from(proto: &Value) -> Option<Machine> {
         }
     }
 
+    let energy_usage_w = proto
+        .get("energy_usage")
+        .and_then(Value::as_str)
+        .and_then(parse_watts)
+        .unwrap_or(0.0);
+    let energy_source = proto.get("energy_source");
+    let is_electric = energy_source
+        .and_then(|source| source.get("type"))
+        .and_then(Value::as_str)
+        .is_none_or(|kind| kind == "electric");
+    let idle_usage_w = if is_electric {
+        energy_source
+            .and_then(|source| source.get("drain"))
+            .and_then(Value::as_str)
+            .and_then(parse_watts)
+            // The game gives an electric crafting machine a drain of one
+            // thirtieth of its active draw when none is specified.
+            .or_else(|| is_crafting.then_some(energy_usage_w / 30.0))
+            .unwrap_or(0.0)
+    } else {
+        0.0
+    };
+
     Some(Machine {
         speed,
         module_slots: uint(proto, "module_slots", 0) as u32,
         allowed_effects: allowed_effects(proto.get("allowed_effects")),
-        energy_usage_w: proto
-            .get("energy_usage")
-            .and_then(Value::as_str)
-            .and_then(parse_watts)
-            .unwrap_or(0.0),
+        energy_usage_w,
+        idle_usage_w,
         pollution_per_minute: proto
             .get("energy_source")
             .and_then(|source| source.get("emissions_per_minute"))

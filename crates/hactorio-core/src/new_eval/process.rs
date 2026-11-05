@@ -7,6 +7,7 @@ use hactorio_data::{ModuleEffect, PrototypeKind, Recipe, Registry};
 
 use super::value::{Config, Item, Quality, Resource, RowKey};
 use crate::Settings;
+use crate::settings::IdlePower;
 
 /// What one machine of a row produces per second at one craft each.
 #[derive(Debug, Clone, PartialEq)]
@@ -25,6 +26,8 @@ pub struct Modifiers {
     pub consumption: f64,
     pub pollution: f64,
     pub power_w: f64,
+    /// Idle draw in watts, unaffected by modules and beacons.
+    pub idle_usage_w: f64,
     pub pollution_per_minute: f64,
     /// The chance of upgrading each product one quality level, from 0 to 1.
     pub quality_chance: f64,
@@ -179,6 +182,7 @@ pub fn modifiers(
         consumption,
         pollution: 1.0 + effect.pollution,
         power_w: machine.energy_usage_w * consumption,
+        idle_usage_w: machine.idle_usage_w,
         pollution_per_minute: machine.pollution_per_minute * consumption * (1.0 + effect.pollution),
         quality_chance: effect.quality.clamp(0.0, 1.0),
     })
@@ -287,11 +291,44 @@ pub fn power(
     registry: &Registry,
     settings: &Settings,
 ) -> Option<f64> {
+    let machine_seconds = process.extent == super::value::Extent::MachineSeconds;
     process
         .rows
         .iter()
-        .map(|(key, scale)| Some(row_modifiers(key, registry, settings)?.power_w * scale))
+        .map(|(key, scale)| {
+            let modifiers = row_modifiers(key, registry, settings)?;
+            Some(draw(
+                &modifiers,
+                *scale,
+                settings.idle_power,
+                machine_seconds,
+            ))
+        })
         .sum()
+}
+
+/// Active draw plus idle draw for `scale` machines (§6.3).
+///
+/// A machine-seconds process carries no machine count, so its idle draw always
+/// follows the fractional scale.
+pub fn draw(modifiers: &Modifiers, scale: f64, idle: IdlePower, machine_seconds: bool) -> f64 {
+    let active = modifiers.power_w * scale;
+    let idle = match idle {
+        IdlePower::Ignored => 0.0,
+        IdlePower::Fractional => modifiers.idle_usage_w * scale,
+        IdlePower::RoundedUp if machine_seconds => modifiers.idle_usage_w * scale,
+        IdlePower::RoundedUp => modifiers.idle_usage_w * whole_machines(scale),
+    };
+    active + idle
+}
+
+/// The machine count, rounded up unless it is already an integer.
+fn whole_machines(count: f64) -> f64 {
+    if crate::approx::is_integer(count) {
+        count.round()
+    } else {
+        count.ceil()
+    }
 }
 
 /// Pollution per minute, or the total pollution of a machine-seconds process.

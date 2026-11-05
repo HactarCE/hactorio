@@ -137,6 +137,9 @@ fn machine_joins_the_item_with_its_entity() {
         }
     );
     assert_eq!(machine.energy_usage_w, 375_000.0);
+    // An electric crafting machine without an explicit drain draws a
+    // thirtieth of its active power.
+    assert_eq!(machine.idle_usage_w, 12_500.0);
     assert_eq!(machine.pollution_per_minute, 2.0);
     assert_eq!(
         names(&machine.categories),
@@ -170,6 +173,8 @@ fn drills_are_machines_with_mining_speed() {
     assert_eq!(machine.speed, 0.5);
     assert_eq!(machine.module_slots, 3);
     assert_eq!(machine.energy_usage_w, 90_000.0);
+    // The drain default is for crafting machines; a drill has none.
+    assert_eq!(machine.idle_usage_w, 0.0);
     assert_eq!(machine.allowed_effects, Default::default());
     assert_eq!(names(&machine.categories), ["basic-solid"]);
 }

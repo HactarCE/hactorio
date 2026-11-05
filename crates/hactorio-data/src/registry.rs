@@ -147,6 +147,12 @@ pub struct Machine {
     pub allowed_effects: AllowedEffects,
     /// Active power in watts, from the prototype's `energy_usage`.
     pub energy_usage_w: f64,
+    /// Idle draw in watts, from the prototype's `energy_source.drain`.
+    ///
+    /// An electric crafting machine without an explicit drain draws
+    /// `energy_usage / 30`, which is what the game assigns by default.
+    #[serde(default)]
+    pub idle_usage_w: f64,
     pub pollution_per_minute: f64,
     pub categories: Vec<Box<str>>,
     /// Productivity the machine grants itself, e.g. the foundry's 50%.

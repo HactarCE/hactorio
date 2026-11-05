@@ -72,7 +72,16 @@ pub fn format_facets(value: &Value, settings: &Settings, registry: &Registry) ->
                 {
                     lines.push(format!(
                         "power {}",
-                        format_si(modifiers.power_w * machine.count(), "W", settings)
+                        format_si(
+                            super::process::draw(
+                                &modifiers,
+                                machine.count(),
+                                settings.idle_power,
+                                false,
+                            ),
+                            "W",
+                            settings
+                        )
                     ));
                     lines.push(format!(
                         "speed {}",

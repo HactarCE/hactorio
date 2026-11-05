@@ -54,6 +54,28 @@ impl TimeUnit {
     }
 }
 
+/// How idle draw enters the power a machine or process reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdlePower {
+    /// Report active draw only.
+    Ignored,
+    /// Add the idle draw of the fractional machine count.
+    Fractional,
+    /// Add the idle draw of the machine count rounded up to whole machines.
+    RoundedUp,
+}
+
+impl IdlePower {
+    pub fn name(self) -> &'static str {
+        match self {
+            IdlePower::Ignored => "Ignored",
+            IdlePower::Fractional => "Fractional",
+            IdlePower::RoundedUp => "Rounded up",
+        }
+    }
+}
+
 /// Global display and evaluation settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -71,6 +93,8 @@ pub struct Settings {
     pub belt_stacking: u8,
     /// Inserter capacity research level.
     pub inserter_capacity: u32,
+    /// How idle draw enters reported power.
+    pub idle_power: IdlePower,
     /// Completed levels of each productivity research, keyed by technology id.
     #[serde(default)]
     pub research_levels: BTreeMap<Box<str>, u32>,
@@ -86,6 +110,7 @@ impl Default for Settings {
             stacked_belts_display: false,
             belt_stacking: 4,
             inserter_capacity: 0,
+            idle_power: IdlePower::Ignored,
             research_levels: BTreeMap::new(),
         }
     }

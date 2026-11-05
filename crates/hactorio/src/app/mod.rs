@@ -9,7 +9,7 @@ use eframe::egui;
 use egui::{Align, Context, RichText, TextStyle, Ui};
 use hactorio_core::new_eval::Evaluation;
 use hactorio_core::belt::BeltTier;
-use hactorio_core::{Settings, TimeUnit, from_plaintext, to_plaintext};
+use hactorio_core::{IdlePower, Settings, TimeUnit, from_plaintext, to_plaintext};
 use hactorio_data::{GameInstall, Registry, locate};
 
 use crate::document::{
@@ -102,15 +102,17 @@ enum DisplaySetting {
     Font,
     TimeUnit,
     ItemRates,
+    IdlePower,
     Decimals,
     MetricPrefixes,
 }
 
-const DISPLAY_SETTINGS: [DisplaySetting; 6] = [
+const DISPLAY_SETTINGS: [DisplaySetting; 7] = [
     DisplaySetting::Theme,
     DisplaySetting::Font,
     DisplaySetting::TimeUnit,
     DisplaySetting::ItemRates,
+    DisplaySetting::IdlePower,
     DisplaySetting::Decimals,
     DisplaySetting::MetricPrefixes,
 ];
@@ -706,6 +708,16 @@ impl HactorioApp {
                     ui.toggle_value(&mut self.settings.stacked_belts_display, stack_label)
                         .on_hover_text("Show item rates as stacks on stacked belts");
                 });
+            }
+            DisplaySetting::IdlePower => {
+                ui.label("Idle power");
+                for mode in [
+                    IdlePower::Ignored,
+                    IdlePower::Fractional,
+                    IdlePower::RoundedUp,
+                ] {
+                    ui.selectable_value(&mut self.settings.idle_power, mode, mode.name());
+                }
             }
             DisplaySetting::Decimals => {
                 ui.label("Decimals");

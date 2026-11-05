@@ -9,6 +9,6 @@ mod settings;
 mod syntax;
 mod text;
 
-pub use settings::{Settings, TimeUnit};
+pub use settings::{IdlePower, Settings, TimeUnit};
 pub use syntax::{BinaryOp, Highlight, Span, highlights};
 pub use text::{from_plaintext, to_plaintext};
