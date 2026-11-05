@@ -59,15 +59,7 @@ each drop would bury the result in noise. Total loss is the only error.
 Precedence and the token set are settled in one pass and do not change when a
 facet is added. Adding a facet adds rows to the operator matrix, not syntax.
 
-**P5 — Quality is never a distribution over outcomes.**
-A value does not stand for "iron plate, some quality". Unspecified quality
-exists only as an *identity* (§3.2), where it means "whatever quality this is
-used for" and is resolved by selection. A quantity always has concrete
-qualities, one term per quality. "Iron plate of quality below rare" is not a
-term; it is a filter applied to a quantity, yielding the subset of terms that
-satisfy it.
-
-**P6 — Evaluation is interruptible.**
+**P5 — Evaluation is interruptible.**
 Every statement boundary, including each loop iteration, checks for
 cancellation. A document is never allowed to make the application
 unresponsive, however large a loop count it contains. See §2.7.
@@ -82,14 +74,16 @@ statement continues onto the next line. A statement is one of:
 | Statement | Form |
 |---|---|
 | blank | whitespace only |
-| comment | `#` outside a `:token:`, to end of line |
+| comment | `#`, to end of line |
 | expression | an expression, evaluated and displayed |
 | definition | `place ASSIGNOP expression` |
 | loop header | `loop expression {` |
 | loop end | `}` |
 
-A `{` must be the last token on its line, and a `}` must be the only token on
-its line. Loop bodies are sequences of statements and may nest.
+A `{` must be the last non-comment token on its line, and a `}` must be the
+only non-comment token on its line. Loop bodies are sequences of statements and
+may nest. A `}` with no open loop, a `{` that is never closed, and a loop whose
+count does not evaluate are errors.
 
 ### 2.2 Definitions
 
@@ -101,17 +95,36 @@ ASSIGNOP   := '=' | '+=' | '-=' | '*=' | '/='
 
 - `=` replaces the binding.
 - `+=`, `-=`, `*=`, `/=` read the current binding, apply the corresponding
-  binary operator, and store the result.
+  binary operator, and store the result. `*=` and `/=` take a dimensionless
+  number.
 - The selector must be one the specification marks assignable: a process's
   resource row. Other selectors are evaluation errors, which is why they can
   name a value only the evaluation knows.
 - Only a process's resource rows are assignable, written as `p.:iron-plate: = …`
-  or with a compound operator. An unspecified quality means normal. The value
-  is a rate for a machines process and an amount for a machine-seconds one, and
-  `*=`/`/=` take a dimensionless number. Assignment writes the resource's total
-  in the stored net: `=` replaces what the recipes produce minus what they
-  consume for that resource, and the process stores that total rather than
-  recomputing it from the rows.
+  or with a compound operator. An unspecified quality means normal. Assignment
+  writes the resource's total in the stored net: `=` replaces what the recipes
+  produce minus what they consume for that resource, and the process stores
+  that total rather than recomputing it from the rows.
+- The value must have exactly the row's unit and item. A machines process takes
+  a rate (`1/s`), a machine-seconds process an amount, and neither may carry a
+  stack rate or capacity. The quantity may name the row's item, at normal
+  quality, or name nothing at all:
+
+  ```text
+  p.:iron-plate: += 5/s                          # a machines row
+  p.:iron-plate: += 5 :iron-plate:/s
+  p.:iron-plate: += 5 :normal: :iron-plate:/s
+  p.:iron-plate: += :transport-belt: :iron-plate:  # a belt rate, applied to plates
+  p.:iron-plate: += 5 :iron-plate:               # error: an amount, not a rate
+  p.:iron-plate: += 5 :rare: :iron-plate:/s      # error: the wrong quality
+  p.:iron-plate: += 5                            # error: no rate
+  p.:iron-plate: += :transport-belt:             # error: no item
+  ```
+
+  A machine-seconds process takes the same forms without `/s`; `5/s` there is
+  an error. An `Unscaled` process has no sized rows and cannot be assigned. An
+  `Unspecified` process accepts either form, and the presence of `/s` decides
+  whether it becomes `Machines` or `MachineSeconds`.
 
 A definition is a **statement**, not an operator. `=` has no precedence and
 cannot appear inside an expression, so expressions are never effectful and
@@ -263,7 +276,8 @@ names.
 
 A quality may only be the **left** operand. `:iron-plate: q` is an error, not
 a no-op: a quality on the right of a value is almost always a mistake, and
-silently ignoring it would hide the mistake.
+silently ignoring it would hide the mistake. Two qualities do not combine
+either: `q1 q2` is an error, since there is no juxtaposition rule for them.
 
 - Every item term of the `quantity` facet is re-keyed to the given quality, in
   the numerator `Amount` and in the `per` resource alike.
@@ -445,7 +459,7 @@ From tightest to loosest:
 |---|---|---|
 | 1 | prefix: `:stacked-belt:`, `:stack-size:`, `:recycling:` | prefix, one primary |
 | 2 | juxtaposition | right |
-| 3 | `.` (a property or a resource operand) | left |
+| 3 | `.` (a property, a signal selector, or a resource operand) | left |
 | 4 | quality filters `<` `>` `<=` `>=` `==` `!=` | left |
 | 5 | `^` | right |
 | 6 | unary `-` | prefix |
@@ -461,7 +475,10 @@ From tightest to loosest:
 Juxtaposition is the tightest *binary* operator. `.` applies to the whole
 juxtaposition chain, so `:common: :iron-plate:` is one selector operand, and
 `.` chains to the left: `a.b.c.d` is `(((a.b).c).d)` whether the selectors are
-properties, signal selectors, or resource operands. Whitespace around the dot
+properties, signal selectors, or resource operands. Quality filters sit above
+arithmetic (level 4) because they behave like suffixes on a quantity rather
+than comparisons of magnitude; chaining them reads naturally, and
+`value < :legendary: > :normal` keeps the uncommon, rare, and epic terms. Whitespace around the dot
 is insignificant, so `a . b . c` is the same expression as `a.b.c`.
 
 `/` binds tighter than `*` so that a ratio can be written in the numerator
@@ -502,7 +519,11 @@ exponent notation and no sign inside the literal: `-3` is unary minus applied
 to `3`. An optional scale suffix may follow the digits immediately: `k`, `M`,
 `G`, `T` for 1e3, 1e6, 1e9, 1e12. Case matters, so `1k` is 1000 while `1K` is
 an error: a word that is neither a scale suffix nor a unit cannot follow a
-number.
+number. A word that is both a suffix and the start of a unit is read as the
+unit, so `1MJ` is one megajoule; the two readings would give the same value.
+
+A leading dot makes a number: `.5` is a number, so `v.5` is `v 0.5`
+(juxtaposition), not a selector.
 
 **Unit keywords.** Each is a token carrying its magnitude:
 
@@ -548,8 +569,8 @@ words are the unit keywords above plus `in`, `into`, `from`, `making`, and
 `loop`. An identifier that names an existing prototype id is not a valid
 definition target.
 
-**Comments and whitespace.** `#` outside a `:token:` starts a comment that runs
-to end of line. Spaces and tabs separate tokens and are otherwise
+**Comments and whitespace.** `#` starts a comment that runs to end of line; no
+token contains `#`. Spaces and tabs separate tokens and are otherwise
 insignificant. Newlines terminate statements.
 
 **Punctuation and operators.** `(`, `)`, `{`, `}`, and the operators
@@ -611,14 +632,16 @@ Autocomplete must offer the aliases: typing `q1` … `q5` surfaces
 Only a small set of operators read a reference facet; every other operator
 drops it. This is a single normative rule and not a per-operator decision.
 
-| Operator | Reads | Writes |
-|---|---|---|
-| `making` | `recipe` | consumes `recipe` |
-| `.` with a resource operand | `resource` | — |
-| `:recycling:` | `resource` | produces `recipe` |
-| `:stack-size:`, `.:stack-size:` | `resource` | — |
-| quality filters `<` `>` `<=` `>=` `==` `!=` | `resource`, `recipe` | — |
-| quality operand (§3.3) | quantity, machine, config, recipe | rewrites quality everywhere |
+| Operator | Reference facet it reads |
+|---|---|
+| `making` | `recipe` on its right operand |
+| `:recycling:` | `resource`, and only an item reference |
+| `:stack-size:`, `.:stack-size:` | `resource`, and only an item reference |
+| quality operand (§3.3) | rewrites `resource` and `recipe` |
+
+`.` and the quality filters do not read a reference facet: they select quantity
+terms or process rows, which carry their own concrete quality (§3.2), and they
+ignore the reference entirely.
 
 Scaling therefore destroys an item's identity. `3 :iron-plate:` has no
 `resource` facet, so `:stack-size: (3 :iron-plate:)` is an error. That is
@@ -646,7 +669,9 @@ partner is silently dropped.
 | `machine` | config | the machine with that config merged in |
 | quality | any | the quality operand of §3.3 |
 
-Everything else drops, and a value with no applicable pair is an error.
+Everything else drops, and a value with no applicable pair is an error. A
+process juxtaposes only with a dimensionless number; two processes, or a
+process and a facet-bearing value, are errors.
 
 Applying stacks to an item multiplies each limit's amount by `min(limit,
 stack_size)`, sums the limits, and multiplies by the item's coefficient. A
@@ -730,6 +755,9 @@ Multiplication adds exponents and division subtracts them.
 
 - At most one operand may have a `per`. Two `per`s drop the quantity facet,
   whether they name the same resource (`X⁻²`) or different ones (`X⁻¹Y⁻¹`).
+- A quantity with one item in the numerator never keeps that item in `per`:
+  the two cancel when the value is constructed, so
+  `3:iron-plate:/:iron-plate:` is the number `3`.
 - **Cancellation.** Multiplying by a single-term bundle whose resource is the
   other operand's `per` cancels both. This is what makes the ratio idiom work:
 
@@ -766,8 +794,10 @@ no facet survives.
 
 #### Unary `-` and `.abs`
 
-Both act on the amount coefficient-wise; `per` and the exponents are unchanged.
-A config has no negative form and drops, as do the reference facets (§5.1).
+Unary `-` and `.abs` work on a quantity's amount, on a stack rate or capacity,
+and on a machine's count, coefficient-wise; `per` and the exponents are
+unchanged. Unary `-` also negates a process; `.abs` refuses one. A config has no
+negative form and drops, as do the reference facets (§5.1).
 
 #### Filters
 
@@ -832,7 +862,7 @@ needing, since it drops fluids.
 - The left operand must be a quantity of items or fluids, or carry the
   `craft` exponent.
 - The right operand is an `Unscaled` process, or a machine from which the
-  recipe is inferred.
+  recipe is inferred. A process of any other extent is an error.
 - `into` sizes by the recipe's input consumption of the selected resource,
   `from` by its output, `in` by its net output. Zero rows never exist — the
   operation that computes them removes them — so a resource the recipe does not
@@ -874,9 +904,10 @@ needing, since it drops fluids.
 - `+` and `-` require both operands to have the same extent kind, and add the
   row scales. An `Unspecified` process is the identity under `+`.
 - `*` and `/` by a dimensionless number size the process: a counted machine or
-  a scaled process picks one recipe — the only row, else the only common one,
-  else an error. Without that, `2 :foundry: making :transport-belt:` would
-  multiply the five quality variants instead of choosing one.
+  a scaled process picks one recipe — the only row, else the
+  normal-quality row among the quality variants of one recipe, else an error.
+  Without that, `2 :foundry: making :transport-belt:` would multiply the five
+  quality variants instead of choosing one.
 - `Machines(n)` multiplied by a time quantity becomes `MachineSeconds(n·t)`.
 - `MachineSeconds(τ)` divided by a time quantity becomes `Machines(τ/t)`.
 - `Unscaled` combined with anything is an error.
@@ -906,6 +937,8 @@ A `StackLimit` is either `Full`, meaning the item's own stack size, or
   `belt speed * 60 * 8` items per second and the capacity is 8 stacks.
 - `:stacked-belt:` uses the belt-stacking level, one through four. The level is
   a setting that the stacking research drives; it is capped at four.
+- A value with no stack facet loses every facet under `:stacked-belt:`, and the
+  operator therefore errors.
 - `:stacked-belt:` requires every stack facet to be at `Limit(1)` and collapses
   each of them to a single term at the configured stacking level, so a belt
   yields a stacked rate and a stacked capacity together. A fluid rate is an
@@ -940,8 +973,9 @@ A config is a module list plus a beacon-group map.
   entry. Zero counts are removed.
 - A beacon group is keyed by (beacon id, beacon quality, its module list) and
   holds a beacon count.
-- An empty config is present but empty. It renders as `0` only when it is the
-  whole value (§7.5).
+- A config is never empty: a value with no modules and no beacons has no
+  `config` facet. An empty config can therefore not be produced; were one
+  displayed, it would read `(empty config)`.
 
 Validation happens when a config is attached: the machine's module slot count
 and allowed effects, each beacon's module slot count and its `allowed_effects`,
@@ -1098,7 +1132,7 @@ never a silent zero.
 | `.productivity`, `.prod` | process | the shared value; error when rows disagree |
 | `.pollution` | `machine` | pollution per minute after config effects, not multiplied by the count |
 | `.pollution` | process | per minute for `Unscaled`/`Machines`, total for `MachineSeconds` |
-| `.power` | `machine` | modifier power × count |
+| `.power` | `machine` | machine power × count |
 | `.power` | process, `Unscaled` or `Machines` | total watts |
 | `.power` | process, `MachineSeconds` | error |
 | `.power` | item | the prototype's `power_w` × coefficient |
@@ -1111,15 +1145,13 @@ never a silent zero.
 | `.:speed:` | process | the shared speed; error when rows differ |
 | `.:module-slots:` | `machine` | the prototype's module slot count |
 | `.abs` | any non-process | absolute values; config drops |
-| `.:stack-size:` | a value with a `resource` facet naming an item | that item's stack size |
-| `.:item:` | quantity or process | the item terms only |
-| `.:fluid:` | quantity or process | the fluid terms only |
+| `.:stack-size:` | a value with a `resource` facet naming an item | that item's stack size; not a process, machine, config, or fluid |
+| `.:item:` | quantity or process | the item terms only; not a machine or a config |
+| `.:fluid:` | quantity or process | the fluid terms only; not a machine or a config |
 | `.level` | quality | §4.6 |
 | `.multiplier` | quality | §4.6 |
 | `.in`, `.out`, `.net` | process | §6.4 |
 | `.EXPR` | quantity or process | the matching rows, where the expression names a resource (§5.3, §6.4) |
-| `.:item:` | quantity or process | the item rows |
-| `.:fluid:` | quantity or process | the fluid rows |
 
 Notes:
 
@@ -1448,7 +1480,8 @@ p.:electric:                            # watts
 ```
 
 - `q.:iron-plate:` is exactly `540:iron-plate:/s`: 45 items/s for an express
-  belt, times 4 for stacking level 4, times 3 belts.
+  belt, times 4 for stacking level 4, times 3 belts. The 4 is the belt-stacking
+  setting's default; at another level the stacked rate differs.
 - `p.net.:iron-plate:` equals the requested rate. This one assertion exercises
   belt application, `:stacked-belt:`, config parsing, `making`, `from`, and
   process scaling together.
@@ -1565,5 +1598,9 @@ equality for quantities, configs, machines, and qualities (§7.5).
 | D41 | A quantity with several resource terms scales one process row per term, and two terms selecting the same recipe is an error. | T3 filters to a set of qualities, and each quality is its own recipe; the same recipe twice would double count. |
 | D42 | There is no `belt` facet. | No operator reads one. A belt token carries `quantity`, `stack_rate`, and `stack_capacity`, and `:stacked-belt:` works on any non-fluid `stack_rate`. |
 | D43 | Machine-seconds is an extent magnitude, not a unit; `.machines` is a rate-process property and `.:time:` is a count-process property. | Quantities carry only `second`, `joule`, `craft`, and resources; the extent already says whether the number is a rate or a total. |
-| D44 | Hidden items and hidden recipes are excluded from autocomplete but not from inference, and remain reachable by naming them (`:recycling:`). | A recycler mostly makes hidden recipes, so excluding them from inference makes `into :recycler:` fail; they are kept out of the completion list because they would dominate it. |
+| D44 | Hidden items and hidden recipes are excluded from autocomplete but not from inference, and remain reachable by naming them (`:iron-plate-recycling:`). | A recycler mostly makes hidden recipes, so excluding them from inference makes `into :recycler:` fail; they are kept out of the completion list because they would dominate it. |
 | D45 | `:stacked-belt:` requires a single `Limit(1)` stack limit and errors otherwise. | Stacking is a belt operation. An inserter's rate is incidentally at `Limit(1)` before capacity research, which is meaningless but not worth a special case to reject. |
+| D46 | Floating-point precision is treated as irrelevant: arithmetic is assumed to be algebraic, and differences below the `1e-9` threshold are not observable. | The calculator is a planning tool; carrying rounding semantics through every operator would cost more than it explains. |
+| D47 | Quality filters bind tighter than arithmetic. | They behave like suffixes on a quantity rather than comparisons of magnitude, so `value < :legendary: > :normal` reads as one filtered value. |
+| D48 | Sizing by zero yields `Unspecified` so that `a p1 + b p2` always works for unscaled processes `p1` and `p2` and dimensionless scalars `a` and `b`, even when either scalar is zero. | The empty process must be the identity under `+`, or a zero term would poison an accumulator. |
+| D49 | The approximate-zero threshold is `1e-9`, chosen arbitrarily. | One part per billion is far below any factory rate and far above float noise. |
