@@ -102,17 +102,15 @@ enum DisplaySetting {
     Font,
     TimeUnit,
     ItemRates,
-    IdlePower,
     Decimals,
     MetricPrefixes,
 }
 
-const DISPLAY_SETTINGS: [DisplaySetting; 7] = [
+const DISPLAY_SETTINGS: &[DisplaySetting] = &[
     DisplaySetting::Theme,
     DisplaySetting::Font,
     DisplaySetting::TimeUnit,
     DisplaySetting::ItemRates,
-    DisplaySetting::IdlePower,
     DisplaySetting::Decimals,
     DisplaySetting::MetricPrefixes,
 ];
@@ -124,11 +122,18 @@ enum ResearchSetting {
     Productivity,
 }
 
-const RESEARCH_SETTINGS: [ResearchSetting; 3] = [
+const RESEARCH_SETTINGS: &[ResearchSetting] = &[
     ResearchSetting::BeltStacking,
     ResearchSetting::InserterCapacity,
     ResearchSetting::Productivity,
 ];
+
+#[derive(Clone, Copy)]
+enum CalculationSetting {
+    IdlePower,
+}
+
+const CALCULATION_SETTINGS: &[CalculationSetting] = &[CalculationSetting::IdlePower];
 
 /// Width of the widest settings-bar label, shared so both bars line up.
 fn settings_label_width(ui: &Ui) -> f32 {
@@ -142,7 +147,9 @@ fn settings_label_width(ui: &Ui) -> f32 {
                 .x
         })
     };
-    width("Display").max(width("Research"))
+    width("Display")
+        .max(width("Research"))
+        .max(width("Calculation"))
 }
 
 /// Splits settings into rows that fit in `available`, given the gap used
@@ -635,10 +642,8 @@ impl HactorioApp {
             ui,
             "Display",
             label_width,
-            &DISPLAY_SETTINGS,
-            |ui, setting| {
-                self.display_setting_ui(ui, setting, registry);
-            },
+            DISPLAY_SETTINGS,
+            |ui, setting| self.display_setting_ui(ui, setting, registry),
         );
 
         self.settings_changed(before);
@@ -647,6 +652,7 @@ impl HactorioApp {
     fn display_setting_ui(&mut self, ui: &mut Ui, setting: DisplaySetting, registry: &Registry) {
         match setting {
             DisplaySetting::Theme => {
+                ui.label("Theme");
                 egui::global_theme_preference_buttons(ui);
             }
             DisplaySetting::Font => {
@@ -709,16 +715,6 @@ impl HactorioApp {
                         .on_hover_text("Show item rates as stacks on stacked belts");
                 });
             }
-            DisplaySetting::IdlePower => {
-                ui.label("Idle power");
-                for mode in [
-                    IdlePower::Ignored,
-                    IdlePower::Fractional,
-                    IdlePower::RoundedUp,
-                ] {
-                    ui.selectable_value(&mut self.settings.idle_power, mode, mode.name());
-                }
-            }
             DisplaySetting::Decimals => {
                 ui.label("Decimals");
                 ui.add(egui::Slider::new(&mut self.settings.max_decimals, 0..=6));
@@ -737,10 +733,8 @@ impl HactorioApp {
             ui,
             "Research",
             label_width,
-            &RESEARCH_SETTINGS,
-            |ui, setting| {
-                self.research_setting_ui(ui, setting, registry, researches);
-            },
+            RESEARCH_SETTINGS,
+            |ui, setting| self.research_setting_ui(ui, setting, registry, researches),
         );
 
         self.settings_changed(before);
@@ -803,6 +797,42 @@ impl HactorioApp {
                             }
                         });
                 });
+            }
+        }
+    }
+
+    fn calculation_bar(&mut self, ui: &mut Ui, label_width: f32) {
+        let before = self.settings.clone();
+
+        settings_bar(
+            ui,
+            "Calculation",
+            label_width,
+            CALCULATION_SETTINGS,
+            |ui, setting| self.calculation_setting_ui(ui, setting),
+        );
+
+        self.settings_changed(before);
+    }
+
+    fn calculation_setting_ui(&mut self, ui: &mut Ui, setting: CalculationSetting) {
+        match setting {
+            CalculationSetting::IdlePower => {
+                ui.label("Idle power");
+                ui.selectable_value(&mut self.settings.idle_power, IdlePower::Ignored, "Ignored");
+                ui.selectable_value(
+                    &mut self.settings.idle_power,
+                    IdlePower::Fractional,
+                    "Fractional",
+                );
+                ui.selectable_value(
+                    &mut self.settings.idle_power,
+                    IdlePower::RoundedUp,
+                    "Rounded up",
+                )
+                .on_hover_text(
+                    "Include idle power for the number of machines needed, rounded up to the next integer",
+                );
             }
         }
     }
@@ -941,6 +971,10 @@ impl HactorioApp {
 
             egui::Panel::top("research_settings").show(ui, |ui| {
                 self.research_bar(ui, registry, label_width);
+            });
+
+            egui::Panel::top("calculation_settings").show(ui, |ui| {
+                self.calculation_bar(ui, label_width);
             });
 
             egui::Panel::bottom("status").show(ui, |ui| {
