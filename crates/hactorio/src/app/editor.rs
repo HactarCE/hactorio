@@ -319,7 +319,8 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                     completion.word = word.clone();
                     completion.selected = 0;
                     completion.needs_scroll = true;
-                    let items = if word.is_empty() && !after_dot {
+                    let after_comparison = completion::after_comparison(&tab.text, cursor_char);
+                    let items = if word.is_empty() && !after_dot && !after_comparison {
                         Vec::new()
                     } else {
                         completion_items(registry, settings, &tab.text, word_start, &word)

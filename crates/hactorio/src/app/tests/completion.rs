@@ -1304,6 +1304,76 @@ fn a_quantity_offers_items_after_a_dot() {
 }
 
 #[test]
+fn a_comparison_offers_only_qualities() {
+    let registry = fixture_registry();
+    for text in [
+        ":iron-plate: > :",
+        ":iron-plate: >:",
+        ":iron-plate: >= :",
+        ":iron-plate: < :",
+        ":iron-plate: <= :",
+        ":iron-plate: == :",
+        ":iron-plate: != :",
+    ] {
+        let labels = completion_labels(&registry, text);
+        assert_eq!(
+            labels.len(),
+            hactorio_core::new_eval::Quality::ALL.len(),
+            "{text}: {labels:?}"
+        );
+        for quality in hactorio_core::new_eval::Quality::ALL {
+            assert!(
+                labels.iter().any(|label| label == quality.name()),
+                "{text}: {labels:?}"
+            );
+        }
+    }
+
+    // A quality alias resolves to the glyph, as it does in normal context.
+    let item = first_completion(&registry, ":iron-plate: > q3");
+    assert_eq!(
+        item.insert,
+        hactorio_core::new_eval::Quality::Rare.glyph().to_string()
+    );
+    assert_eq!(item.label, "quality-3");
+}
+
+#[test]
+fn a_definition_is_not_a_comparison() {
+    let registry = fixture_registry();
+    let labels = completion_labels(&registry, "x = :");
+    assert!(
+        labels.iter().any(|label| label == "iron-plate"),
+        "{labels:?}"
+    );
+}
+
+#[test]
+fn typing_a_comparison_opens_quality_completions() {
+    let document = editor_document("# Main\n", 0, 6);
+    let (mut harness, dir) = completion_harness("comparison-trigger", document);
+    harness.run();
+    type_into_editor(&mut harness, " :iron-plate: >");
+    let app = harness.state().as_ref().expect("app");
+    let inserts: Vec<String> = app
+        .completion
+        .items
+        .iter()
+        .map(|item| item.insert.clone())
+        .collect();
+    let expected: Vec<String> = hactorio_core::new_eval::Quality::ALL
+        .iter()
+        .map(|quality| quality.glyph().to_string())
+        .collect();
+    assert_eq!(inserts.len(), expected.len(), "{inserts:?}");
+    for glyph in expected {
+        assert!(inserts.contains(&glyph), "{inserts:?}");
+    }
+
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn making_offers_qualities_alongside_recipes() {
     let registry = fixture_registry();
     let text = "making :";

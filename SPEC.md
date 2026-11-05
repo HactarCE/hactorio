@@ -806,6 +806,10 @@ operand must be a **quality**; a number or a quantity there is an error. These
 are quality filters, not comparisons of magnitude, and `==` is not an equality
 operator: it filters the terms whose quality is the given one.
 
+Autocomplete after a comparison operator offers the qualities alone, since
+they are the only legal right operand. A lone `=` is a definition (§2.2), not a
+comparison, so it keeps the ordinary completions.
+
 #### Quality filters
 
 - Item terms are kept when their quality satisfies the comparison and dropped

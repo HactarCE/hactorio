@@ -20,6 +20,8 @@ enum CompletionContext {
     Recipe,
     Config,
     Property,
+    /// After a comparison operator, whose right operand is a quality (§5.3).
+    Filter,
 }
 
 #[derive(Clone, Default)]
@@ -85,7 +87,7 @@ fn is_completion_boundary(ch: char) -> bool {
     ch.is_whitespace()
         || matches!(
             ch,
-            '+' | '-' | '*' | '/' | '^' | '=' | '(' | ')' | '#' | '.'
+            '+' | '-' | '*' | '/' | '^' | '=' | '<' | '>' | '!' | '(' | ')' | '#' | '.'
         )
 }
 
@@ -165,6 +167,18 @@ fn previous_word(before: &[char]) -> String {
         .collect();
     word.reverse();
     word.into_iter().collect()
+}
+
+/// Whether the text before `cursor` ends with a comparison operator.
+///
+/// A comparison's right operand is a quality (§5.3), so its completions are
+/// qualities alone. A lone `=` is a definition, not a comparison.
+pub(super) fn after_comparison(text: &str, cursor: usize) -> bool {
+    let before: String = text.chars().take(cursor).collect();
+    let trimmed = before.trim_end();
+    ["<=", ">=", "==", "!=", "<", ">"]
+        .iter()
+        .any(|operator| trimmed.ends_with(operator))
 }
 
 /// Common community names for prototypes.
@@ -661,6 +675,8 @@ pub(super) fn completion_items(
         .filter(|index| before[*index] == '.');
     let context = if dot.is_some() {
         CompletionContext::Property
+    } else if after_comparison(text, word_start) {
+        CompletionContext::Filter
     } else {
         match previous_word(&before).as_str() {
             "making" => CompletionContext::Recipe,
@@ -693,6 +709,7 @@ pub(super) fn completion_items(
                 .recipe
                 .is_some_and(|recipe| !registry.recipe(recipe).hidden),
             _ if entry.hidden => false,
+            CompletionContext::Filter => false,
             CompletionContext::Machine => entry.machine().is_some(),
             CompletionContext::Config => entry.module.is_some() || entry.beacon.is_some(),
             CompletionContext::Property => match &value {
@@ -791,11 +808,12 @@ pub(super) fn completion_items(
 
     if matches!(
         context,
-        CompletionContext::Normal | CompletionContext::Recipe
+        CompletionContext::Normal | CompletionContext::Recipe | CompletionContext::Filter
     ) {
         // A quality qualifies a prototype, filters a quantity, and can precede
         // a recipe after `making`, so every quality is offered (§4.6). Its
-        // spellings all match the one glyph row.
+        // spellings all match the one glyph row. After a comparison it is the
+        // only legal operand (§5.3).
         push_qualities(&mut items, needle);
     }
 
