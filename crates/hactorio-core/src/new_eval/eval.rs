@@ -62,7 +62,8 @@ pub struct Evaluation {
 
 struct Cancelled;
 
-type Env = BTreeMap<String, Result<Value, ValueError>>;
+/// Every name's value, or the line of the definition that poisoned it.
+type Env = BTreeMap<String, Result<Value, usize>>;
 
 /// Evaluates a document. Evaluation stops without producing output when
 /// `cancel` returns true, and the check runs at every statement boundary
@@ -155,16 +156,16 @@ impl Runner<'_> {
                         Ok(value) => Output::Value(value),
                         Err(error) => Output::Error {
                             message: error.to_string(),
-                            span: self.line_span(line),
+                            span: error.span().unwrap_or_else(|| self.line_span(line)),
                         },
                     };
                 }
                 Ok(Line::Definition { place, op, value }) => {
-                    self.outputs[line] = match self.define(place, *op, value) {
+                    self.outputs[line] = match self.define(place, *op, value, line) {
                         Ok(value) => Output::Value(value),
                         Err(error) => Output::Error {
                             message: error.to_string(),
-                            span: self.line_span(line),
+                            span: error.span().unwrap_or_else(|| self.line_span(line)),
                         },
                     };
                 }
@@ -200,8 +201,28 @@ impl Runner<'_> {
                     };
                     self.outputs[line] = Output::None;
                     self.outputs[self.lines[close].0] = Output::None;
-                    for _ in 0..iterations {
+                    for iteration in 0..iterations {
                         self.run(index + 1, close)?;
+                        // An error does not stop the iteration, but it stops the
+                        // loop after that iteration (§2.6).
+                        let failed = (index + 1..close)
+                            .find(|body| self.outputs[self.lines[*body].0].error().is_some());
+                        if let Some(body) = failed {
+                            let completed = iteration + 1;
+                            let wording = if completed == 1 {
+                                "iteration"
+                            } else {
+                                "iterations"
+                            };
+                            self.outputs[line] = Output::Error {
+                                message: format!(
+                                    "loop aborted after {completed} {wording} due to error on line {}",
+                                    self.lines[body].0 + 1
+                                ),
+                                span: self.line_span(line),
+                            };
+                            break;
+                        }
                     }
                     index = close + 1;
                     continue;
@@ -243,12 +264,21 @@ impl Runner<'_> {
     fn lookup(&self, name: &str) -> Result<Value, ValueError> {
         match self.env.get(name) {
             Some(Ok(value)) => Ok(value.clone()),
-            Some(Err(error)) => Err(error.clone()),
+            Some(Err(line)) => Err(ValueError::new(format!(
+                "`{name}` has error from line {}",
+                line + 1
+            ))),
             None => Err(ValueError::new(format!("`{name}` is not defined"))),
         }
     }
 
-    fn define(&mut self, place: &Place, op: AssignOp, value: &Expr) -> Result<Value, ValueError> {
+    fn define(
+        &mut self,
+        place: &Place,
+        op: AssignOp,
+        value: &Expr,
+        line: usize,
+    ) -> Result<Value, ValueError> {
         let result = match &place.selector {
             // Only a process's resource rows are assignable (§2.2).
             Some(Selector::Resource(resource)) => self
@@ -271,7 +301,10 @@ impl Runner<'_> {
                     }),
             },
         };
-        self.env.insert(place.name.clone(), result.clone());
+        self.env.insert(
+            place.name.clone(),
+            result.clone().map_err(|_| line),
+        );
         result
     }
 
@@ -282,7 +315,7 @@ impl Runner<'_> {
             Expr::Token(id) => self.token(*id, None),
             Expr::Qualified { id, quality } => self.token(*id, Some(*quality)),
             Expr::Quality(quality) => Ok(Value::Quality(*quality)),
-            Expr::Variable(name) => self.lookup(name),
+            Expr::Variable { name, span } => self.lookup(name).map_err(|error| error.at(*span)),
             Expr::Negate(inner) => self.eval(inner)?.negate(),
             Expr::StackSize(inner) => self.stack_size(&self.eval(inner)?),
             Expr::StackedBelt(inner) => {
@@ -1203,6 +1236,20 @@ fn validate_config(config: &Config, registry: &Registry) -> Result<(), ValueErro
             }
         }
     }
+    // The distribution profile must have an entry for the total beacon count
+    // (§6.2).
+    let total = config.total_beacons();
+    if total > 0
+        && let Some(group) = config.beacons.keys().next()
+        && let Some(beacon) = &registry.entry_by_index(group.beacon).beacon
+        && usize::try_from(total).is_ok_and(|count| count > beacon.profile.len())
+    {
+        return Err(ValueError::new(format!(
+            "`:{}:` has a beacon profile for {} beacons, not {total}",
+            registry.entry_by_index(group.beacon).id,
+            beacon.profile.len()
+        )));
+    }
     Ok(())
 }
 
@@ -1682,10 +1729,12 @@ mod tests {
     }
 
     #[test]
-    fn a_loop_body_keeps_running_after_an_error() {
+    fn a_loop_body_finishes_its_iteration_then_aborts() {
         let outputs = run("x = 0\nloop 2 {\n  y = :nope:\n  x += 1\n}\nx");
+        // The iteration completes, so `x` is 1, and the loop reports the abort
+        // on its own line.
         assert!(matches!(outputs[2], Output::Error { .. }));
-        assert_eq!(outputs[5], Output::Value(Value::number(2.0)));
+        assert_eq!(outputs[5], Output::Value(Value::number(1.0)));
     }
 
     #[test]
@@ -1716,7 +1765,7 @@ mod tests {
         };
         // The quantity is the only facet, so its reason is shown (§8).
         assert!(message("1:iron-plate:/s * 2:copper-plate:/s").contains("bundle"));
-        assert!(message("(2:iron-plate:)^2").contains("raised to a power"));
+        assert!(message("(2:iron-plate:)^2").contains("that power"));
     }
 
     #[test]

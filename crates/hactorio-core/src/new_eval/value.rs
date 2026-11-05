@@ -18,21 +18,38 @@ pub fn is_zero(value: f64) -> bool {
 
 /// A user-facing evaluation error (§8).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ValueError(String);
+pub struct ValueError {
+    message: String,
+    /// Where the error should be underlined, when a sub-expression knows it.
+    span: Option<super::parse::Span>,
+}
 
 impl ValueError {
     pub fn new(message: impl Into<String>) -> Self {
-        Self(message.into())
+        Self {
+            message: message.into(),
+            span: None,
+        }
+    }
+
+    /// The same error, underlined at `span`.
+    pub fn at(mut self, span: super::parse::Span) -> Self {
+        self.span = Some(span);
+        self
     }
 
     pub fn message(&self) -> &str {
-        &self.0
+        &self.message
+    }
+
+    pub fn span(&self) -> Option<super::parse::Span> {
+        self.span
     }
 }
 
 impl fmt::Display for ValueError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.message)
     }
 }
 
@@ -498,14 +515,23 @@ impl Quantity {
                 "the exponent must be a dimensionless number",
             ));
         };
-        let Some(base) = self.amount.number_value() else {
-            return Err(ValueError::new(
-                "a resource bundle cannot be raised to a power",
-            ));
-        };
-
         let has_units =
             self.per.is_some() || self.second != 0 || self.joule != 0 || self.craft != 0;
+        let Some(base) = self.amount.number_value() else {
+            // A bundle is representable only at exponents one, zero, and minus
+            // one; a reciprocal needs at most one resource in the numerator.
+            let power = as_integer(power)
+                .ok_or_else(|| ValueError::new("a resource bundle needs an integer exponent"))?;
+            return match power {
+                0 => Ok(Self::number(1.0)),
+                1 => Ok(self.clone()),
+                -1 => self.reciprocal(),
+                _ => Err(ValueError::new(
+                    "a resource bundle cannot be raised to that power",
+                )),
+            };
+        };
+
         if !has_units {
             return Ok(Self::number(base.powf(power)));
         }
@@ -865,7 +891,7 @@ impl Config {
 
     /// Scales counts, which requires a nonnegative integer factor (§5.5).
     pub fn scale(&self, factor: f64) -> Option<Self> {
-        let factor = as_count(factor)?;
+        let factor = as_count(factor).filter(|factor| *factor >= 1)?;
         let modules = self
             .modules
             .iter()
@@ -1169,18 +1195,7 @@ impl Process {
                     .map(|(resource, amount)| (*resource, amount * seconds))
                     .collect(),
             }),
-            Extent::Unscaled => Some(Self {
-                extent: Extent::MachineSeconds,
-                // An unscaled row is one machine, so its machine-seconds are
-                // the seconds themselves.
-                rows: self.rows.keys().map(|key| (key.clone(), seconds)).collect(),
-                net: self
-                    .net
-                    .iter()
-                    .map(|(resource, amount)| (*resource, amount * seconds))
-                    .collect(),
-            }),
-            Extent::MachineSeconds | Extent::Unspecified => None,
+            Extent::Unscaled | Extent::MachineSeconds | Extent::Unspecified => None,
         }
     }
 
@@ -1456,8 +1471,7 @@ impl MultiValue {
                 ..machine.clone()
             }),
             config: None,
-            resource: self.resource,
-            recipe: self.recipe,
+            ..Self::default()
         };
         if result.is_empty() {
             return Err(ValueError::new("unary `-` dropped every facet"));
@@ -1471,9 +1485,7 @@ impl MultiValue {
             stack_rate: self.stack_rate.as_ref().map(Stacks::absolute),
             stack_capacity: self.stack_capacity.as_ref().map(Stacks::absolute),
             machine: self.machine.clone(),
-            config: self.config.clone(),
-            resource: self.resource,
-            recipe: self.recipe,
+            ..Self::default()
         };
         if result.is_empty() {
             return Err(ValueError::new("`.abs` dropped every facet"));

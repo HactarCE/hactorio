@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use egui::{Align, Context, RichText, TextStyle, Ui};
 use hactorio_core::new_eval::Evaluation;
+use hactorio_core::belt::BeltTier;
 use hactorio_core::{Settings, TimeUnit, from_plaintext, to_plaintext};
 use hactorio_data::{GameInstall, Registry, locate};
 
@@ -100,14 +101,16 @@ enum DisplaySetting {
     Theme,
     Font,
     TimeUnit,
+    ItemRates,
     Decimals,
     MetricPrefixes,
 }
 
-const DISPLAY_SETTINGS: [DisplaySetting; 5] = [
+const DISPLAY_SETTINGS: [DisplaySetting; 6] = [
     DisplaySetting::Theme,
     DisplaySetting::Font,
     DisplaySetting::TimeUnit,
+    DisplaySetting::ItemRates,
     DisplaySetting::Decimals,
     DisplaySetting::MetricPrefixes,
 ];
@@ -286,6 +289,11 @@ fn productivity_research_cap(research: &hactorio_data::ProductivityResearch) -> 
         })
         .max()
         .unwrap_or(u32::MAX)
+}
+
+/// The game item whose icon represents a belt tier.
+fn belt_tier_glyph(registry: &Registry, tier: BeltTier) -> Option<char> {
+    registry.entry(tier.item_id()).map(|entry| entry.glyph)
 }
 
 pub struct HactorioApp {
@@ -618,7 +626,7 @@ impl HactorioApp {
         }
     }
 
-    fn display_bar(&mut self, ui: &mut Ui, label_width: f32) {
+    fn display_bar(&mut self, ui: &mut Ui, registry: &Registry, label_width: f32) {
         let before = self.settings.clone();
 
         settings_bar(
@@ -627,14 +635,14 @@ impl HactorioApp {
             label_width,
             &DISPLAY_SETTINGS,
             |ui, setting| {
-                self.display_setting_ui(ui, setting);
+                self.display_setting_ui(ui, setting, registry);
             },
         );
 
         self.settings_changed(before);
     }
 
-    fn display_setting_ui(&mut self, ui: &mut Ui, setting: DisplaySetting) {
+    fn display_setting_ui(&mut self, ui: &mut Ui, setting: DisplaySetting, registry: &Registry) {
         match setting {
             DisplaySetting::Theme => {
                 egui::global_theme_preference_buttons(ui);
@@ -671,6 +679,33 @@ impl HactorioApp {
                 for unit in [TimeUnit::Second, TimeUnit::Minute, TimeUnit::Hour] {
                     ui.selectable_value(&mut self.settings.time_unit, unit, unit.name());
                 }
+            }
+            DisplaySetting::ItemRates => {
+                ui.label("Item rates");
+                let unit = self.settings.time_unit.short_name();
+                ui.selectable_value(
+                    &mut self.settings.item_rate_belt_display,
+                    None,
+                    format!("item/{unit}"),
+                );
+                for tier in BeltTier::ALL {
+                    let label: egui::WidgetText = match belt_tier_glyph(registry, tier) {
+                        Some(glyph) => RichText::new(glyph.to_string()).size(GLYPH_SIZE).into(),
+                        None => tier.item_id().to_string().into(),
+                    };
+                    ui.selectable_value(
+                        &mut self.settings.item_rate_belt_display,
+                        Some(tier),
+                        label,
+                    )
+                    .on_hover_text(format!("{} item/s", tier.items_per_second()));
+                }
+                ui.add_enabled_ui(self.settings.item_rate_belt_display.is_some(), |ui| {
+                    let stack_label =
+                        RichText::new(hactorio_data::STACK_SIZE_GLYPH.to_string()).size(GLYPH_SIZE);
+                    ui.toggle_value(&mut self.settings.stacked_belts_display, stack_label)
+                        .on_hover_text("Show item rates as stacks on stacked belts");
+                });
             }
             DisplaySetting::Decimals => {
                 ui.label("Decimals");
@@ -889,7 +924,7 @@ impl HactorioApp {
         let label_width = settings_label_width(ui);
         if let Some(registry) = &loaded {
             egui::Panel::top("display_settings").show(ui, |ui| {
-                self.display_bar(ui, label_width);
+                self.display_bar(ui, registry, label_width);
             });
 
             egui::Panel::top("research_settings").show(ui, |ui| {

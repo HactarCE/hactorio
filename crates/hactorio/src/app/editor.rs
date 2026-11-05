@@ -395,6 +395,37 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                 let error_color = Color32::from_rgb(220, 90, 90);
                 let painter = ui.painter();
 
+                // Underline the span of every error, so the offending token is
+                // marked where it is (§8).
+                let mut line_start = 0usize;
+                for (index, line) in tab.text.split('\n').enumerate() {
+                    let fresh = outputs.hashes.get(index).copied() == Some(line_hash(line));
+                    if fresh
+                        && let Some((_, span)) = outputs.outputs.get(index).and_then(|o| o.error())
+                        && line.is_char_boundary(span.start.min(line.len()))
+                        && line.is_char_boundary(span.end.min(line.len()))
+                    {
+                        let start = line[..span.start.min(line.len())].chars().count();
+                        let end = line[..span.end.min(line.len())]
+                            .chars()
+                            .count()
+                            .max(start + 1);
+                        let from = galley
+                            .pos_from_cursor(egui::text::CCursor::new(line_start + start));
+                        let to =
+                            galley.pos_from_cursor(egui::text::CCursor::new(line_start + end));
+                        let y = origin.y + from.bottom() - 1.0;
+                        painter.line_segment(
+                            [
+                                egui::pos2(origin.x + from.left(), y),
+                                egui::pos2(origin.x + to.left(), y),
+                            ],
+                            egui::Stroke::new(1.5, error_color),
+                        );
+                    }
+                    line_start += line.chars().count() + 1;
+                }
+
                 for (index, line) in tab.text.split('\n').enumerate() {
                     let Some(row) = galley.rows.get(index) else {
                         break;

@@ -402,10 +402,12 @@ fn keyword(word: &str) -> Option<Keyword> {
 /// Unit keywords and control keywords never lex as identifiers, but the
 /// numeric scale suffixes do, so a definition such as `M = 3` would otherwise
 /// create a variable that can never be written in an expression.
+/// A word that is never a variable name.
+///
+/// The scale suffixes (`k`, `M`, `G`, `T`) are not here: they only occur after
+/// a number or before a unit, so `k` is an ordinary identifier (§4.4).
 pub fn is_reserved_word(word: &str) -> bool {
-    matches!(word, "k" | "M" | "G" | "T")
-        || Unit::from_keyword(word).is_some()
-        || keyword(word).is_some()
+    Unit::from_keyword(word).is_some() || keyword(word).is_some()
 }
 
 fn starts_number(rest: &str) -> bool {

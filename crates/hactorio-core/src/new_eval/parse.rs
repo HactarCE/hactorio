@@ -138,7 +138,10 @@ pub enum Expr {
         quality: Quality,
     },
     Quality(Quality),
-    Variable(String),
+    Variable {
+        name: String,
+        span: Span,
+    },
     Negate(Box<Expr>),
     StackSize(Box<Expr>),
     StackedBelt(Box<Expr>),
@@ -449,13 +452,14 @@ impl Parser<'_> {
     }
 
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
+        let span = self.peek_span();
         match self.advance() {
             Some(Token::Number(value)) => Ok(Expr::Number(value)),
             Some(Token::Unit(unit)) => Ok(Expr::Unit(unit)),
             Some(Token::Prototype(id)) => Ok(Expr::Token(id)),
             Some(Token::Qualified { id, quality }) => Ok(Expr::Qualified { id, quality }),
             Some(Token::Quality(quality)) => Ok(Expr::Quality(quality)),
-            Some(Token::Ident(name)) => Ok(Expr::Variable(name)),
+            Some(Token::Ident(name)) => Ok(Expr::Variable { name, span }),
             Some(Token::LParen) => {
                 let inner = self.parse_expr()?;
                 self.expect(Token::RParen, "expected `)`")?;
@@ -489,7 +493,10 @@ impl Parser<'_> {
             // expression naming a resource, so `p . q` selects by `q`.
             Some(Token::Ident(name)) => Ok(match Property::from_name(&name) {
                 Some(property) => ParsedSelector::Known(Selector::Property(property)),
-                None => ParsedSelector::Expression(Box::new(Expr::Variable(name))),
+                None => ParsedSelector::Expression(Box::new(Expr::Variable {
+                    name,
+                    span,
+                })),
             }),
             // `in` is a keyword and also a process property.
             Some(Token::Keyword(Keyword::In)) => {
@@ -596,7 +603,7 @@ mod tests {
             Expr::Token(_) => "token".to_string(),
             Expr::Qualified { .. } => "qualified".to_string(),
             Expr::Quality(quality) => format!(":{}:", quality.name()),
-            Expr::Variable(name) => name.clone(),
+            Expr::Variable { name, .. } => name.clone(),
             Expr::Negate(inner) => format!("(-{})", shape(inner)),
             Expr::StackSize(inner) => format!("(stack-size {})", shape(inner)),
             Expr::StackedBelt(inner) => format!("(stacked-belt {})", shape(inner)),
@@ -705,12 +712,10 @@ mod tests {
 
     #[test]
     fn reserved_words_are_not_definition_targets() {
-        for line in ["M = 1", "k += 1", "G -= 1", "T = 1", "M.in = 1"] {
-            let error = parse_line(line, &test_registry()).unwrap_err();
+        for line in ["s = 1", "kJ += 1", "loop -= 1", "making = 1", "in = 1"] {
             assert!(
-                error.message.contains("reserved"),
-                "{line}: {}",
-                error.message
+                parse_line(line, &test_registry()).is_err(),
+                "{line} parsed as a definition"
             );
         }
     }

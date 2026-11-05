@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::belt::BeltTier;
+
 /// The unit used to display time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -61,6 +63,10 @@ pub struct Settings {
     /// Display item quantities and rates with `k`/`M`/`G`.
     pub metric_prefixes: bool,
     pub time_unit: TimeUnit,
+    /// Belt tier used to display item rates, or `None` for items per second.
+    pub item_rate_belt_display: Option<BeltTier>,
+    /// Whether item rates in belt mode use stacked belts.
+    pub stacked_belts_display: bool,
     /// Belt stacking level, 1 through 4, which the stacking research sets.
     pub belt_stacking: u8,
     /// Inserter capacity research level.
@@ -76,6 +82,8 @@ impl Default for Settings {
             max_decimals: 3,
             metric_prefixes: true,
             time_unit: TimeUnit::Second,
+            item_rate_belt_display: None,
+            stacked_belts_display: false,
             belt_stacking: 4,
             inserter_capacity: 0,
             research_levels: BTreeMap::new(),

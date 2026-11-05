@@ -164,7 +164,7 @@ pub(crate) fn test_registry() -> hactorio_data::Registry {
         "quality-module-2": {"type": "module", "name": "quality-module-2", "category": "quality", "tier": 2, "stack_size": 50, "effect": {"quality": 0.25}}
       },
       "beacon": {
-        "beacon": {"type": "beacon", "name": "beacon", "module_slots": 2, "allowed_effects": ["speed", "consumption"], "distribution_effectivity": 1.5, "profile": [1.0], "energy_usage": "480kW"}
+        "beacon": {"type": "beacon", "name": "beacon", "module_slots": 2, "allowed_effects": ["speed", "consumption"], "distribution_effectivity": 1.5, "profile": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], "energy_usage": "480kW"}
       },
       "assembling-machine": {
         "foundry": {"type": "assembling-machine", "name": "foundry", "crafting_categories": ["smelting"], "crafting_speed": 4.0, "module_slots": 4, "energy_usage": "2MW", "effect_receiver": {"base_effect": {"productivity": 0.5}}, "allowed_effects": ["speed", "productivity", "consumption", "pollution", "quality"]}
@@ -182,7 +182,7 @@ pub(crate) fn test_registry() -> hactorio_data::Registry {
         "quality-module-2": {"type": "module", "name": "quality-module-2", "category": "quality", "tier": 2, "stack_size": 50, "effect": {"quality": 0.25}}
       },
       "beacon": {
-        "beacon": {"type": "beacon", "name": "beacon", "module_slots": 2, "allowed_effects": ["speed", "consumption"], "distribution_effectivity": 1.5, "profile": [1.0], "energy_usage": "480kW"}
+        "beacon": {"type": "beacon", "name": "beacon", "module_slots": 2, "allowed_effects": ["speed", "consumption"], "distribution_effectivity": 1.5, "profile": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], "energy_usage": "480kW"}
       },
       "assembling-machine": {
         "foundry": {"type": "assembling-machine", "name": "foundry", "crafting_categories": ["smelting"], "crafting_speed": 4.0, "module_slots": 4, "energy_usage": "2MW", "effect_receiver": {"base_effect": {"productivity": 0.5}}, "allowed_effects": ["speed", "productivity", "consumption", "pollution", "quality"]}
@@ -1590,5 +1590,178 @@ mod tests {
             panic!("expected facets, got {:?}", outputs[0]);
         };
         assert!(multi.recipe.is_some());
+    }
+
+    fn facets_of(text: &str) -> Vec<crate::new_eval::Output> {
+        let registry = test_registry();
+        evaluate(text, &registry, &Settings::default(), &|| false).outputs
+    }
+
+    fn error_of(outputs: &[crate::new_eval::Output], index: usize) -> (String, super::parse::Span) {
+        match &outputs[index] {
+            crate::new_eval::Output::Error { message, span } => (message.clone(), *span),
+            other => panic!("expected an error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn k_is_a_variable_name() {
+        // `k` is a number suffix, not a reserved word (§4.4).
+        let registry = test_registry();
+        let settings = Settings::default();
+        let outputs = evaluate("k = 1\nk", &registry, &settings, &|| false).outputs;
+        assert_eq!(outputs[1], crate::new_eval::Output::Value(Value::number(1.0)));
+        let outputs = evaluate("k = 2\n1k", &registry, &settings, &|| false).outputs;
+        assert_eq!(
+            outputs[1],
+            crate::new_eval::Output::Value(Value::number(1000.0))
+        );
+    }
+
+    #[test]
+    fn negation_drops_the_reference_facets() {
+        let outputs = facets_of("-:iron-plate:");
+        let crate::new_eval::Output::Value(Value::Multi(multi)) = &outputs[0] else {
+            panic!("expected facets, got {:?}", outputs[0]);
+        };
+        assert!(multi.quantity.is_some());
+        assert!(multi.resource.is_none(), "resource: {:?}", multi.resource);
+    }
+
+    #[test]
+    fn abs_drops_the_config() {
+        let outputs = facets_of("(2 :speed-module-2:).abs");
+        let crate::new_eval::Output::Value(Value::Multi(multi)) = &outputs[0] else {
+            panic!("expected facets, got {:?}", outputs[0]);
+        };
+        assert!(multi.config.is_none(), "config: {:?}", multi.config);
+    }
+
+    #[test]
+    fn a_bundle_accepts_the_representable_exponents() {
+        let plate = registry_glyph("iron-plate");
+        assert_eq!(render("(2:iron-plate:)^1"), format!("2{plate}"));
+        assert_eq!(render("(2:iron-plate:)^0"), "1");
+        assert_eq!(render("(2:iron-plate:)^-1"), format!("0.5/{plate}"));
+        // A second item term would make the reciprocal unrepresentable.
+        assert!(matches!(
+            facets_of("(2:iron-plate: + 1:copper-plate:)^-1")[0],
+            crate::new_eval::Output::Error { .. }
+        ));
+        assert!(matches!(
+            facets_of("(2:iron-plate:)^2")[0],
+            crate::new_eval::Output::Error { .. }
+        ));
+    }
+
+    #[test]
+    fn an_unscaled_process_cannot_be_timed() {
+        assert!(matches!(
+            facets_of("1 m * (:foundry: making (:normal: :iron-plate:))")[0],
+            crate::new_eval::Output::Error { .. }
+        ));
+    }
+
+    #[test]
+    fn a_beacon_profile_must_cover_the_beacon_count() {
+        // The test registry's profile has eight entries, so nine beacons has no
+        // distribution entry (§6.2).
+        let outputs = facets_of("1 :foundry: (9 :beacon: :speed-module-2:) making (:normal: :iron-plate:)");
+        let (message, _) = error_of(&outputs, 0);
+        assert!(message.contains("beacon profile"), "{message}");
+    }
+
+    #[test]
+    fn a_zero_factor_does_not_scale_a_config() {
+        let outputs = facets_of("0 (2 :speed-module-2:)");
+        let crate::new_eval::Output::Value(Value::Multi(multi)) = &outputs[0] else {
+            panic!("expected facets, got {:?}", outputs[0]);
+        };
+        assert!(multi.config.is_none(), "config: {:?}", multi.config);
+    }
+
+    #[test]
+    fn the_panel_uses_the_configured_time_unit_for_crafts() {
+        let registry = test_registry();
+        let mut settings = Settings::default();
+        settings.time_unit = crate::TimeUnit::Minute;
+        let outputs = evaluate(
+            "p = 1 :foundry: making (:normal: :iron-plate:)\np",
+            &registry,
+            &settings,
+            &|| false,
+        )
+        .outputs;
+        let crate::new_eval::Output::Value(value) = &outputs[1] else {
+            panic!("expected a process, got {:?}", outputs[1]);
+        };
+        let panel = format_facets(value, &settings, &registry).join("\n");
+        assert!(panel.contains("craft/m"), "{panel}");
+        assert!(!panel.contains("craft/s"), "{panel}");
+    }
+
+    #[test]
+    fn a_poisoned_read_names_the_definition_line() {
+        let outputs = facets_of("x = 1:iron-plate: + 1s\ny = x");
+        let (message, span) = error_of(&outputs, 1);
+        assert_eq!(message, "`x` has error from line 1");
+        assert_eq!(span, super::parse::Span::new(4, 5));
+    }
+
+    #[test]
+    fn a_loop_aborts_after_the_failing_iteration() {
+        let outputs = facets_of("loop 5 {\n  x = 1:iron-plate: + 1s\n}\n1");
+        let (message, _) = error_of(&outputs, 0);
+        assert_eq!(message, "loop aborted after 1 iteration due to error on line 2");
+        // The statement after the loop still runs (§2.5).
+        assert!(matches!(
+            outputs[3],
+            crate::new_eval::Output::Value(_)
+        ));
+    }
+
+    #[test]
+    fn belt_mode_renders_item_rates_as_belt_counts() {
+        let registry = test_registry();
+        let belt = registry
+            .entry_by_index(registry.entry_id("transport-belt").unwrap())
+            .glyph;
+        let plate = registry
+            .entry_by_index(registry.entry_id("iron-plate").unwrap())
+            .glyph;
+        let mut settings = Settings::default();
+        settings.item_rate_belt_display = Some(crate::belt::BeltTier::Yellow);
+        let render = |settings: &Settings| {
+            let outputs = evaluate("15 :iron-plate:/s", &registry, settings, &|| false).outputs;
+            match &outputs[0] {
+                crate::new_eval::Output::Value(value) => {
+                    format_value(value, settings, &registry)
+                }
+                other => panic!("expected a value, got {other:?}"),
+            }
+        };
+        assert_eq!(render(&settings), format!("1 {belt} {plate}"));
+        settings.stacked_belts_display = true;
+        let stacked = render(&settings);
+        assert!(stacked.contains(STACK_SIZE_GLYPH), "{stacked}");
+        assert!(stacked.contains(belt), "{stacked}");
+    }
+
+    fn registry_glyph(id: &str) -> String {
+        let registry = test_registry();
+        registry
+            .entry_by_index(registry.entry_id(id).unwrap())
+            .glyph
+            .to_string()
+    }
+
+    fn render(text: &str) -> String {
+        let registry = test_registry();
+        let settings = Settings::default();
+        let outputs = evaluate(text, &registry, &settings, &|| false).outputs;
+        match &outputs[0] {
+            crate::new_eval::Output::Value(value) => format_value(value, &settings, &registry),
+            other => panic!("expected a value, got {other:?}"),
+        }
     }
 }

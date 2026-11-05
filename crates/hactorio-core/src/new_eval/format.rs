@@ -5,6 +5,8 @@ use hactorio_data::{Registry, STACK_SIZE_GLYPH};
 use hactorio_data::EntryId;
 
 use super::process::Rows;
+use crate::belt::{belt_capacity, BeltTier};
+
 use super::value::{
     Amount, Config, Extent, Machine, MultiValue, Process, Quality, Quantity, Resource, ResourceRef,
     Stacks, Value,
@@ -167,7 +169,11 @@ pub fn format_process_panel(
         let crafts = if machine_seconds {
             format!("{} craft", format_number_with(crafts, settings))
         } else {
-            format!("{} craft/s", format_number_with(crafts, settings))
+            format!(
+                "{} craft/{}",
+                format_number_with(crafts, settings),
+                settings.time_unit.short_name()
+            )
         };
         lines.push(format!(
             "{} · {crafts}",
@@ -182,6 +188,12 @@ pub fn format_process_panel(
         }
         lines.push(header.to_string());
         for (resource, amount) in totals {
+            if !machine_seconds
+                && let Some(text) = format_belt_rate(amount, resource, settings, registry)
+            {
+                lines.push(text);
+                continue;
+            }
             lines.push(format!(
                 "{}{}{suffix}",
                 format_prefixed(amount * factor, settings, settings.metric_prefixes),
@@ -242,6 +254,12 @@ fn format_process(process: &Process, settings: &Settings, registry: &Registry) -
             settings.time_unit.seconds()
         };
         for (resource, amount) in totals {
+            if !machine_seconds
+                && let Some(text) = format_belt_rate(amount, resource, settings, registry)
+            {
+                parts.push(text);
+                continue;
+            }
             parts.push(format!(
                 "{}{}{unit}",
                 format_prefixed(amount * factor, settings, settings.metric_prefixes),
@@ -250,6 +268,41 @@ fn format_process(process: &Process, settings: &Settings, registry: &Registry) -
         }
     }
     parts.join(" · ")
+}
+
+/// An item rate in belt mode is shown as a count of one belt tier (§7.8).
+///
+/// The rate is items per second; the tier's belt carries `belt_capacity` items
+/// per second, which the stacking research level and the item's stack size
+/// decide.
+fn format_belt_rate(
+    amount_per_second: f64,
+    resource: Resource,
+    settings: &Settings,
+    registry: &Registry,
+) -> Option<String> {
+    let tier: BeltTier = settings.item_rate_belt_display?;
+    let Resource::Item(item) = resource else {
+        return None;
+    };
+    let stack_size = registry.entry_by_index(item.id).item.as_ref()?.stack_size;
+    let capacity = belt_capacity(
+        tier,
+        settings.stacked_belts_display,
+        stack_size,
+        settings.belt_stacking,
+    );
+    let glyph = registry.entry(tier.item_id())?.glyph;
+    let belt = if settings.stacked_belts_display {
+        format!("{STACK_SIZE_GLYPH}{glyph}")
+    } else {
+        glyph.to_string()
+    };
+    Some(format!(
+        "{} {belt} {}",
+        format_number_with(amount_per_second / capacity, settings),
+        registry.entry_by_index(item.id).glyph
+    ))
 }
 
 fn format_machine(machine: &Machine, settings: &Settings, registry: &Registry) -> String {
@@ -319,6 +372,17 @@ fn format_module_glyph(
 }
 
 fn format_quantity(quantity: &Quantity, settings: &Settings, registry: &Registry) -> String {
+    if quantity.second == -1
+        && quantity.per.is_none()
+        && quantity.joule == 0
+        && quantity.craft == 0
+        && let Amount::Resources(terms) = &quantity.amount
+        && terms.len() == 1
+        && let Some((resource, coefficient)) = terms.iter().next()
+        && let Some(text) = format_belt_rate(*coefficient, *resource, settings, registry)
+    {
+        return text;
+    }
     if quantity.per.is_none()
         && quantity.craft == 0
         && let Amount::Number(value) = quantity.amount
