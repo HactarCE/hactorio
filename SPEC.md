@@ -637,6 +637,7 @@ drops it. This is a single normative rule and not a per-operator decision.
 | `making` | `recipe` on its right operand |
 | `:recycling:` | `resource`, and only an item reference |
 | `:stack-size:`, `.:stack-size:` | `resource`, and only an item reference |
+| juxtaposition with a `stack_rate` or `stack_capacity` | `resource` on its right operand |
 | quality operand (§3.3) | rewrites `resource` and `recipe` |
 
 `.` and the quality filters do not read a reference facet: they select quantity
@@ -663,7 +664,7 @@ partner is silently dropped.
 |---|---|---|
 | scalar | any | the right operand scaled by the scalar |
 | any | scalar | the left operand scaled by the scalar |
-| `stack_rate` or `stack_capacity` | item or fluid quantity | the applied amount |
+| `stack_rate` or `stack_capacity` | item or fluid prototype | the applied amount |
 | a value whose prototype is a beacon | a module list | the modules fill that beacon's one group, whatever its count |
 | a module list | a module list | the merged module list |
 | `machine` | config | the machine with that config merged in |
@@ -673,11 +674,18 @@ Everything else drops, and a value with no applicable pair is an error. A
 process juxtaposes only with a dimensionless number; two processes, or a
 process and a facet-bearing value, are errors.
 
-Applying stacks to an item multiplies each limit's amount by `min(limit,
-stack_size)`, sums the limits, and multiplies by the item's coefficient. A
-fluid map scales the fluid amount directly. That is the only conversion between
-stacks and items, and it is what makes a belt's `1:stack-size:/s` at `Limit(1)`
-mean one item per second.
+Applying stacks reads the right operand's prototype, not its quantity: the
+prototype says which item or fluid receives the rate, and the rate alone
+decides the amount. Each limit's amount is multiplied by
+`min(limit, stack_size)` and the limits are summed; a fluid map scales the
+fluid amount directly. That is the only conversion between stacks and items,
+and it is what makes a belt's `1:stack-size:/s` at `Limit(1)` mean one item per
+second. A counted amount has lost its prototype, so it cannot receive a rate:
+
+```text
+:transport-belt: :iron-plate:        # 15 iron plates/s
+:transport-belt: 2 :iron-plate:      # error: no prototype to apply to
+```
 
 The item facets need no rule of their own. In `:beacon: :efficiency-module-1:`
 the left has an item and a config, the right has an item and a config; the

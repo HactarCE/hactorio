@@ -802,24 +802,23 @@ impl Stacks {
         }
     }
 
-    /// Applies these stacks to a resource (§5.2 rules 1 and 2). A medium
-    /// mismatch is `None`; the caller turns that into an error.
-    pub fn apply(&self, resource: Resource, coefficient: f64, stack_size: u32) -> Option<f64> {
+    /// Applies these stacks to a resource (§5.2). A medium mismatch is `None`;
+    /// the caller turns that into an error.
+    pub fn apply(&self, resource: Resource, stack_size: u32) -> Option<f64> {
         match (self, resource) {
             (Stacks::Items(terms), Resource::Item(_)) => Some(
-                coefficient
-                    * terms
-                        .iter()
-                        .map(|(limit, amount)| {
-                            let cap = match limit {
-                                StackLimit::Full => stack_size,
-                                StackLimit::Limit(limit) => (*limit).min(stack_size),
-                            };
-                            amount * f64::from(cap)
-                        })
-                        .sum::<f64>(),
+                terms
+                    .iter()
+                    .map(|(limit, amount)| {
+                        let cap = match limit {
+                            StackLimit::Full => stack_size,
+                            StackLimit::Limit(limit) => (*limit).min(stack_size),
+                        };
+                        amount * f64::from(cap)
+                    })
+                    .sum::<f64>(),
             ),
-            (Stacks::Fluid(amount), Resource::Fluid(_)) => Some(coefficient * amount),
+            (Stacks::Fluid(amount), Resource::Fluid(_)) => Some(*amount),
             _ => None,
         }
     }
@@ -832,14 +831,6 @@ impl Quantity {
             return None;
         }
         self.amount.number_value()
-    }
-
-    /// A pure amount of one resource, which is what a rate applies to.
-    pub fn pure_resource_amount(&self) -> Option<(Resource, f64)> {
-        if self.per.is_some() || self.second != 0 || self.joule != 0 || self.craft != 0 {
-            return None;
-        }
-        self.amount.single_term()
     }
 }
 
@@ -1617,22 +1608,30 @@ impl MultiValue {
         Ok(Self::quantity(quantity.select_medium(item)))
     }
 
-    /// Applies a rate or capacity to a pure item or fluid amount (§5.2).
+    /// Applies a rate or capacity to an item or fluid prototype (§5.2).
+    ///
+    /// The pair reads the right operand's reference facet, not its quantity: a
+    /// counted amount has lost its prototype, so it cannot receive a rate.
     fn apply_stacks(
         &self,
         other: &Self,
         stack_size: &dyn Fn(Resource) -> Option<u32>,
-    ) -> Result<Option<Self>> {
+    ) -> Result<Option<Self>, ValueError> {
         let (stacks, is_rate) = match (&self.stack_rate, &self.stack_capacity) {
             (Some(rate), _) => (rate, true),
             (None, Some(capacity)) => (capacity, false),
             (None, None) => return Ok(None),
         };
-        let Some(quantity) = &other.quantity else {
+        let Some(reference) = other.resource else {
             return Ok(None);
         };
-        let Some((resource, coefficient)) = quantity.pure_resource_amount() else {
-            return Ok(None);
+        let resource = if reference.is_fluid {
+            Resource::Fluid(reference.id)
+        } else {
+            Resource::Item(Item {
+                id: reference.id,
+                quality: reference.quality.unwrap_or(Quality::Normal),
+            })
         };
         let size = match resource {
             Resource::Item(_) => match stack_size(resource) {
@@ -1641,7 +1640,7 @@ impl MultiValue {
             },
             Resource::Fluid(_) => 0,
         };
-        let Some(amount) = stacks.apply(resource, coefficient, size) else {
+        let Some(amount) = stacks.apply(resource, size) else {
             return Err(ValueError::new(
                 "a stack rate cannot be applied to a resource of the other medium",
             ));

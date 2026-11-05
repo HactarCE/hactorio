@@ -398,6 +398,53 @@ mod tests {
     }
 
     #[test]
+    fn a_rate_applies_to_a_prototype_not_to_a_counted_amount() {
+        let registry = test_registry();
+        let settings = Settings::default();
+        let glyph = |id: &str| {
+            registry
+                .entry_by_index(registry.entry_id(id).unwrap())
+                .glyph
+        };
+        let (iron, fluid) = (glyph("iron-plate"), glyph("molten-iron"));
+        let run = |text: &str| {
+            let outputs = evaluate(text, &registry, &settings, &|| false).outputs;
+            match &outputs[0] {
+                Output::Value(value) => format_value(value, &settings, &registry),
+                other => panic!("expected a value, got {other:?}"),
+            }
+        };
+
+        // The right operand is an item or fluid prototype, so a rate and a
+        // capacity both apply.
+        assert_eq!(run(":transport-belt: :iron-plate:"), format!("15{iron}/s"));
+        assert_eq!(run(":steel-chest: :iron-plate:"), format!("4.8k{iron}"));
+        assert_eq!(run(":pump: :molten-iron:"), format!("30{fluid}/s"));
+
+        // A qualified prototype keeps its quality.
+        let rare = Quality::Rare.glyph();
+        assert_eq!(
+            run(":transport-belt: :rare::iron-plate:"),
+            format!("15{rare}{iron}/s")
+        );
+
+        // A counted amount has lost its prototype (§5.1), so the pair matches
+        // no rule and the statement errors.
+        let outputs = evaluate(
+            ":transport-belt: 2 :iron-plate:",
+            &registry,
+            &settings,
+            &|| false,
+        )
+        .outputs;
+        assert!(
+            matches!(outputs[0], Output::Error { .. }),
+            "{:?}",
+            outputs[0]
+        );
+    }
+
+    #[test]
     fn entity_tokens_carry_rates_and_capacities() {
         let registry = test_registry();
         let settings = Settings::default();
