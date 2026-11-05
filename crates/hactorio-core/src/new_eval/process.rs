@@ -391,9 +391,8 @@ pub fn quality_shares(base: Quality, chance: f64) -> Vec<(Quality, f64)> {
     let mut shares = vec![(base, 1.0 - chance)];
     for (offset, quality) in above.iter().enumerate() {
         let level = offset + 1;
-        let at_least = |level: usize| {
-            chance * 0.1_f64.powi(i32::try_from(level - 1).unwrap_or(i32::MAX))
-        };
+        let at_least =
+            |level: usize| chance * 0.1_f64.powi(i32::try_from(level - 1).unwrap_or(i32::MAX));
         // The top tier keeps everything that reached it; a middle tier keeps
         // only what did not roll one level further.
         let share = if level == above.len() {

@@ -278,13 +278,7 @@ pub struct Quantity {
 impl Quantity {
     /// The one constructor. A zero numerator has no units, so `0:iron-plate:`
     /// and `0/s` are both the number `0` (§5.3).
-    pub fn new(
-        amount: Amount,
-        per: Option<Resource>,
-        second: i32,
-        joule: i32,
-        craft: i32,
-    ) -> Self {
+    pub fn new(amount: Amount, per: Option<Resource>, second: i32, joule: i32, craft: i32) -> Self {
         // A single numerator term equal to the denominator cancels it, so
         // `3:iron-plate:/:iron-plate:` is the number `3` (§5.3).
         let (amount, per) = match (amount.canonicalize(), per) {
@@ -1088,11 +1082,7 @@ pub struct Process {
 }
 
 impl Process {
-    pub fn new(
-        extent: Extent,
-        rows: BTreeMap<RowKey, f64>,
-        net: BTreeMap<Resource, f64>,
-    ) -> Self {
+    pub fn new(extent: Extent, rows: BTreeMap<RowKey, f64>, net: BTreeMap<Resource, f64>) -> Self {
         Self { extent, rows, net }
     }
 
@@ -1418,9 +1408,7 @@ impl MultiValue {
                 &other.machine,
                 |a, b| {
                     Machine::same(a, b).ok_or_else(|| {
-                        ValueError::new(
-                            "the machines differ in prototype, quality, or config",
-                        )
+                        ValueError::new("the machines differ in prototype, quality, or config")
                     })
                 },
                 &mut dropped,
@@ -1433,12 +1421,8 @@ impl MultiValue {
 
     pub fn mul(&self, other: &Self) -> Result<Self> {
         let mut dropped = Vec::new();
-        let quantity = Self::combine_dropped(
-            &self.quantity,
-            &other.quantity,
-            Quantity::mul,
-            &mut dropped,
-        );
+        let quantity =
+            Self::combine_dropped(&self.quantity, &other.quantity, Quantity::mul, &mut dropped);
         let stack_capacity = self
             .stack_rate
             .as_ref()
@@ -1461,12 +1445,8 @@ impl MultiValue {
 
     pub fn div(&self, other: &Self) -> Result<Self> {
         let mut dropped = Vec::new();
-        let quantity = Self::combine_dropped(
-            &self.quantity,
-            &other.quantity,
-            Quantity::div,
-            &mut dropped,
-        );
+        let quantity =
+            Self::combine_dropped(&self.quantity, &other.quantity, Quantity::div, &mut dropped);
         let stack_rate = self
             .stack_capacity
             .as_ref()
@@ -1482,12 +1462,8 @@ impl MultiValue {
 
     pub fn pow(&self, other: &Self) -> Result<Self> {
         let mut dropped = Vec::new();
-        let quantity = Self::combine_dropped(
-            &self.quantity,
-            &other.quantity,
-            Quantity::pow,
-            &mut dropped,
-        );
+        let quantity =
+            Self::combine_dropped(&self.quantity, &other.quantity, Quantity::pow, &mut dropped);
         Self {
             quantity,
             ..Self::default()

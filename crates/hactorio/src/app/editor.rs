@@ -410,10 +410,9 @@ pub(super) fn editor_ui(ui: &mut Ui, tab: &mut Tab, state: &mut EditorState<'_>)
                             .chars()
                             .count()
                             .max(start + 1);
-                        let from = galley
-                            .pos_from_cursor(egui::text::CCursor::new(line_start + start));
-                        let to =
-                            galley.pos_from_cursor(egui::text::CCursor::new(line_start + end));
+                        let from =
+                            galley.pos_from_cursor(egui::text::CCursor::new(line_start + start));
+                        let to = galley.pos_from_cursor(egui::text::CCursor::new(line_start + end));
                         let y = origin.y + from.bottom() - 1.0;
                         painter.line_segment(
                             [

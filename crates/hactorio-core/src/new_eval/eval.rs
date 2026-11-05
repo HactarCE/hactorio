@@ -301,10 +301,8 @@ impl Runner<'_> {
                     }),
             },
         };
-        self.env.insert(
-            place.name.clone(),
-            result.clone().map_err(|_| line),
-        );
+        self.env
+            .insert(place.name.clone(), result.clone().map_err(|_| line));
         result
     }
 
@@ -384,9 +382,10 @@ impl Runner<'_> {
                 let mut iter = values.into_iter().rev();
                 let mut acc = iter.next().expect("a chain has at least one operand");
                 for value in iter {
-                    let is_beacon =
-                    |id: hactorio_data::EntryId| self.registry.entry_by_index(id).beacon.is_some();
-                acc = value.juxtapose(&acc, &stack_size, &is_beacon, &validate_config)?;
+                    let is_beacon = |id: hactorio_data::EntryId| {
+                        self.registry.entry_by_index(id).beacon.is_some()
+                    };
+                    acc = value.juxtapose(&acc, &stack_size, &is_beacon, &validate_config)?;
                 }
                 Ok(acc)
             }
@@ -623,10 +622,12 @@ impl Runner<'_> {
                 }
                 let watts = self
                     .item_amount(&multi, |item| item.power_w)
-                    .ok_or_else(|| ValueError::new(format!(
-                        "`.power` needs a machine facet or an item with a `power_w` ({})",
-                        multi.facets()
-                    )))?;
+                    .ok_or_else(|| {
+                        ValueError::new(format!(
+                            "`.power` needs a machine facet or an item with a `power_w` ({})",
+                            multi.facets()
+                        ))
+                    })?;
                 Ok(Value::quantity(Quantity::new(
                     Amount::Number(watts),
                     None,
@@ -638,10 +639,12 @@ impl Runner<'_> {
             Selector::Property(Property::Energy) => {
                 let joules = self
                     .item_amount(&multi, |item| item.stored_energy_j)
-                    .ok_or_else(|| ValueError::new(format!(
-                        "`.energy` needs a machine-seconds process or a stored energy ({})",
-                        multi.facets()
-                    )))?;
+                    .ok_or_else(|| {
+                        ValueError::new(format!(
+                            "`.energy` needs a machine-seconds process or a stored energy ({})",
+                            multi.facets()
+                        ))
+                    })?;
                 Ok(Value::quantity(Quantity::new(
                     Amount::Number(joules),
                     None,
@@ -662,10 +665,12 @@ impl Runner<'_> {
                 }
                 let joules = self
                     .item_amount(&multi, |item| item.stored_energy_j)
-                    .ok_or_else(|| ValueError::new(format!(
-                        "`.:electric:` needs a machine, a `power_w`, or a stored energy ({})",
-                        multi.facets()
-                    )))?;
+                    .ok_or_else(|| {
+                        ValueError::new(format!(
+                            "`.:electric:` needs a machine, a `power_w`, or a stored energy ({})",
+                            multi.facets()
+                        ))
+                    })?;
                 Ok(Value::quantity(Quantity::new(
                     Amount::Number(joules),
                     None,
@@ -737,9 +742,7 @@ impl Runner<'_> {
             }
             Selector::Signal(super::lex::Signal::Time) => {
                 if !machine_seconds {
-                    return Err(ValueError::new(
-                        "`.:time:` needs a machine-seconds process",
-                    ));
+                    return Err(ValueError::new("`.:time:` needs a machine-seconds process"));
                 }
                 let seconds: f64 = process.rows.values().sum();
                 Ok(Value::quantity(Quantity::time(seconds)))
@@ -837,8 +840,8 @@ impl Runner<'_> {
             }
             Selector::Resource(resource) => {
                 let totals = process::totals(process, Rows::Net);
-                let selected = Quantity::new(Amount::Resources(totals), None, rate, 0, 0)
-                    .select(&resource);
+                let selected =
+                    Quantity::new(Amount::Resources(totals), None, rate, 0, 0).select(&resource);
                 Ok(Value::quantity(selected))
             }
             other => Err(ValueError::new(format!(
@@ -935,15 +938,9 @@ fn facets(value: &Value) -> String {
 fn unit_quantity(unit: super::lex::Unit) -> Quantity {
     match unit {
         super::lex::Unit::Second(seconds) => Quantity::time(seconds),
-        super::lex::Unit::Joule(joules) => {
-            Quantity::new(Amount::Number(joules), None, 0, 1, 0)
-        }
-        super::lex::Unit::Watt(watts) => {
-            Quantity::new(Amount::Number(watts), None, -1, 1, 0)
-        }
-        super::lex::Unit::Craft(crafts) => {
-            Quantity::new(Amount::Number(crafts), None, 0, 0, 1)
-        }
+        super::lex::Unit::Joule(joules) => Quantity::new(Amount::Number(joules), None, 0, 1, 0),
+        super::lex::Unit::Watt(watts) => Quantity::new(Amount::Number(watts), None, -1, 1, 0),
+        super::lex::Unit::Craft(crafts) => Quantity::new(Amount::Number(crafts), None, 0, 0, 1),
     }
 }
 
@@ -1116,7 +1113,9 @@ fn assign_resource(
     let extent = match op {
         AssignOp::Mul | AssignOp::Div => {
             if quantity.second != 0 {
-                return Err(ValueError::new("scaling a row needs a dimensionless number"));
+                return Err(ValueError::new(
+                    "scaling a row needs a dimensionless number",
+                ));
             }
             process.extent
         }

@@ -5,7 +5,7 @@ use hactorio_data::{Registry, STACK_SIZE_GLYPH};
 use hactorio_data::EntryId;
 
 use super::process::Rows;
-use crate::belt::{belt_capacity, BeltTier};
+use crate::belt::{BeltTier, belt_capacity};
 
 use super::value::{
     Amount, Config, Extent, Machine, MultiValue, Process, Quality, Quantity, Resource, ResourceRef,

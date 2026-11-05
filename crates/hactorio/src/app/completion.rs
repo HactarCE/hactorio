@@ -723,9 +723,9 @@ pub(super) fn completion_items(
             let references = registry.reference_count(EntryId::from_index(index));
             let insert = entry.glyph.to_string();
             let rank = exact_rank(label, &insert, needle);
-            let present = value.as_ref().is_some_and(|value| {
-                unit_in_value(value, EntryId::from_index(index), entry)
-            });
+            let present = value
+                .as_ref()
+                .is_some_and(|value| unit_in_value(value, EntryId::from_index(index), entry));
             let mut score = if needle.is_empty() {
                 score as f64
             } else {

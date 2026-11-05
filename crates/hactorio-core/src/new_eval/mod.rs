@@ -212,8 +212,8 @@ mod tests {
     use crate::new_eval::format::format_process_panel;
 
     use crate::Settings;
-    use crate::settings::IdlePower;
     use crate::new_eval::value::{StackLimit, Stacks};
+    use crate::settings::IdlePower;
     use hactorio_data::STACK_SIZE_GLYPH;
 
     fn number(text: &str) -> f64 {
@@ -1349,10 +1349,7 @@ mod tests {
             .glyph;
 
         // Items are both the ore consumed and the plates produced.
-        assert_eq!(
-            render("p.:item:"),
-            format!("-1.25{ore}/s + 1.875{plate}/s")
-        );
+        assert_eq!(render("p.:item:"), format!("-1.25{ore}/s + 1.875{plate}/s"));
         assert_eq!(render("p.:fluid:"), "0");
 
         // A rare selection is empty, and quality renders as its own glyph. A
@@ -1663,7 +1660,10 @@ mod tests {
         let registry = test_registry();
         let settings = Settings::default();
         let outputs = evaluate("k = 1\nk", &registry, &settings, &|| false).outputs;
-        assert_eq!(outputs[1], crate::new_eval::Output::Value(Value::number(1.0)));
+        assert_eq!(
+            outputs[1],
+            crate::new_eval::Output::Value(Value::number(1.0))
+        );
         let outputs = evaluate("k = 2\n1k", &registry, &settings, &|| false).outputs;
         assert_eq!(
             outputs[1],
@@ -1719,7 +1719,8 @@ mod tests {
     fn a_beacon_profile_must_cover_the_beacon_count() {
         // The test registry's profile has eight entries, so nine beacons has no
         // distribution entry (§6.2).
-        let outputs = facets_of("1 :foundry: (9 :beacon: :speed-module-2:) making (:normal: :iron-plate:)");
+        let outputs =
+            facets_of("1 :foundry: (9 :beacon: :speed-module-2:) making (:normal: :iron-plate:)");
         let (message, _) = error_of(&outputs, 0);
         assert!(message.contains("beacon profile"), "{message}");
     }
@@ -1765,12 +1766,12 @@ mod tests {
     fn a_loop_aborts_after_the_failing_iteration() {
         let outputs = facets_of("loop 5 {\n  x = 1:iron-plate: + 1s\n}\n1");
         let (message, _) = error_of(&outputs, 0);
-        assert_eq!(message, "loop aborted after 1 iteration due to error on line 2");
+        assert_eq!(
+            message,
+            "loop aborted after 1 iteration due to error on line 2"
+        );
         // The statement after the loop still runs (§2.5).
-        assert!(matches!(
-            outputs[3],
-            crate::new_eval::Output::Value(_)
-        ));
+        assert!(matches!(outputs[3], crate::new_eval::Output::Value(_)));
     }
 
     #[test]
@@ -1787,9 +1788,7 @@ mod tests {
         let render = |settings: &Settings| {
             let outputs = evaluate("15 :iron-plate:/s", &registry, settings, &|| false).outputs;
             match &outputs[0] {
-                crate::new_eval::Output::Value(value) => {
-                    format_value(value, settings, &registry)
-                }
+                crate::new_eval::Output::Value(value) => format_value(value, settings, &registry),
                 other => panic!("expected a value, got {other:?}"),
             }
         };
@@ -1815,14 +1814,15 @@ mod tests {
         let (message, _) = error_of(&outputs, 0);
         assert!(message.contains("unscaled"), "{message}");
         // A machine-seconds process cannot be timed twice.
-        let outputs = facets_of(
-            "p = 1 :foundry: making (:normal: :iron-plate:)\np * 1s * 1s",
-        );
+        let outputs = facets_of("p = 1 :foundry: making (:normal: :iron-plate:)\np * 1s * 1s");
         let (message, _) = error_of(&outputs, 1);
         assert!(message.contains("machine-seconds"), "{message}");
     }
 
-    fn extent_of(outputs: &[crate::new_eval::Output], index: usize) -> crate::new_eval::value::Extent {
+    fn extent_of(
+        outputs: &[crate::new_eval::Output],
+        index: usize,
+    ) -> crate::new_eval::value::Extent {
         match &outputs[index] {
             crate::new_eval::Output::Value(Value::Process(process)) => process.extent,
             other => panic!("expected a process, got {other:?}"),
@@ -1834,9 +1834,7 @@ mod tests {
         let registry = test_registry();
         let settings = Settings::default();
         let run = |line: &str| {
-            let document = format!(
-                "p = 1 :foundry: making (:normal: :iron-plate:)\n{line}"
-            );
+            let document = format!("p = 1 :foundry: making (:normal: :iron-plate:)\n{line}");
             evaluate(&document, &registry, &settings, &|| false).outputs
         };
 
