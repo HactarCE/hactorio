@@ -1,7 +1,7 @@
 //! Per-row rates for a process: machine modifiers and recipe arithmetic
 //! (§6.3, §6.4).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use hactorio_data::{ModuleEffect, PrototypeKind, Recipe, Registry};
 
@@ -425,16 +425,26 @@ pub fn net(
     settings: &Settings,
 ) -> Option<BTreeMap<Resource, f64>> {
     let mut total: BTreeMap<Resource, f64> = BTreeMap::new();
+    // A resource a row names survives a net that cancels to approximately zero,
+    // so an iterative process keeps converging instead of freezing just above
+    // the threshold.
+    let mut named: BTreeSet<Resource> = BTreeSet::new();
     for (key, scale) in rows {
         let rates = row_rates(key, registry, settings)?;
         for (resource, amount) in &rates.outputs {
             *total.entry(*resource).or_insert(0.0) += amount * scale;
+            if !super::value::is_zero(*amount) {
+                named.insert(*resource);
+            }
         }
         for (resource, amount) in &rates.inputs {
             *total.entry(*resource).or_insert(0.0) -= amount * scale;
+            if !super::value::is_zero(*amount) {
+                named.insert(*resource);
+            }
         }
     }
-    total.retain(|_, amount| !super::value::is_zero(*amount));
+    total.retain(|resource, amount| !super::value::is_zero(*amount) || named.contains(resource));
     Some(total)
 }
 

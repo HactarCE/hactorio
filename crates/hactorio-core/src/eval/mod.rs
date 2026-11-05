@@ -73,7 +73,7 @@ pub(crate) fn test_registry() -> hactorio_data::Registry {
         "assembling-machine": {
         "foundry": {"type": "assembling-machine", "name": "foundry", "crafting_categories": ["smelting"], "crafting_speed": 4.0, "module_slots": 4, "energy_usage": "2MW", "effect_receiver": {"base_effect": {"productivity": 0.5}}, "allowed_effects": ["speed", "productivity", "consumption", "pollution", "quality"]},
         "crusher": {"type": "assembling-machine", "name": "crusher", "crafting_categories": ["crushing"], "crafting_speed": 1.0, "module_slots": 2, "energy_usage": "540kW"},
-        "recycler": {"type": "assembling-machine", "name": "recycler", "crafting_categories": ["recycling"], "crafting_speed": 1.0, "module_slots": 4, "energy_usage": "100kW"}
+        "recycler": {"type": "assembling-machine", "name": "recycler", "crafting_categories": ["recycling"], "crafting_speed": 1.0, "module_slots": 4, "energy_usage": "100kW", "allowed_effects": ["speed", "productivity", "consumption", "pollution", "quality"]}
       },
       "offshore-pump": {"type": "item", "name": "offshore-pump", "stack_size": 20},
         "barrel": {"type": "item", "name": "barrel", "stack_size": 10, "subgroup": "intermediate-product"},
@@ -167,7 +167,7 @@ pub(crate) fn test_registry() -> hactorio_data::Registry {
       "assembling-machine": {
         "foundry": {"type": "assembling-machine", "name": "foundry", "crafting_categories": ["smelting"], "crafting_speed": 4.0, "module_slots": 4, "energy_usage": "2MW", "effect_receiver": {"base_effect": {"productivity": 0.5}}, "allowed_effects": ["speed", "productivity", "consumption", "pollution", "quality"]},
         "crusher": {"type": "assembling-machine", "name": "crusher", "crafting_categories": ["crushing"], "crafting_speed": 1.0, "module_slots": 2, "energy_usage": "540kW"},
-        "recycler": {"type": "assembling-machine", "name": "recycler", "crafting_categories": ["recycling"], "crafting_speed": 1.0, "module_slots": 4, "energy_usage": "100kW"}
+        "recycler": {"type": "assembling-machine", "name": "recycler", "crafting_categories": ["recycling"], "crafting_speed": 1.0, "module_slots": 4, "energy_usage": "100kW", "allowed_effects": ["speed", "productivity", "consumption", "pollution", "quality"]}
       },
       "offshore-pump": {
         "module": {
@@ -185,7 +185,7 @@ pub(crate) fn test_registry() -> hactorio_data::Registry {
       "assembling-machine": {
         "foundry": {"type": "assembling-machine", "name": "foundry", "crafting_categories": ["smelting"], "crafting_speed": 4.0, "module_slots": 4, "energy_usage": "2MW", "effect_receiver": {"base_effect": {"productivity": 0.5}}, "allowed_effects": ["speed", "productivity", "consumption", "pollution", "quality"]},
         "crusher": {"type": "assembling-machine", "name": "crusher", "crafting_categories": ["crushing"], "crafting_speed": 1.0, "module_slots": 2, "energy_usage": "540kW"},
-        "recycler": {"type": "assembling-machine", "name": "recycler", "crafting_categories": ["recycling"], "crafting_speed": 1.0, "module_slots": 4, "energy_usage": "100kW"}
+        "recycler": {"type": "assembling-machine", "name": "recycler", "crafting_categories": ["recycling"], "crafting_speed": 1.0, "module_slots": 4, "energy_usage": "100kW", "allowed_effects": ["speed", "productivity", "consumption", "pollution", "quality"]}
       },
       "offshore-pump": {"type": "offshore-pump", "name": "offshore-pump", "pumping_speed": 20}
       },
@@ -1331,6 +1331,41 @@ mod tests {
         assert!((rate(Quality::Normal) - 1.875 * 0.75).abs() < 1e-9);
         assert!((rate(Quality::Uncommon) - 1.875 * 0.225).abs() < 1e-9);
         assert!((rate(Quality::Rare) - 1.875 * 0.025).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_quality_loop_does_not_freeze_its_residuals() {
+        // Each pass recycles everything below rare, so the normal and uncommon
+        // rows shrink geometrically. Their nets pass through the approximate
+        // threshold, and a net dropped there would strand the residue the loop
+        // had yet to consume.
+        let registry = test_registry();
+        let settings = Settings {
+            max_quality: Quality::Rare,
+            ..Settings::default()
+        };
+        let document = "qm = :quality-module-2:\np = 1:foundry: making :casting-iron:\nloop 100 {\np += (p.net<:rare:) into :recycler:(1 qm)\n}\np.net";
+        let outputs = evaluate(document, &registry, &settings, &|| false).outputs;
+        let Output::Value(value) = &outputs[5] else {
+            panic!("expected a process, got {:?}", outputs[5]);
+        };
+        let Value::Multi(multi) = &**value else {
+            unreachable!()
+        };
+        let quantity = multi.quantity.as_ref().expect("a quantity");
+        let Amount::Resources(terms) = &quantity.amount else {
+            panic!("expected a bundle");
+        };
+        let rates: Vec<(Quality, f64)> = terms
+            .iter()
+            .filter_map(|(resource, amount)| match resource {
+                Resource::Item(item) => Some((item.quality, *amount)),
+                Resource::Fluid(_) => None,
+            })
+            .collect();
+        assert_eq!(rates.len(), 1, "{rates:?}");
+        assert_eq!(rates[0].0, Quality::Rare);
+        assert!((rates[0].1 - 1.25).abs() < 1e-6, "{}", rates[0].1);
     }
 
     #[test]
