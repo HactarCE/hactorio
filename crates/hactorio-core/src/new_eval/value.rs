@@ -38,6 +38,15 @@ impl ValueError {
         self
     }
 
+    /// Underlines the error at `span` unless a tighter span is already known.
+    pub fn or_span(self, span: super::parse::Span) -> Self {
+        if self.span.is_some() {
+            self
+        } else {
+            self.at(span)
+        }
+    }
+
     pub fn message(&self) -> &str {
         &self.message
     }

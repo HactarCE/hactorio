@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use hactorio_data::{EntryId, PrototypeKind, RecipeId, Registry};
 
 use super::parse::{
-    self, AssignOp, BinaryOp, Expr, Line, ParseError, Place, Property, Selector, Span,
+    self, AssignOp, BinaryOp, Expr, ExprKind, Line, ParseError, Place, Property, Selector, Span,
 };
 use super::process::{self, Rows};
 use super::value::{
@@ -308,17 +308,23 @@ impl Runner<'_> {
         result
     }
 
+    /// Evaluates a node, underlining any error it produces at the node's span.
     fn eval(&self, expr: &Expr) -> Result<Value, ValueError> {
-        match expr {
-            Expr::Number(value) => Ok(Value::number(*value)),
-            Expr::Unit(unit) => Ok(Value::quantity(unit_quantity(*unit))),
-            Expr::Token(id) => self.token(*id, None),
-            Expr::Qualified { id, quality } => self.token(*id, Some(*quality)),
-            Expr::Quality(quality) => Ok(Value::Quality(*quality)),
-            Expr::Variable { name, span } => self.lookup(name).map_err(|error| error.at(*span)),
-            Expr::Negate(inner) => self.eval(inner)?.negate(),
-            Expr::StackSize(inner) => self.stack_size(&self.eval(inner)?),
-            Expr::StackedBelt(inner) => {
+        self.eval_kind(expr)
+            .map_err(|error| error.or_span(expr.span))
+    }
+
+    fn eval_kind(&self, expr: &Expr) -> Result<Value, ValueError> {
+        match &expr.kind {
+            ExprKind::Number(value) => Ok(Value::number(*value)),
+            ExprKind::Unit(unit) => Ok(Value::quantity(unit_quantity(*unit))),
+            ExprKind::Token(id) => self.token(*id, None),
+            ExprKind::Qualified { id, quality } => self.token(*id, Some(*quality)),
+            ExprKind::Quality(quality) => Ok(Value::Quality(*quality)),
+            ExprKind::Variable(name) => self.lookup(name),
+            ExprKind::Negate(inner) => self.eval(inner)?.negate(),
+            ExprKind::StackSize(inner) => self.stack_size(&self.eval(inner)?),
+            ExprKind::StackedBelt(inner) => {
                 let value = self.eval(inner)?;
                 match value {
                     Value::Multi(multi) => Ok(Value::Multi(
@@ -332,12 +338,12 @@ impl Runner<'_> {
                     )),
                 }
             }
-            Expr::Recycling(inner) => self.recycling(&self.eval(inner)?),
-            Expr::Select { value, selector } => {
+            ExprKind::Recycling(inner) => self.recycling(&self.eval(inner)?),
+            ExprKind::Select { value, selector } => {
                 let value = self.eval(value)?;
                 self.select(&value, *selector)
             }
-            Expr::SelectBy { value, selector } => {
+            ExprKind::SelectBy { value, selector } => {
                 let value = self.eval(value)?;
                 let reference = match self.eval(selector)? {
                     Value::Multi(multi) => multi
@@ -347,12 +353,12 @@ impl Runner<'_> {
                 };
                 self.select(&value, Selector::Resource(reference))
             }
-            Expr::Binary { op, lhs, rhs } => {
+            ExprKind::Binary { op, lhs, rhs } => {
                 let left = self.eval(lhs)?;
                 let right = self.eval(rhs)?;
                 binary_values(*op, &left, &right, self.registry, self.settings)
             }
-            Expr::Juxtapose(operands) => {
+            ExprKind::Juxtapose(operands) => {
                 let mut values = Vec::with_capacity(operands.len());
                 for operand in operands {
                     values.push(self.eval(operand)?);

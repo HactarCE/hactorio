@@ -1747,6 +1747,14 @@ mod tests {
         assert!(stacked.contains(belt), "{stacked}");
     }
 
+    #[test]
+    fn an_eval_error_underlines_the_failing_subexpression() {
+        let line = "x = 2 * (1:iron-plate: + 1s)";
+        let outputs = facets_of(line);
+        let (_, span) = error_of(&outputs, 0);
+        assert_eq!(&line[span.start..span.end], "1:iron-plate: + 1s");
+    }
+
     fn registry_glyph(id: &str) -> String {
         let registry = test_registry();
         registry

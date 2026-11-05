@@ -128,8 +128,21 @@ impl BinaryOp {
     }
 }
 
+/// One expression node, with the span it occupies (§8).
 #[derive(Debug, Clone, PartialEq)]
-pub enum Expr {
+pub struct Expr {
+    pub span: Span,
+    pub kind: ExprKind,
+}
+
+impl Expr {
+    pub fn new(span: Span, kind: ExprKind) -> Self {
+        Self { span, kind }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExprKind {
     Number(f64),
     Unit(Unit),
     Token(hactorio_data::EntryId),
@@ -138,10 +151,7 @@ pub enum Expr {
         quality: Quality,
     },
     Quality(Quality),
-    Variable {
-        name: String,
-        span: Span,
-    },
+    Variable(String),
     Negate(Box<Expr>),
     StackSize(Box<Expr>),
     StackedBelt(Box<Expr>),
@@ -375,11 +385,15 @@ impl Parser<'_> {
                 BinaryOp::In | BinaryOp::Into | BinaryOp::From => self.parse_machine_expr()?,
                 _ => self.parse_bp(if right_associative { lbp } else { lbp + 1 })?,
             };
-            lhs = Expr::Binary {
-                op,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-            };
+            let span = Span::new(lhs.span.start, rhs.span.end);
+            lhs = Expr::new(
+                span,
+                ExprKind::Binary {
+                    op,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                },
+            );
         }
         Ok(lhs)
     }
@@ -419,7 +433,11 @@ impl Parser<'_> {
         Ok(if operands.len() == 1 {
             operands.pop().expect("one operand")
         } else {
-            Expr::Juxtapose(operands)
+            let span = Span::new(
+                operands.first().expect("one operand").span.start,
+                operands.last().expect("one operand").span.end,
+            );
+            Expr::new(span, ExprKind::Juxtapose(operands))
         })
     }
 
@@ -430,22 +448,31 @@ impl Parser<'_> {
     }
 
     fn parse_operand(&mut self) -> Result<Expr, ParseError> {
+        let span = self.peek_span();
         match self.peek() {
             Some(Token::Minus) => {
                 self.pos += 1;
-                Ok(Expr::Negate(Box::new(self.parse_bp(BP_NEG)?)))
+                let inner = self.parse_bp(BP_NEG)?;
+                let span = Span::new(span.start, inner.span.end);
+                Ok(Expr::new(span, ExprKind::Negate(Box::new(inner))))
             }
             Some(Token::Signal(Signal::StackSize)) => {
                 self.pos += 1;
-                Ok(Expr::StackSize(Box::new(self.parse_primary()?)))
+                let inner = self.parse_primary()?;
+                let span = Span::new(span.start, inner.span.end);
+                Ok(Expr::new(span, ExprKind::StackSize(Box::new(inner))))
             }
             Some(Token::Signal(Signal::StackedBelt)) => {
                 self.pos += 1;
-                Ok(Expr::StackedBelt(Box::new(self.parse_primary()?)))
+                let inner = self.parse_primary()?;
+                let span = Span::new(span.start, inner.span.end);
+                Ok(Expr::new(span, ExprKind::StackedBelt(Box::new(inner))))
             }
             Some(Token::Signal(Signal::Recycling)) => {
                 self.pos += 1;
-                Ok(Expr::Recycling(Box::new(self.parse_primary()?)))
+                let inner = self.parse_primary()?;
+                let span = Span::new(span.start, inner.span.end);
+                Ok(Expr::new(span, ExprKind::Recycling(Box::new(inner))))
             }
             _ => self.parse_primary(),
         }
@@ -454,13 +481,16 @@ impl Parser<'_> {
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         let span = self.peek_span();
         match self.advance() {
-            Some(Token::Number(value)) => Ok(Expr::Number(value)),
-            Some(Token::Unit(unit)) => Ok(Expr::Unit(unit)),
-            Some(Token::Prototype(id)) => Ok(Expr::Token(id)),
-            Some(Token::Qualified { id, quality }) => Ok(Expr::Qualified { id, quality }),
-            Some(Token::Quality(quality)) => Ok(Expr::Quality(quality)),
-            Some(Token::Ident(name)) => Ok(Expr::Variable { name, span }),
+            Some(Token::Number(value)) => Ok(Expr::new(span, ExprKind::Number(value))),
+            Some(Token::Unit(unit)) => Ok(Expr::new(span, ExprKind::Unit(unit))),
+            Some(Token::Prototype(id)) => Ok(Expr::new(span, ExprKind::Token(id))),
+            Some(Token::Qualified { id, quality }) => {
+                Ok(Expr::new(span, ExprKind::Qualified { id, quality }))
+            }
+            Some(Token::Quality(quality)) => Ok(Expr::new(span, ExprKind::Quality(quality))),
+            Some(Token::Ident(name)) => Ok(Expr::new(span, ExprKind::Variable(name))),
             Some(Token::LParen) => {
+                // Parentheses group; they are not part of the expression's span.
                 let inner = self.parse_expr()?;
                 self.expect(Token::RParen, "expected `)`")?;
                 Ok(inner)
@@ -474,45 +504,62 @@ impl Parser<'_> {
     }
 
     fn selector_expr(&mut self, value: Expr) -> Result<Expr, ParseError> {
-        Ok(match self.parse_selector()? {
-            ParsedSelector::Known(selector) => Expr::Select {
-                value: Box::new(value),
-                selector,
+        let (selector, end) = self.parse_selector()?;
+        let span = Span::new(value.span.start, end.end);
+        Ok(Expr::new(
+            span,
+            match selector {
+                ParsedSelector::Known(selector) => ExprKind::Select {
+                    value: Box::new(value),
+                    selector,
+                },
+                ParsedSelector::Expression(selector) => ExprKind::SelectBy {
+                    value: Box::new(value),
+                    selector,
+                },
             },
-            ParsedSelector::Expression(selector) => Expr::SelectBy {
-                value: Box::new(value),
-                selector,
-            },
-        })
+        ))
     }
 
-    fn parse_selector(&mut self) -> Result<ParsedSelector, ParseError> {
+    fn parse_selector(&mut self) -> Result<(ParsedSelector, Span), ParseError> {
         let span = self.peek_span();
         match self.advance() {
             // A known property name is a property; any other name is an
             // expression naming a resource, so `p . q` selects by `q`.
-            Some(Token::Ident(name)) => Ok(match Property::from_name(&name) {
-                Some(property) => ParsedSelector::Known(Selector::Property(property)),
-                None => ParsedSelector::Expression(Box::new(Expr::Variable {
-                    name,
-                    span,
-                })),
-            }),
+            Some(Token::Ident(name)) => Ok((
+                match Property::from_name(&name) {
+                    Some(property) => ParsedSelector::Known(Selector::Property(property)),
+                    None => ParsedSelector::Expression(Box::new(Expr::new(
+                        span,
+                        ExprKind::Variable(name),
+                    ))),
+                },
+                span,
+            )),
             // `in` is a keyword and also a process property.
-            Some(Token::Keyword(Keyword::In)) => {
-                Ok(ParsedSelector::Known(Selector::Property(Property::In)))
+            Some(Token::Keyword(Keyword::In)) => Ok((
+                ParsedSelector::Known(Selector::Property(Property::In)),
+                span,
+            )),
+            Some(Token::Signal(signal)) => {
+                Ok((ParsedSelector::Known(Selector::Signal(signal)), span))
             }
-            Some(Token::Signal(signal)) => Ok(ParsedSelector::Known(Selector::Signal(signal))),
-            Some(Token::Prototype(id)) => Ok(ParsedSelector::Known(Selector::Resource(
-                self.resource_ref(id, None),
-            ))),
-            Some(Token::Qualified { id, quality }) => Ok(ParsedSelector::Known(
-                Selector::Resource(self.resource_ref(id, Some(quality))),
+            Some(Token::Prototype(id)) => Ok((
+                ParsedSelector::Known(Selector::Resource(self.resource_ref(id, None))),
+                span,
+            )),
+            Some(Token::Qualified { id, quality }) => Ok((
+                ParsedSelector::Known(Selector::Resource(self.resource_ref(id, Some(quality)))),
+                span,
             )),
             Some(Token::LParen) => {
                 let inner = self.parse_expr()?;
+                let close = self.peek_span();
                 self.expect(Token::RParen, "expected `)`")?;
-                Ok(ParsedSelector::Expression(Box::new(inner)))
+                Ok((
+                    ParsedSelector::Expression(Box::new(inner)),
+                    Span::new(span.start, close.end),
+                ))
             }
             Some(token) => Err(ParseError::new(
                 span,
@@ -562,7 +609,7 @@ impl Parser<'_> {
         if matches!(after, Some(Token::Dot)) {
             let saved = self.pos;
             self.pos += 2;
-            let selector = self.parse_selector()?;
+            let (selector, _) = self.parse_selector()?;
             let ParsedSelector::Known(selector) = selector else {
                 self.pos = saved;
                 return Ok(None);
@@ -597,25 +644,25 @@ mod tests {
 
     /// Renders the tree's shape so grouping assertions stay readable.
     fn shape(expr: &Expr) -> String {
-        match expr {
-            Expr::Number(value) => format!("{value}"),
-            Expr::Unit(_) => "unit".to_string(),
-            Expr::Token(_) => "token".to_string(),
-            Expr::Qualified { .. } => "qualified".to_string(),
-            Expr::Quality(quality) => format!(":{}:", quality.name()),
-            Expr::Variable { name, .. } => name.clone(),
-            Expr::Negate(inner) => format!("(-{})", shape(inner)),
-            Expr::StackSize(inner) => format!("(stack-size {})", shape(inner)),
-            Expr::StackedBelt(inner) => format!("(stacked-belt {})", shape(inner)),
-            Expr::Recycling(inner) => format!("(recycling {})", shape(inner)),
-            Expr::Select { value, selector } => format!("({}.{:?})", shape(value), selector),
-            Expr::SelectBy { value, selector } => {
+        match &expr.kind {
+            ExprKind::Number(value) => format!("{value}"),
+            ExprKind::Unit(_) => "unit".to_string(),
+            ExprKind::Token(_) => "token".to_string(),
+            ExprKind::Qualified { .. } => "qualified".to_string(),
+            ExprKind::Quality(quality) => format!(":{}:", quality.name()),
+            ExprKind::Variable(name) => name.clone(),
+            ExprKind::Negate(inner) => format!("(-{})", shape(inner)),
+            ExprKind::StackSize(inner) => format!("(stack-size {})", shape(inner)),
+            ExprKind::StackedBelt(inner) => format!("(stacked-belt {})", shape(inner)),
+            ExprKind::Recycling(inner) => format!("(recycling {})", shape(inner)),
+            ExprKind::Select { value, selector } => format!("({}.{:?})", shape(value), selector),
+            ExprKind::SelectBy { value, selector } => {
                 format!("({}.expr {})", shape(value), shape(selector))
             }
-            Expr::Binary { op, lhs, rhs } => {
+            ExprKind::Binary { op, lhs, rhs } => {
                 format!("({} {} {})", shape(lhs), op.symbol(), shape(rhs))
             }
-            Expr::Juxtapose(operands) => {
+            ExprKind::Juxtapose(operands) => {
                 let parts: Vec<String> = operands.iter().map(shape).collect();
                 format!("[{}]", parts.join(" "))
             }
