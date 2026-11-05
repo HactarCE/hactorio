@@ -18,7 +18,6 @@ enum CompletionContext {
     Normal,
     Machine,
     Recipe,
-    Config,
     Property,
     /// After a comparison operator, whose right operand is a quality (§5.3).
     Filter,
@@ -680,8 +679,7 @@ pub(super) fn completion_items(
     } else {
         match previous_word(&before).as_str() {
             "making" => CompletionContext::Recipe,
-            "with" => CompletionContext::Config,
-            "in" => CompletionContext::Machine,
+            "in" | "into" | "from" => CompletionContext::Machine,
             _ => CompletionContext::Normal,
         }
     };
@@ -711,7 +709,6 @@ pub(super) fn completion_items(
             _ if entry.hidden => false,
             CompletionContext::Filter => false,
             CompletionContext::Machine => entry.machine().is_some(),
-            CompletionContext::Config => entry.module.is_some() || entry.beacon.is_some(),
             CompletionContext::Property => match &value {
                 // A process and a quantity both select by resource, so
                 // every item and fluid is a selector after their dot.

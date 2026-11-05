@@ -1482,7 +1482,7 @@ fn quality_shortcuts_rank_their_quality_first() {
 }
 
 #[test]
-fn operators_are_suggested_without_with() {
+fn operators_are_suggested() {
     let registry = autocomplete_registry();
     for keyword in ["in", "into", "from", "making"] {
         let labels: Vec<String> = {
@@ -1494,13 +1494,6 @@ fn operators_are_suggested_without_with() {
         };
         assert!(labels.iter().any(|label| label == keyword), "{keyword}");
     }
-    let (start, word) = completion_word("wit", 3);
-    let labels: Vec<String> =
-        completion_items(&registry, &Settings::default(), "wit", start, &word)
-            .into_iter()
-            .map(|item| item.label)
-            .collect();
-    assert!(!labels.iter().any(|label| label == "with"), "{labels:?}");
 }
 
 #[test]
