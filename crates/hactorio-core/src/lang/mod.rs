@@ -26,30 +26,6 @@ pub(crate) fn test_registry() -> hactorio_data::Registry {
     const DUMP: &str = r#"{
       "item": {
         "iron-plate": {"type": "item", "name": "iron-plate", "stack_size": 100},
-        "carbonic-asteroid-crushing": {
-          "type": "recipe",
-          "name": "carbonic-asteroid-crushing",
-          "categories": ["crushing"],
-          "energy_required": 2.0,
-          "ingredients": [{"type": "item", "name": "metallic-asteroid-chunk", "amount": 1}],
-          "results": [{"type": "item", "name": "carbon", "amount": 1}]
-        },
-        "advanced-carbonic-asteroid-crushing": {
-          "type": "recipe",
-          "name": "advanced-carbonic-asteroid-crushing",
-          "categories": ["crushing"],
-          "energy_required": 5.0,
-          "ingredients": [{"type": "item", "name": "metallic-asteroid-chunk", "amount": 1}],
-          "results": [{"type": "item", "name": "carbon", "amount": 2}]
-        },
-        "casting-iron": {
-          "type": "recipe",
-          "name": "casting-iron",
-          "categories": ["smelting"],
-          "energy_required": 3.2,
-          "ingredients": [{"type": "fluid", "name": "molten-iron", "amount": 20}],
-          "results": [{"type": "item", "name": "iron-plate", "amount": 1}]
-        },
         "copper-plate": {"type": "item", "name": "copper-plate", "stack_size": 100},
         "transport-belt": {"type": "item", "name": "transport-belt", "stack_size": 100},
         "foundry": {"type": "item", "name": "foundry", "stack_size": 20},
@@ -70,12 +46,7 @@ pub(crate) fn test_registry() -> hactorio_data::Registry {
         "storage-tank": {"type": "item", "name": "storage-tank", "stack_size": 50},
         "pump": {"type": "item", "name": "pump", "stack_size": 50},
         "recycler": {"type": "item", "name": "recycler", "stack_size": 20},
-        "assembling-machine": {
-        "foundry": {"type": "assembling-machine", "name": "foundry", "crafting_categories": ["smelting"], "crafting_speed": 4.0, "module_slots": 4, "energy_usage": "2MW", "effect_receiver": {"base_effect": {"productivity": 0.5}}, "allowed_effects": ["speed", "productivity", "consumption", "pollution", "quality"]},
-        "crusher": {"type": "assembling-machine", "name": "crusher", "crafting_categories": ["crushing"], "crafting_speed": 1.0, "module_slots": 2, "energy_usage": "540kW"},
-        "recycler": {"type": "assembling-machine", "name": "recycler", "crafting_categories": ["recycling"], "crafting_speed": 1.0, "module_slots": 4, "energy_usage": "100kW", "allowed_effects": ["speed", "productivity", "consumption", "pollution", "quality"]}
-      },
-      "offshore-pump": {"type": "item", "name": "offshore-pump", "stack_size": 20},
+        "offshore-pump": {"type": "item", "name": "offshore-pump", "stack_size": 20},
         "barrel": {"type": "item", "name": "barrel", "stack_size": 10, "subgroup": "intermediate-product"},
         "crude-oil-barrel": {"type": "item", "name": "crude-oil-barrel", "stack_size": 10, "subgroup": "barrel"}
       },
@@ -162,32 +133,12 @@ pub(crate) fn test_registry() -> hactorio_data::Registry {
         "beacon": {"type": "beacon", "name": "beacon", "module_slots": 2, "allowed_effects": ["speed", "consumption"], "distribution_effectivity": 1.5, "profile": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], "energy_usage": "480kW"}
       },
       "assembling-machine": {
-        "foundry": {"type": "assembling-machine", "name": "foundry", "crafting_categories": ["smelting"], "crafting_speed": 4.0, "module_slots": 4, "energy_usage": "2MW", "effect_receiver": {"base_effect": {"productivity": 0.5}}, "allowed_effects": ["speed", "productivity", "consumption", "pollution", "quality"]}
-      },
-      "assembling-machine": {
         "foundry": {"type": "assembling-machine", "name": "foundry", "crafting_categories": ["smelting"], "crafting_speed": 4.0, "module_slots": 4, "energy_usage": "2MW", "effect_receiver": {"base_effect": {"productivity": 0.5}}, "allowed_effects": ["speed", "productivity", "consumption", "pollution", "quality"]},
         "crusher": {"type": "assembling-machine", "name": "crusher", "crafting_categories": ["crushing"], "crafting_speed": 1.0, "module_slots": 2, "energy_usage": "540kW"},
         "recycler": {"type": "assembling-machine", "name": "recycler", "crafting_categories": ["recycling"], "crafting_speed": 1.0, "module_slots": 4, "energy_usage": "100kW", "allowed_effects": ["speed", "productivity", "consumption", "pollution", "quality"]}
       },
       "offshore-pump": {
-        "module": {
-        "speed-module-2": {"type": "module", "name": "speed-module-2", "category": "speed", "tier": 2, "stack_size": 50, "effect": {"speed": 0.3, "consumption": 0.7}},
-        "productivity-module-1": {"type": "module", "name": "productivity-module-1", "category": "productivity", "tier": 1, "stack_size": 50, "effect": {"productivity": 0.04, "consumption": 0.4}},
-        "efficiency-module-1": {"type": "module", "name": "efficiency-module-1", "category": "efficiency", "tier": 1, "stack_size": 50, "effect": {"consumption": -0.3}},
-        "quality-module-2": {"type": "module", "name": "quality-module-2", "category": "quality", "tier": 2, "stack_size": 50, "effect": {"quality": 0.25}}
-      },
-      "beacon": {
-        "beacon": {"type": "beacon", "name": "beacon", "module_slots": 2, "allowed_effects": ["speed", "consumption"], "distribution_effectivity": 1.5, "profile": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], "energy_usage": "480kW"}
-      },
-      "assembling-machine": {
-        "foundry": {"type": "assembling-machine", "name": "foundry", "crafting_categories": ["smelting"], "crafting_speed": 4.0, "module_slots": 4, "energy_usage": "2MW", "effect_receiver": {"base_effect": {"productivity": 0.5}}, "allowed_effects": ["speed", "productivity", "consumption", "pollution", "quality"]}
-      },
-      "assembling-machine": {
-        "foundry": {"type": "assembling-machine", "name": "foundry", "crafting_categories": ["smelting"], "crafting_speed": 4.0, "module_slots": 4, "energy_usage": "2MW", "effect_receiver": {"base_effect": {"productivity": 0.5}}, "allowed_effects": ["speed", "productivity", "consumption", "pollution", "quality"]},
-        "crusher": {"type": "assembling-machine", "name": "crusher", "crafting_categories": ["crushing"], "crafting_speed": 1.0, "module_slots": 2, "energy_usage": "540kW"},
-        "recycler": {"type": "assembling-machine", "name": "recycler", "crafting_categories": ["recycling"], "crafting_speed": 1.0, "module_slots": 4, "energy_usage": "100kW", "allowed_effects": ["speed", "productivity", "consumption", "pollution", "quality"]}
-      },
-      "offshore-pump": {"type": "offshore-pump", "name": "offshore-pump", "pumping_speed": 20}
+        "offshore-pump": {"type": "offshore-pump", "name": "offshore-pump", "pumping_speed": 20}
       },
       "technology": {
         "inserter-capacity-bonus-1": {"type": "technology", "effects": [{"type": "bulk-inserter-capacity-bonus", "modifier": 1}]},
